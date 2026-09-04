@@ -834,6 +834,20 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **deepEqual benchmarked against fast-deep-equal; record branch
+  restructured** (`pnpm bench:equal`) — verdict-agreement asserted per pair
+  (corpus avoids the two semantic divergences: NaN and undefined-valued
+  keys, where valsem answers true and fast-deep-equal false). Results: raw
+  arrays ≥100 elements 2.5–2.9× faster; raw records at parity on equal
+  walks (was 1.6–1.8× behind — the undefined-dropping semantics was paying
+  for…in + double hasOwnProperty + an unconditional second pass; now
+  Object.keys iteration, one hasOwn on the b side as the
+  prototype-pollution guard, deferred b-key snapshot, and a single-pass
+  common case) and 1.6–1.8× faster on unequal records; tiny records ~1.2×
+  behind (Object.keys allocation floor, ~300 ns absolute); canonical pairs
+  20–33 ns flat regardless of size — 9× to 1200× — and mixed-boundary
+  inequality 5.6×. The semantics cost of undefined-dropping is now one
+  deferred Object.keys, only on successful matches.
 - **`[interned]` clarified as a TYPE contract; deepEqual's marker check
   strengthened (supersedes the marked-vs-unmarked test of the previous
   entry)** — the original intent, restated by the author: `[interned]`

@@ -253,19 +253,29 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 
   const ra = a as Record<string, unknown>;
   const rb = b as Record<string, unknown>;
+  const aKeys = Object.keys(ra); // own enumerable only — no per-key hasOwn on a
   let count = 0;
-  for (const k in ra) {
-    if (!Object.prototype.hasOwnProperty.call(ra, k)) continue;
+  for (let i = 0; i < aKeys.length; i++) {
+    const k = aKeys[i]!;
     const va = ra[k];
     if (va === undefined) continue; // undefined-valued key ≡ absent
-    const vb = Object.prototype.hasOwnProperty.call(rb, k) ? rb[k] : undefined;
-    if (!deepEqual(va, vb)) return false; // vb === undefined fails here, as it must
+    // hasOwn on b guards against reading inherited (polluted) prototype
+    // properties; an absent key and an undefined-valued key both fail here,
+    // as they must (va is defined at this point).
+    if (!Object.hasOwn(rb, k)) return false;
+    const vb = rb[k];
+    if (vb === undefined || !deepEqual(va, vb)) return false;
     count++;
   }
-  // b must have no extra populated keys (undefined-valued ones don't count).
+  // b's keys are only needed now — unequal pairs return above without the
+  // allocation. If b has exactly `count` own keys, they are precisely the
+  // matched (populated) ones: no extra populated keys exist.
+  const bKeys = Object.keys(rb);
+  if (bKeys.length === count) return true;
+  // Undefined-valued keys present somewhere: count b's populated keys.
   let bCount = 0;
-  for (const k in rb) {
-    if (Object.prototype.hasOwnProperty.call(rb, k) && rb[k] !== undefined) bCount++;
+  for (let i = 0; i < bKeys.length; i++) {
+    if (rb[bKeys[i]!] !== undefined) bCount++;
   }
   return count === bCount;
 }
