@@ -111,9 +111,17 @@ intern({ at: new Date(0) });  // throws
 intern(new Set([1]));         // throws — names ValueSet.from
 ```
 
-`deepEqual` is the one exception, and only because it cannot throw: it is a
-total function, so it reports these as *unequal* rather than raising. If you
-need to know why, hash the value.
+`deepEqual` is the one exception — deliberately total, and not as a
+concession. For mutable objects, **reference equality is the correct
+answer**: equality means observational substitutability, and two distinct
+`Date`s are not substitutable — one `setTime()` later they observably
+diverge. Content comparison over independently‑mutable objects asserts a
+sameness their mutability falsifies, so the honest report is *unequal*.
+Totality also lets `deepEqual` sit safely in positions that must not throw —
+memo comparators, dedup gates — while the throwing happens where it belongs:
+at the boundaries that admit data into value‑land (`deepHash`, `intern`, the
+collections, `produce`), each error naming the immutable replacement. If you
+need to know why two things are unequal, hash one.
 
 If your application truly wants, say, Date‑by‑time equality, the escape hatch
 exists and is **contained**: `deepEqual.register(Date, (a, b) => a.getTime()

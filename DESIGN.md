@@ -834,6 +834,19 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Should deepEqual throw on incomparable input? No — settled** — asked
+  directly and answered on three grounds. Principled: for mutable objects
+  reference equality IS the correct equality (substitutability — two Dates
+  with equal time are not substitutable; one setTime later they diverge;
+  content comparison over independently-mutable objects asserts a sameness
+  mutability falsifies), and identity comparison of unregistered class
+  instances in state records is a feature, not a fallback. Structural:
+  throwing belongs at the boundaries that ADMIT data into value-land
+  (deepHash/intern/collections/produce — all throw, with teaching text);
+  deepEqual is a passive query, not an admission point. Practical: equality
+  predicates sit in memo comparators and dedup gates that must not throw on
+  stray foreign data; every peer is total for the same reason. README
+  reframed from "cannot throw" to the substitutability argument.
 - **deepEqual benchmarked against fast-deep-equal; record branch
   restructured** (`pnpm bench:equal`) — verdict-agreement asserted per pair
   (corpus avoids the two semantic divergences: NaN and undefined-valued
