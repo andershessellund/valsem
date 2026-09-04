@@ -8,9 +8,9 @@
 // (`equals`/`hashCode`/`interned` symbols, `createInternPool`) that let any
 // type participate.
 //
-// Temporal value semantics live behind the `valsem/temporal` subpath.
-// Identity-preserving serialization lives in the `samme` package — the wire
-// binding built on valsem.
+// Temporal value semantics live behind the `valsem/temporal` subpath; the
+// stable surface for binding authors (wire formats, storage layers) behind
+// `valsem/binding`.
 // ---------------------------------------------------------------------------
 
 export { deepEqual, equals, hashCode, interned } from './deep-equal.js';

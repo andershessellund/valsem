@@ -1,8 +1,7 @@
 # valsem
 
 **Value semantics for JavaScript** — structural equality, companion hashing,
-global interning, and immutable value collections. (Identity‑preserving
-serialization lives one package over, in [`samme`](../samme).)
+global interning, and immutable value collections.
 
 ```bash
 npm install valsem
@@ -45,10 +44,10 @@ means a lot of boilerplate.
 - **Extension points** — the `equals` / `hashCode` / `interned` symbols,
   `deepEqual.register`, and `createInternPool` let any type become a first‑class
   value.
-Everything is dependency‑free and tree‑shakeable. Identity‑preserving
-serialization — a JSON‑safe wire where `decode(encode(x)) === x`, plus a
-structural `diff`/`apply` — lives in the separate [`samme`](../samme) package,
-the wire binding built on valsem.
+Everything is dependency‑free and tree‑shakeable. Serialization is deliberately
+out of scope: valsem defines what "the same" *means*; carrying values across a
+wire is a separate layer's job (see
+[Serialization is out of scope](#serialization-is-out-of-scope)).
 
 ---
 
@@ -81,8 +80,8 @@ handler, and the mutable built‑ins below.
 `Date`, `RegExp`, `Map`, and `Set` are **not supported**. valsem gives value
 semantics to immutable values only: a canonical instance is shared by every
 holder, so one mutation would corrupt all of them *and* invalidate the hash
-cached against it. `deepHash`, `intern`, and samme's `encode` all reject them,
-naming the immutable replacement:
+cached against it. `deepHash` and `intern` both reject them, naming the
+immutable replacement:
 
 | Instead of | Use |
 | --- | --- |
@@ -97,9 +96,9 @@ naming the immutable replacement:
 gated on that check.)
 
 ```ts
-deepHash(new Date(0));   // throws — names Temporal.Instant
+deepHash(new Date(0));        // throws — names Temporal.Instant
 intern({ at: new Date(0) });  // throws
-encode(new Set([1]));    // throws — names InternSet.from   (samme)
+intern(new Set([1]));         // throws — names InternSet.from
 ```
 
 `deepEqual` is the one exception, and only because it cannot throw: it is a
@@ -342,9 +341,7 @@ import 'valsem/temporal';
 ```
 
 That one line registers, for all eight Temporal types, an equality handler, a
-companion hash, and an immutability declaration (so `intern` pools them). Wire
-codecs for Temporal live in the samme package: `import 'samme/temporal'`, which
-loads this module first.
+companion hash, and an immutability declaration (so `intern` pools them).
 
 ```ts
 import { deepEqual, intern } from 'valsem';
@@ -367,29 +364,23 @@ Without the import, Temporal values fall back to reference semantics and
 
 ---
 
-## Serialization: the `samme` package
+## Serialization is out of scope
 
-Serialization is deliberately **not** part of valsem. The
-[`samme`](../samme) package (Danish: *"the same"*) is the wire binding built on
-valsem: `encode` writes a JSON‑safe wire, `decode` returns the canonical
-interned value — so a round‑trip yields `===` — and a structural `diff`/`apply`
-ships minimal updates for live queries and event streams.
+valsem defines what "the same" *means*; it does not define bytes. The split is
+deliberate: a wire format that wants identity‑preserving decoding
+(`decode(encode(x)) === x`) builds on valsem from the outside — decode into
+plain data, `intern` the result, and equal payloads collapse to the same
+canonical instance no matter when, or from where, they arrived.
 
-```ts
-import { encode, decode } from 'samme';
-
-decode(encode({ id: 7 })) === decode(encode({ id: 7 })); // true
-```
-
-valsem defines what "the same" means; samme carries it across the wire.
+The [`valsem/binding`](#valsembinding) subpath is the small, semver‑covered
+contract for authors of such bindings.
 
 ---
 
 ## What exactly is "the value"?
 
-Every operation in valsem — equality, hashing, interning — and every layer of
-the samme wire built on it agrees on one definition of what each kind of thing
-*is*:
+Every operation in valsem — equality, hashing, interning — and every binding
+built on it agrees on one definition of what each kind of thing *is*:
 
 | Kind | Its value is |
 | --- | --- |
@@ -429,8 +420,6 @@ cannot even express it:
 ```ts
 deepEqual({ a: undefined }, {});                 // true
 intern({ a: undefined }) === intern({});         // true — canonical form drops the key
-encode({ a: undefined });                        // {} — nothing is written (samme)
-diff({ a: 1 }, { a: undefined });                // a record patch deleting 'a' (samme)
 deepEqual({ ...opts, verbose: maybe }, opts);    // true when `maybe` is undefined
 ```
 
@@ -439,7 +428,7 @@ Model "present but intentionally empty" with **`null`**, which is a value —
 position or intent makes it meaningful there:
 
 - **Arrays** are positional: `[undefined]` has length 1 and does not equal
-  `[]`. Array elements round‑trip through the wire as a tagged envelope.
+  `[]`.
 - **`InternMap`** stores it deliberately: `m.set(k, undefined)` is a real
   entry, distinct from absence (`has` tells them apart). With TypeScript, a
   `Map<K, V | undefined>` is a declared intent in a way a record's
@@ -503,11 +492,17 @@ position or intent makes it meaningful there:
 | *(side effect)* | import | Registers equality, hashing, and interning for all eight Temporal types. |
 | `registerTemporal` | function | The same registration, callable explicitly. Idempotent. |
 
-### `samme` (separate package)
+### `valsem/binding`
+
+The stable surface for binding authors — packages that map valsem's information
+model onto another representation (a wire format, a storage layer). Not for
+application code.
 
 | Symbol | Kind | Summary |
 | --- | --- | --- |
-| `encode` / `decode` / `registerCodec` / `diff` / `apply` | function | The wire binding — see the [samme README](../samme/README.md). |
+| `defineRecordField` | function | `__proto__`‑safe record‑field definition, for building records from untrusted keys. |
+| `hasValueSemantics` | function | Whether a type has registered equality **and** hash handlers. |
+| `mutableBuiltinReason` | function | The shared rejection table: why a mutable built‑in is not a value, as error text. |
 
 ## License
 

@@ -1,5 +1,4 @@
-// Temporal value semantics (`valsem/temporal`). Wire codecs are tested in the
-// samme package (`samme/temporal`).
+// Temporal value semantics (`valsem/temporal`).
 //
 // Importing the module registers globally, so the import itself is the setup.
 import { describe, it, expect } from 'vitest';

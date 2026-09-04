@@ -47,37 +47,37 @@ valsem is the foundation layer of a larger suite, but is **independently
 valuable** and is developed as a standalone project (own repo, own docs, own
 audience):
 
-| Layer | Project | Depends on |
-| --- | --- | --- |
-| Value semantics (this project) | `valsem` | nothing |
-| Wire format (schemaless, JSON + CBOR-profile binary) | `samme` / `@sammejs/core` | valsem |
-| Schemas, expression rules, IDL, UI | `@sammejs/*` | the above |
-| Application runtime (spindle) | private | all of the above |
+| Layer | Depends on |
+| --- | --- |
+| Value semantics (this project — `valsem`) | nothing |
+| Wire format (schemaless, JSON + binary; developed separately) | valsem |
+| Schemas, expression rules, IDL, UI | the above |
+| Application runtimes | all of the above |
 
 The dependency law is absolute and one-directional: **everything may depend on
 valsem; valsem depends on nothing** — not on the wire format, not on any
-framework, not on any runtime. `spindle`'s reactive signals dedupe via valsem's
-`deepEqual`; `samme`'s decoder interns via valsem's pool. Neither is visible
-from inside valsem.
+framework, not on any runtime. A reactive UI layer dedupes via valsem's
+`deepEqual`; a wire decoder interns via valsem's pool. Neither is visible from
+inside valsem.
 
 valsem is the TypeScript **binding** of a language-neutral information model
-(specified in the samme project). Other languages may bind the same model
-without interning at all; interning is valsem's *strategy* for delivering value
-semantics in JS, not part of the model.
+(the wire-format project above carries its specification). Other languages may
+bind the same model without interning at all; interning is valsem's *strategy*
+for delivering value semantics in JS, not part of the model.
 
 ### 1.2 Naming and packaging
 
-- npm: **`valsem`** (unscoped flagship — the vite/svelte pattern: the package
-  people type stays unscoped; constellation packages live under `@sammejs/*`).
-  **Status: name verified free, NOT yet reserved. Reserve before anything
-  else.**
+- npm: **`valsem`** (unscoped — the vite/svelte pattern: the package people
+  type stays unscoped). **Status: name verified free, NOT yet reserved.
+  Reserve before anything else.**
 - Repo split prerequisite — **done in this repo**: the pre-split
-  `valsem/internal` subpath (consumed by samme: `_defineRecordField`,
-  `_mutableBuiltinReason`, `_hasValueSemantics`) is promoted to the small,
-  semver'd **`valsem/binding`** API for first-party binding authors
-  (underscore prefixes dropped: `defineRecordField`, `mutableBuiltinReason`,
-  `hasValueSemantics`). An unstable cross-repo seam is a live wire; samme
-  migrates to `valsem/binding` when it starts consuming the published package.
+  `valsem/internal` subpath (consumed by the wire binding:
+  `_defineRecordField`, `_mutableBuiltinReason`, `_hasValueSemantics`) is
+  promoted to the small, semver'd **`valsem/binding`** API for first-party
+  binding authors (underscore prefixes dropped: `defineRecordField`,
+  `mutableBuiltinReason`, `hasValueSemantics`). An unstable cross-repo seam is
+  a live wire; downstream bindings migrate when they start consuming the
+  published package.
 
 ---
 
@@ -572,7 +572,7 @@ as it lives.
 
 Three distinct dividends: **identity dedup** (exact memo/effect skipping — the
 framework's cheapest equality check becomes *correct*, framework-agnostically:
-React memo, Solid/Vue signals, spindle signals all gate on reference equality),
+React memo and Solid/Vue signals all gate on reference equality),
 **memory dedup** (one copy of equal data), **cache dedup** (values as `Map`
 keys; hash-addressed caches).
 
@@ -647,7 +647,7 @@ ops, clearly labeled).
 
 | Phase | Content | Gate |
 | --- | --- | --- |
-| 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | names reserved; samme green against `valsem/binding` |
+| 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
 | 1 | **`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission, per-call options; Mutative corpus as tests | all existing suites green; patch-emission property tests |
 | 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
 | 3 | Adaptive HAMT backing for `InternMap`/`InternSet` (invisible) | conformance + property suites; benchmark wins on large collections |
@@ -656,8 +656,8 @@ ops, clearly labeled).
 | 6 | Hardening backlog: lazy hash seeding; decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant and intern idempotence | — |
 
 Non-goals, permanently: mutable built-ins as values; cycle support; wire
-formats (samme's job); schemas (higher layers); framework adapters (the point
-is needing none).
+formats (a separate layer's job); schemas (higher layers); framework adapters
+(the point is needing none).
 
 ---
 

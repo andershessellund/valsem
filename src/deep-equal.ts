@@ -90,9 +90,9 @@ const immutableTypes = new Set<Function>();
  * each with the reason and its immutable replacement.
  *
  * `deepEqual` cannot report these — it is a total function and answers `false`
- * — so the whole diagnostic budget is spent in `deepHash`, `intern`, and
- * samme's `encode` (via `valsem/internal`), which all throw and all share
- * these strings.
+ * — so the whole diagnostic budget is spent in `deepHash` and `intern` — and
+ * in any serialization binding's encode, via `valsem/binding` — which all
+ * throw and all share these strings.
  */
 const MUTABLE_BUILTINS = new Map<Function, string>([
   [Date, 'a Date can be re-timed with setTime(). Use Temporal.Instant instead: ' +
@@ -282,8 +282,8 @@ deepEqual.register = function register<T>(
  * `Intern*` collections and the `createInternPool` pattern both do), so it is
  * not observable from the constructor alone.
  *
- * @internal — used by samme's registration guard to reject wire types that would crash
- * `decode`'s interning pass.
+ * @internal — exposed through `valsem/binding` for registration guards that
+ * must reject types that would crash an interning pass (e.g. a wire decoder's).
  */
 export function _hasValueSemantics(type: Function): boolean {
   if (equalsMethods.has(type) && hashCodeMethods.has(type)) return true;

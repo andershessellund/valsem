@@ -11,8 +11,8 @@
 //     import 'valsem/temporal';
 //
 // It lives behind its own entry point so consumers who do not use Temporal pay
-// nothing for it. Wire codecs live one package over, in `samme/temporal`,
-// which imports this module first — serialization is samme's concern.
+// nothing for it. (Serializing Temporal values is a wire binding's concern,
+// one layer up; such a codec module imports this one first and builds on it.)
 //
 // Temporal values are safe to pool unfrozen: they expose accessors only, have
 // no mutators, and (unlike Date and RegExp) cannot be re-timed or carry a

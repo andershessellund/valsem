@@ -2,9 +2,9 @@
 // valsem/binding — the stable contract for binding authors.
 //
 // A *binding* is a package that maps valsem's information model onto some
-// other representation — a wire format (samme), a storage layer, a schema
-// system. Bindings need a few pieces of valsem's machinery that application
-// code never should:
+// other representation — a wire format, a storage layer, a schema system.
+// Bindings need a few pieces of valsem's machinery that application code
+// never should:
 //
 // - `mutableBuiltinReason` — the mutable-built-in rejection table, so a
 //   binding's encode errors tell the same story `deepHash` and `intern` do.
