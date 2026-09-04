@@ -406,7 +406,17 @@ endpoint decodes them as the plain model value.
 
 ---
 
-## 7. `produce` — the mutation story (designed, next to build)
+## 7. `produce` — the mutation story — **shipped**
+
+> Built after a source-level study of immer and mutative (both ~3k lines;
+> notes in the decision log). As-built deviations from the sketch below, all
+> recorded there: collection drafts are overlays (base + edits/ops) rather
+> than trie transients — the transient upgrade is Phase-2 perf work; DraftList
+> materializes its working array on first write (the immer/mutative cost,
+> accepted for v1); patches ship as a typed vocabulary (record.set/delete,
+> list.set/splice, map.set/delete, set.add/delete, replace) with inverse
+> patches and `applyPatches` implemented ON TOP of produce; the curried
+> `produce(recipe)` form is included.
 
 ### 7.1 One operation
 
@@ -701,7 +711,7 @@ ops, clearly labeled).
 | Phase | Content | Gate |
 | --- | --- | --- |
 | 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
-| 1 | **`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission, per-call options; Mutative corpus as tests | all existing suites green; patch-emission property tests |
+| 1 | ~~**`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission~~ done (collection-draft transients and a Mutative-derived test corpus remain) | all existing suites green; patch-emission property tests |
 | 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
 | 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
@@ -763,6 +773,26 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Shipped `produce` after a source-level study of immer and mutative** —
+  the study (repos read in full) found both share one skeleton: lazy
+  copy-on-write proxy drafts, assignment maps, net patches; immer's costs are
+  default deep-freezing and callback-heavy finalize (reverse maps for
+  aliased drafts); mutative's speed comes from opt-in freezing and a flat
+  LIFO finalize stack; both copy whole Map/Set containers on first write and
+  neither recovers array splice intent (index-wise patches, confirmed in
+  source). Our resolution: **finalize is an intern walk** — both libraries
+  work to avoid a walk that interning must do anyway, so draft replacement,
+  graft adoption, and patch emission ride it; aliased drafts converge by
+  memoization because the walk interns. Canonicality detection is the pool
+  marker, not `isFrozen` (which would wrongly prune frozen-but-foreign
+  data). DraftList records splices as intent (method API — no proxy
+  ambiguity); plain arrays intercept mutating methods for the same, falling
+  back to net index-diff on sort/reverse/fill/length. Inverse-patch law:
+  forward values resolve drafts to their final canonical, restore values
+  resolve drafts to their base. v1 costs accepted and earmarked: overlay
+  collection drafts (not yet trie transients), DraftList materializes on
+  first write, changed nodes rehash from scratch (assignment maps retained
+  so incremental hashing can drop in).
 - **Shipped the hash-consed dense radix vector for `ValueList`** — trunk of
   full 32-wide consed leaves + consed tail (the tail is itself a leaf node,
   so wrapper equality is two pointer comparisons); trunk/tail split and tree

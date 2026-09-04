@@ -26,3 +26,14 @@ export { createInternPool } from './intern-pool.js';
 export type { InternPool } from './intern-pool.js';
 export { configureHasher, createMarvin32Hasher, getHashSeed } from './hasher.js';
 export type { Hasher } from './hasher.js';
+export {
+  produce,
+  produceWithPatches,
+  applyPatches,
+  nothing,
+  isDraft,
+  DraftMap,
+  DraftSet,
+  DraftList,
+} from './produce.js';
+export type { Draft, Patch, PatchPath } from './produce.js';

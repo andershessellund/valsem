@@ -40,6 +40,9 @@ means a lot of boilerplate.
 - **`intern`** — collapse every structurally‑equal value to a single, frozen,
   canonical instance, so **value equality becomes `===`** and hashing becomes an
   O(1) cache read.
+- **`produce`** — mutate a draft with ordinary syntax, receive the canonical
+  result (plus optional semantic patches): the immer ergonomics, ending in
+  interned values.
 - **Value collections** — `HashMap` keyed by structure, and the persistent
   `ValueList` / `ValueMap` / `ValueSet` / `InternedString` whose *instances*
   are canonical (equal contents ⟹ same reference).
@@ -257,6 +260,55 @@ the runtime can actually protect it.
 
 `InternedString` wraps a string and precomputes its hash once, turning repeated
 `deepHash`/key lookups on the same string into O(1) reads.
+
+---
+
+## produce: mutate a draft, get the canonical value
+
+`produce` gives you plain mutable syntax over immutable values — the immer
+ergonomics — with one upgrade: the result is **canonical**. `intern` is the
+degenerate case: `produce(base, () => {}) === intern(base)`, and edits that
+net out structurally converge back to the canonical base for free.
+
+```ts
+import { produce } from 'valsem';
+
+const state = intern({ count: 1, todos: ValueList.of('a') });
+const next = produce(state, draft => {
+  draft.count++;
+  draft.todos.push('b');       // ValueList slots draft as a DraftList
+});
+
+next === intern({ count: 2, todos: ValueList.of('a', 'b') }); // true — canonical
+next.todos === produce(state, d => void d.todos.push('b')).todos; // lineage-free
+```
+
+Plain objects and arrays draft through proxies (any syntax works, including
+array methods); `ValueMap`/`ValueSet`/`ValueList` slots hand out
+`DraftMap`/`DraftSet`/`DraftList` — mutable twins with the native-collection
+API. Raw material assigned into a draft is **adopted**: interned on the way
+into the result, exactly like the collections' intern-on-entry. Drafts are
+revoked when `produce` returns — using a leaked draft throws.
+
+`produceWithPatches` additionally returns **semantic patches** (and their
+inverses): net `record.set`/`record.delete`, `map.set`/`map.delete`,
+`set.add`/`set.delete` — and for sequences, *recorded* `list.splice` intent
+rather than index diffs (a `DraftList.splice` is one patch, not n). Apply
+them with `applyPatches`; because everything is canonical,
+`applyPatches(base, patches) === produce(base, recipe)` — patch streams and
+direct production converge on the same instance.
+
+```ts
+const [next2, patches, inverse] = produceWithPatches(state, d => {
+  d.todos.splice(0, 1, 'z');
+});
+applyPatches(state, patches) === next2;   // true
+applyPatches(next2, inverse) === state;   // true
+```
+
+Recipes follow the immer conventions: mutate the draft, or return a
+replacement value (`nothing` for "the result is `undefined`") — never both.
+The curried form `produce(recipe)` returns `base => produce(base, recipe)`.
 
 ---
 
@@ -501,6 +553,10 @@ position or intent makes it meaningful there:
 | `internEqual` / `internHash` | function | Equality / hashing that exploit the intern cache. |
 | `HashMap` | class | Mutable map with structural (interned) keys. |
 | `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
+| `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
+| `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |
+| `nothing` / `isDraft` | symbol / function | Recipe sentinel for "result is `undefined`"; draft detection. |
+| `DraftMap` / `DraftSet` / `DraftList` | class | Mutable draft twins of the collections, handed out inside `produce`. |
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt‑in value‑semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |

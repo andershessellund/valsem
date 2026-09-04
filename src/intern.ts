@@ -266,3 +266,8 @@ function shallowRefEqual(a: object, b: object): boolean {
 export function _internPoolSize(): number {
   return pool.size();
 }
+
+/** @internal O(1) probe: is this object canonical plain data (hash cached)? */
+export function _hashCacheHas(obj: object): boolean {
+  return hashCache.has(obj);
+}
