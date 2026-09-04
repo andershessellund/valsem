@@ -834,6 +834,20 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **`[interned]` clarified as a TYPE contract; deepEqual's marker check
+  strengthened (supersedes the marked-vs-unmarked test of the previous
+  entry)** — the original intent, restated by the author: `[interned]`
+  marks *auto-interning types* — no publicly reachable constructor, every
+  instance canonical by construction (the collections and the
+  `createInternPool` pattern with its private constructor). Under that
+  contract, a non-identical pair with EITHER side marked is unequal: same
+  type would imply both marked, so a mixed pair is cross-kind. deepEqual
+  now concludes on `aMarked || bMarked` — one or two property reads, no
+  map lookups, and mixed marked/raw pairs skip the dispatch entirely. The
+  earlier "fresh unmarked instance equals its marked canonical" behavior
+  is reclassified as a contract violation (a type exposing non-interning
+  construction must not carry the marker) and the regression test inverted
+  to pin the contract instead.
 - **internEqual deleted; [hashCode] pre-filter added to deepEqual** — the
   audit of the new fast path surfaced that `internEqual` was a
   side-effecting predicate: its fallback interned both arguments, FREEZING

@@ -327,7 +327,7 @@ implement whichever the operation needs:
 | ------------ | -------------------------------- | -------------------------------- |
 | `equals`     | `deepEqual`                      | `[equals](other): boolean`       |
 | `hashCode`   | `deepHash`                       | `[hashCode]: number` (or method) |
-| `interned`   | fast‑path in `intern`            | `[interned]: true`               |
+| `interned`   | auto‑interning type contract     | `[interned]: true`               |
 
 ```ts
 import { equals, hashCode } from 'valsem';
@@ -405,6 +405,14 @@ Point.of(1, 2) === Point.of(1, 2); // true
 canonical copy — a cache hit discards the argument without allocating. A
 per‑class pool needs no type tag in its hashes: there is no cross‑type collision
 risk because each pool only ever holds one type.
+
+The **private constructor is part of the contract**, not a style choice:
+`[interned]` declares an *auto‑interning type* — every instance canonical by
+construction, with no publicly reachable way to build one around the pool.
+valsem leans on that: `intern` returns marked values without a lookup, and
+`deepEqual` concludes on any non‑identical pair the moment either side is
+marked (same type would mean both marked; a mixed pair is cross‑kind). A type
+that exposes non‑interning construction must not carry the marker.
 
 ---
 

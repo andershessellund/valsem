@@ -50,13 +50,22 @@ export const equals: unique symbol = Symbol.for('valsem.equals') as any;
 export const hashCode: unique symbol = Symbol.for('valsem.hashCode') as any;
 
 /**
- * Symbol marking an object as already canonicalized by the interner.
+ * Symbol marking a value of an **auto-interning type**.
  *
- * When an object exposes `[interned] === true`, {@link intern} returns it
- * immediately without pool lookup. Persistent collections
- * ({@link ValueList}, {@link ValueMap}, {@link ValueSet},
- * {@link InternedString}) set this flag on their prototype so every
- * instance is recognised as canonical for free.
+ * `[interned] === true` is a TYPE-level contract, not a per-instance
+ * observation: every instance of a marked type is canonical by
+ * construction, because the type offers no publicly reachable way to
+ * create an instance without going through its intern pool (private
+ * constructor + interning factory — the persistent collections and the
+ * {@link createInternPool} pattern). Consequences:
+ *
+ * - {@link intern} returns marked values immediately, no pool lookup;
+ * - `deepEqual` treats a non-identical pair as unequal the moment either
+ *   side is marked: same type would mean both marked, so a mixed pair is
+ *   cross-kind, and two distinct canonicals are distinct values.
+ *
+ * Marking a type whose instances can be constructed around the pool breaks
+ * equality — the contract is the constructor discipline, not the flag.
  */
 export const interned: unique symbol = Symbol.for('valsem.interned') as any;
 
@@ -173,23 +182,26 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object')
     return a !== a && b !== b; // NaN === NaN
 
-  // Canonical fast path: equal content implies the SAME instance, so two
-  // distinct canonical values are structurally distinct — no walk needed.
-  // This also terminates mixed-tree comparisons in O(1) at every canonical
-  // boundary. The marker covers collections and pooled value types; the
-  // injected cache covers canonical plain data.
+  // Canonical fast path — `a === b` already returned true above, so:
   //
-  // Evaluation order is deliberate, cheapest test first via short-circuit:
-  // per side, the [interned] property read runs BEFORE the WeakMap lookup
-  // (both-marked pairs never touch the map), and a raw `a` fails the first
-  // conjunct without ever examining `b`. Note that one-marked/one-not does
-  // NOT imply unequal — a fresh, not-yet-pooled instance can equal its
-  // marked canonical (the createInternPool pattern) — so mixed pairs fall
-  // through to the [equals] dispatch below.
+  // 1. [interned] is a TYPE contract (see the symbol's doc): every instance
+  //    of a marked type is canonical by construction. A non-identical pair
+  //    with EITHER side marked is therefore unequal — same type would mean
+  //    both marked; a mixed pair is cross-kind; two distinct canonicals are
+  //    distinct values. One or two property reads, no map lookups.
+  // 2. Canonical plain data (the injected interner hash cache): both
+  //    canonical + non-identical ⟹ structurally distinct — stronger than
+  //    comparing hash values, which can collide.
+  //
+  // Together these terminate mixed-tree comparisons in O(1) at every
+  // canonical boundary.
   if (
-    ((a as Record<symbol, unknown>)[interned] === true || _canonicals?.has(a) === true) &&
-    ((b as Record<symbol, unknown>)[interned] === true || _canonicals?.has(b) === true)
+    (a as Record<symbol, unknown>)[interned] === true ||
+    (b as Record<symbol, unknown>)[interned] === true
   ) {
+    return false;
+  }
+  if (_canonicals !== null && _canonicals.has(a) && _canonicals.has(b)) {
     return false;
   }
 

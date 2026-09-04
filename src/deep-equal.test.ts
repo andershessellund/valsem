@@ -322,8 +322,12 @@ describe('deepEqual — canonical fast path', () => {
   });
 });
 
-describe('deepEqual — marked vs unmarked is NOT a shortcut', () => {
-  it('a fresh, not-yet-pooled instance equals its marked canonical', async () => {
+describe('deepEqual — the [interned] type contract', () => {
+  // [interned] marks auto-interning TYPES: every instance is canonical by
+  // construction (no public non-interning constructor). deepEqual therefore
+  // concludes on ANY non-identical pair with a marked side — same type would
+  // mean both marked, so a mixed pair is cross-kind.
+  it('a marked value never deep-equals anything it is not identical to', async () => {
     const { createInternPool } = await import('./intern-pool.js');
     const pool = createInternPool<Pt>();
     class Pt {
@@ -335,12 +339,22 @@ describe('deepEqual — marked vs unmarked is NOT a shortcut', () => {
         return other instanceof Pt && other.x === this.x;
       }
     }
-    const canonical = pool.intern(new Pt(42)); // marked [interned]
-    const fresh = new Pt(42); // unmarked — the pre-pooling duplicate
+    const canonical = pool.intern(new Pt(42));
     expect((canonical as Record<symbol, unknown>)[interned as unknown as symbol]).toBe(true);
-    expect((fresh as Record<symbol, unknown>)[interned as unknown as symbol]).toBeUndefined();
-    expect(deepEqual(canonical, fresh)).toBe(true); // must walk, not shortcut
-    expect(deepEqual(fresh, canonical)).toBe(true);
-    expect(deepEqual(canonical, new Pt(43))).toBe(false);
+    expect(deepEqual(canonical, canonical)).toBe(true); // identity
+    expect(deepEqual(canonical, pool.intern(new Pt(43)))).toBe(false); // distinct canonicals
+    expect(deepEqual(canonical, { x: 42 })).toBe(false); // cross-kind
+    // An unmarked instance of a marked type is a CONTRACT VIOLATION (the
+    // type must not expose non-interning construction); under the contract
+    // the marked side concludes without walking:
+    expect(deepEqual(canonical, new Pt(42))).toBe(false);
+  });
+
+  it('marked collections conclude against everything non-identical', async () => {
+    const { ValueMap } = await import('./value-map.js');
+    const m = ValueMap.fromObject({ a: 1 });
+    expect(deepEqual(m, ValueMap.fromObject({ a: 1 }))).toBe(true); // same canonical
+    expect(deepEqual(m, ValueMap.fromObject({ a: 2 }))).toBe(false);
+    expect(deepEqual(m, { a: 1 })).toBe(false); // maps are not records
   });
 });
