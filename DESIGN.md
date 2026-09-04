@@ -667,7 +667,7 @@ frozen-aware copies):
 | 10k-entry map, one set | **3.5 µs** | 474 µs | 400 µs | **~120× ahead** (their drafts copy the container) |
 | 10k-element list, set+push | **4.8 µs** | 9.6 µs | 9.0 µs | **~2× ahead** |
 | 1000-key record, one set | **180 µs** | 208 µs | 208 µs | ahead; spread-copy floor is 153 µs |
-| 10k plain array, one item edit | 28 µs | 575 µs / 3.0 µs (no freeze) | 3.4 µs | 8× behind the unfrozen libs — the canonicality floor (frozen-base copy ≈ 9 µs, freeze+hash+pool the rest); `ValueList` is the designed answer |
+| 10k plain array, one item edit | 28 µs | 575 µs / 3.0 µs (no freeze) | 3.4 µs | 8× behind the unfrozen libs — the measured floor decomposes as: drafting ~1 µs (virtual), successor copy ~7 µs (shadowed slice), and ~18 µs of **GC lifecycle for an 80 KB short-lived pooled value** (old-space promotion + major-GC collection + ephemeron cache entries) — invariant under ref strategy (eager WeakRef vs strong-nursery-then-weaken measured equal; the retention itself is the bill, not the ref). Their 3 µs array dies in the scavenger nursery untouched. `ValueList` is the designed answer: no 80 KB monolith per state |
 | 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | **fastest — and the only `===` results.** Transition memoization: a successor is a pure function of (canonical base, exact delta), so a repeat produce is O(touched) with no copy, no hash walk, no compare |
 
@@ -787,6 +787,20 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Big-array floor investigated; nursery-deferred WeakRefs tried and
+  REVERTED (negative result, recorded)** — isolates showed
+  `new WeakRef(freshBigArray)` costs ~24 µs (vs 0.04 µs on an old object,
+  ~0 for fresh small objects, ~0 for WeakMap keys) — apparently forced
+  early promotion. A strong-nursery that deferred WeakRef creation to the
+  GC-epoch backstop was built — and measured **exactly nothing**: the bill
+  is the retention lifecycle itself (any pooled 80 KB short-lived value gets
+  promoted, collected by major GC, and drags ephemeron cache entries),
+  identical whichever ref holds it. Reverted per the measured-optimizations
+  law. What stayed: the unfrozen shadow cache for large frozen bases
+  (repeat copies at slice speed, WeakMap-keyed per the §8.4 cache law).
+  The durable finding: valsem's plain-array novelty tax at 10k scale is
+  ~18 µs of memory-system physics for materializing a *findable* 80 KB
+  state; the fix is structural (ValueList), not micro.
 - **Transition memoization + virtual array drafts (Phase-2, second pass)** —
   the recurrent arena was 17× behind mutative (48 µs vs 2.9) because
   recognizing a recurring successor cost O(n): a draft-time copy of the 10k

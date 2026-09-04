@@ -382,11 +382,25 @@ function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): Ob
 // ---------------------------------------------------------------------------
 
 /**
+ * Unfrozen shadows of large frozen bases, so repeat copies run at unfrozen
+ * slice speed (~2 µs vs ~9 µs spread at 10k). WeakMap-keyed: a shadow lives
+ * and dies with its base (the §8.4 cache law — O(n) caches must be
+ * evictable), and is private to copyArr, never mutated, only sliced.
+ */
+const shadows = new WeakMap<object, unknown[]>();
+const SHADOW_MIN = 64;
+
+/**
  * Copy an array that may be frozen. V8's `slice` fast path does not cover
- * frozen-elements arrays (measured 65× slower); spread does.
+ * frozen-elements arrays (measured 65× slower); spread does — and for large
+ * bases the unfrozen shadow beats even the spread.
  */
 function copyArr<T>(a: readonly T[]): T[] {
-  return Object.isFrozen(a) ? [...a] : (a as T[]).slice();
+  if (!Object.isFrozen(a)) return (a as T[]).slice();
+  if (a.length < SHADOW_MIN) return [...a];
+  let s = shadows.get(a as object) as T[] | undefined;
+  if (s === undefined) shadows.set(a as object, (s = [...a]));
+  return s.slice();
 }
 
 function arrLen(state: ArrayState): number {
