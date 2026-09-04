@@ -209,9 +209,14 @@ SipHash over `getHashSeed()`) — once, at startup. Hashes are **process-local b
 design**: they never cross the wire, and HAMT shapes derived from them (§8) are
 process-local too.
 
-Open hardening item: seeding is currently module-load-eager (an environment
-without WebCrypto throws at import, before `configureHasher` can run) — should
-become lazy.
+Web Crypto (`globalThis.crypto`) is a **platform requirement** — universal in
+every supported runtime (Node ≥ 19, all browsers, workers, Deno, Bun). The
+old existence check was removed together with the "lazy seeding" hardening
+item it motivated: its error text suggested `configureHasher()` as the
+escape, but the throw fired at module load, before any caller could run —
+incoherent by construction. Exotic hosts (e.g. bare React Native without the
+standard `getRandomValues` polyfill) fail at import, which is the honest
+place.
 
 ### 3.4 Incremental hashing
 
@@ -777,7 +782,7 @@ ops, clearly labeled).
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
 | 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
 | 5 | ~~Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array`~~ done | contract table holds empirically |
-| 6 | Hardening backlog: lazy hash seeding; decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant and intern idempotence | — |
+| 6 | Hardening backlog: ~~lazy hash seeding~~ closed (Web Crypto declared a platform requirement — see §3.3); decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant, intern idempotence, and applyPatches convergence | — |
 
 Non-goals, permanently: mutable built-ins as values; cycle support; wire
 formats (a separate layer's job); schemas (higher layers); framework adapters

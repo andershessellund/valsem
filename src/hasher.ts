@@ -40,19 +40,16 @@ function readSeed(): Uint32Array {
   const g = globalThis as unknown as Record<symbol, Uint32Array | undefined>;
   const existing = g[SEED_KEY];
   if (existing !== undefined) return existing;
-  // Structural type instead of the DOM `Crypto` name: valsem is runtime-
-  // neutral and does not compile against the DOM lib.
-  const c = (globalThis as {
-    crypto?: { getRandomValues?: <T extends ArrayBufferView>(array: T) => T };
-  }).crypto;
-  if (!c || typeof c.getRandomValues !== 'function') {
-    throw new Error(
-      'valsem: globalThis.crypto.getRandomValues is required to seed the hasher. ' +
-        'Provide a Web Crypto implementation (Node \u2265 15, all Workers/browsers), ' +
-        'or call configureHasher() with a hasher carrying an explicit key.',
-    );
-  }
-  const seed = c.getRandomValues(new Uint32Array(4));
+  // Web Crypto is a platform requirement: globalThis.crypto is universal in
+  // every supported runtime (Node \u2265 19, all browsers/workers/Deno/Bun), so
+  // there is no existence check \u2014 an exotic environment without it fails
+  // here at import, which is the honest place. (Structural type instead of
+  // the DOM `Crypto` name: valsem does not compile against the DOM lib.)
+  const seed = (
+    globalThis as unknown as {
+      crypto: { getRandomValues: <T extends ArrayBufferView>(array: T) => T };
+    }
+  ).crypto.getRandomValues(new Uint32Array(4));
   g[SEED_KEY] = seed;
   return seed;
 }
