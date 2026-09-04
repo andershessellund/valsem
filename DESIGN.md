@@ -671,6 +671,22 @@ frozen-aware copies):
 | 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | **fastest — and the only `===` results.** Transition memoization: a successor is a pure function of (canonical base, exact delta), so a repeat produce is O(touched) with no copy, no hash walk, no compare |
 
+**The arena of record** (`scripts/big-array-bench.mjs`: results held in a
+50-ring, one op per scheduling unit, one contender×mode per process):
+
+| mode | valsem | immer (no freeze) | mutative |
+| --- | --- | --- | --- |
+| sync burst | 32 µs | 7.5 µs | 7.8 µs |
+| microtask per op | 36 µs | 7.3 µs | 7.6 µs |
+| **macrotask per op** (event-driven) | **18 µs** | 9.8 µs | 10.1 µs |
+
+Findings: (1) with results held, the unfrozen libraries' realistic cost is
+~8–10 µs, not 3; (2) valsem's event-driven cost is 18 µs — **a <2× gap** for
+plain arrays; (3) V8 clears the kept-objects list only at MACROTASK
+checkpoints — microtask-spaced produces retain like a sync burst, so many
+produces inside one event turn should be batched into one recipe (or use
+`ValueList`).
+
 **The job-regime correction** (`scripts/yield-bench.mjs`,
 `scripts/yield-bisect.mjs`): the spec's `AddToKeptObjects` retains every
 `new WeakRef` target until the END OF THE CURRENT JOB — so a synchronous
