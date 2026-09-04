@@ -671,6 +671,20 @@ frozen-aware copies):
 | 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | **fastest — and the only `===` results.** Transition memoization: a successor is a pure function of (canonical base, exact delta), so a repeat produce is O(touched) with no copy, no hash walk, no compare |
 
+**The job-regime correction** (`scripts/yield-bench.mjs`,
+`scripts/yield-bisect.mjs`): the spec's `AddToKeptObjects` retains every
+`new WeakRef` target until the END OF THE CURRENT JOB — so a synchronous
+bench loop of 2,000 produces force-retains all 2,000 80 KB results at once
+(mass promotion, majors mid-loop), which is what the "~18 µs GC lifecycle"
+mostly was. Under one-produce-per-task (the actual application regime),
+every piece normalizes: WeakRef creation free, freeze free, cache entries
+free, pool machinery ≈ +1.3 µs — full produce ≈ **13–19 µs vs their
+~6 µs: a ~2–3× gap**, decomposed as ~6 µs copy (a cost class everyone
+pays) + ~1.5 µs pool + ~5 µs draft machinery. The 27 µs sync number
+remains true for batch loops — whose answer is batching edits into one
+recipe, or `ValueList`. No code fix exists for in-job WeakRef retention;
+it is spec semantics, now documented.
+
 **Retention-pattern audit** (`scripts/retention-bench.mjs`, one scenario per
 process — heap cross-pollution otherwise corrupts every number): the
 discarded-result arena flatters the unfrozen libraries, whose results die in
@@ -800,6 +814,20 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **The AddToKeptObjects correction (amending the entry below)** — pressed
+  on whether 26 µs could be real ("do we re-hash the entire array?" — no:
+  hashing is O(1) delta), the bisection was redone under a
+  one-produce-per-task regime, and the previous "memory-system physics"
+  attribution partly dissolved: `new WeakRef(target)` performs
+  AddToKeptObjects, retaining the target until the current JOB ends, so a
+  synchronous bench loop force-retains every result at once — that was the
+  "promotion pathology", and why the StrongCell nursery measured identical
+  (strong retention ≡ kept-objects retention in-job). Event-driven
+  decomposition: copy ~6 µs + pool ~1.5 µs + draft machinery ~5 µs ≈ 13–19
+  vs their ~6 — a 2–3× plain-array gap in real regimes, not 8×. Three
+  benchmark-methodology lessons now on file: discarded results flatter
+  unfrozen libraries; in-process scenario order corrupts numbers; and
+  synchronous produce loops trip AddToKeptObjects.
 - **Retention-pattern audit** — prompted by the observation that real
   applications HOLD the state they produce: benched discarded vs held vs
   reducer-chain vs chain-with-history, each in a fresh process (in-process
