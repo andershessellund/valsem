@@ -23,9 +23,9 @@
       "types": "./dist/temporal.d.ts",
       "default": "./dist/temporal.js"
     },
-    "./internal": {
-      "types": "./dist/internal.d.ts",
-      "default": "./dist/internal.js"
+    "./binding": {
+      "types": "./dist/binding.d.ts",
+      "default": "./dist/binding.js"
     }
   },
   "main": "./dist/index.js",

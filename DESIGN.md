@@ -71,11 +71,13 @@ semantics in JS, not part of the model.
   people type stays unscoped; constellation packages live under `@sammejs/*`).
   **Status: name verified free, NOT yet reserved. Reserve before anything
   else.**
-- Repo split prerequisite: the `valsem/internal` subpath (currently consumed by
-  samme: `_defineRecordField`, `_mutableBuiltinReason`, `_hasValueSemantics`)
-  must be promoted to a small, semver'd **`valsem/binding`** API for
-  first-party binding authors — or eliminated — before valsem and samme live in
-  separate repositories. An unstable cross-repo seam is a live wire.
+- Repo split prerequisite — **done in this repo**: the pre-split
+  `valsem/internal` subpath (consumed by samme: `_defineRecordField`,
+  `_mutableBuiltinReason`, `_hasValueSemantics`) is promoted to the small,
+  semver'd **`valsem/binding`** API for first-party binding authors
+  (underscore prefixes dropped: `defineRecordField`, `mutableBuiltinReason`,
+  `hasValueSemantics`). An unstable cross-repo seam is a live wire; samme
+  migrates to `valsem/binding` when it starts consuming the published package.
 
 ---
 
@@ -645,7 +647,7 @@ ops, clearly labeled).
 
 | Phase | Content | Gate |
 | --- | --- | --- |
-| 0 | Reserve `valsem` on npm; promote `valsem/internal` → `valsem/binding` (semver'd); repo split; docs site with the frontend-first pitch | names reserved; samme green against `valsem/binding` |
+| 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | names reserved; samme green against `valsem/binding` |
 | 1 | **`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission, per-call options; Mutative corpus as tests | all existing suites green; patch-emission property tests |
 | 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
 | 3 | Adaptive HAMT backing for `InternMap`/`InternSet` (invisible) | conformance + property suites; benchmark wins on large collections |
