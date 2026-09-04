@@ -115,6 +115,15 @@ intern(new Set([1]));         // throws — names ValueSet.from
 total function, so it reports these as *unequal* rather than raising. If you
 need to know why, hash the value.
 
+If your application truly wants, say, Date‑by‑time equality, the escape hatch
+exists and is **contained**: `deepEqual.register(Date, (a, b) => a.getTime()
+=== b.getTime(), d => d.getTime() >>> 0)` makes `deepEqual`/`deepHash` answer
+for Dates — while `intern`, the collections, `produce`, and `HashMap` keys
+still refuse them (rejection is independent of registration). The risk you
+accept is the classic one: a hash taken from a mutable object goes stale the
+moment it mutates, and structures you key by it will silently miss. That
+silent miss is precisely why these types are not values by default.
+
 A class instance with neither an `[equals]` method nor a registered handler
 falls back to **reference semantics** (`deepEqual` is `Object.is`); `deepHash`
 throws, because it has no safe, content‑based hash to offer. (See
