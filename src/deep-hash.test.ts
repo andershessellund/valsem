@@ -118,8 +118,8 @@ describe('deepHash', () => {
     // deepEqual cannot throw, so this is the only place a user learns why.
     expect(() => deepHash(new Date(0))).toThrow(/Temporal\.Instant/);
     expect(() => deepHash(/a/g)).toThrow(/source, flags/);
-    expect(() => deepHash(new Map())).toThrow(/InternMap\.from/);
-    expect(() => deepHash(new Set())).toThrow(/InternSet\.from/);
+    expect(() => deepHash(new Map())).toThrow(/ValueMap\.from/);
+    expect(() => deepHash(new Set())).toThrow(/ValueSet\.from/);
     expect(() => deepHash(new Date(0))).toThrow(/immutable values only/);
     expect(() => deepHash(new Uint8Array([1]))).toThrow(/hex or base64 string/);
     expect(() => deepHash(new Uint8Array([1]))).toThrow(/any view over the same buffer/);
@@ -127,7 +127,7 @@ describe('deepHash', () => {
 
   it('rejects them nested inside a record too', () => {
     expect(() => deepHash({ at: new Date(0) })).toThrow(/Temporal\.Instant/);
-    expect(() => deepHash([new Set([1])])).toThrow(/InternSet\.from/);
+    expect(() => deepHash([new Set([1])])).toThrow(/ValueSet\.from/);
   });
 
   // --- Type discrimination ---

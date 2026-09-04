@@ -15,7 +15,7 @@ const INITIAL_SWEEP_THRESHOLD = 64;
  *
  * Members are retained via `WeakRef` and reclaimed by a periodic sweep, so an
  * instance leaves the pool once nothing else references it. This backs the
- * persistent {@link InternArray}/{@link InternMap}/{@link InternSet}/
+ * persistent {@link ValueList}/{@link ValueMap}/{@link ValueSet}/
  * {@link InternString} collections and any consumer value type (see
  * {@link createInternPool}).
  *

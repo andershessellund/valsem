@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// InternMap — persistent (immutable) map with incremental hashing
+// ValueMap — persistent (immutable) map with incremental hashing
 //
 // Mutator methods (`set`, `delete`) compute the new hash from the
 // existing hash in O(1), look up the canonical instance in the pool,
@@ -41,28 +41,28 @@ function entryHash(kh: number, vh: number): number {
   return scramble((kh + Math.imul(vh, Q)) >>> 0);
 }
 
-const pool = createInternPool<InternMap<unknown, unknown>>();
+const pool = createInternPool<ValueMap<unknown, unknown>>();
 
 /**
  * Persistent (immutable) map with structural identity.
  *
- * Two `InternMap` instances with the same set of `(===, ===)` entries are the
+ * Two `ValueMap` instances with the same set of `(===, ===)` entries are the
  * same object reference.
  *
  * **Iteration order is unspecified.** Entry order is not part of the value —
  * `{a→1, b→2}` and `{b→2, a→1}` are the *same* canonical instance — so the
  * order you observe is whichever structurally-equal map was pooled first, and
  * can differ between runs. Never depend on it; if order carries meaning, use an
- * `InternArray` of `[key, value]` pairs (a future `OrderedMap` may cover this).
+ * `ValueList` of `[key, value]` pairs (a future `OrderedMap` may cover this).
  *
  * The backing `Map` is a private field — never exposed, because JavaScript has
  * no way to make a `Map` immutable at runtime (`Object.freeze` does not reach
  * its internal slots), and handing it out would let one accidental `set()`
  * corrupt the shared canonical instance and its cached hash. Instead the
- * InternMap **is** a `ReadonlyMap` itself: pass it anywhere one is accepted,
+ * ValueMap **is** a `ReadonlyMap` itself: pass it anywhere one is accepted,
  * and take a mutable copy with `new Map(internMap)` when you need one.
  */
-export class InternMap<K, V> implements ReadonlyMap<K, V> {
+export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   readonly #map: Map<K, V>;
   readonly [hashCodeSym]: number;
   readonly [internedSym]: true = true;
@@ -120,7 +120,7 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   [equalsSym](other: unknown): boolean {
-    if (!(other instanceof InternMap)) return false;
+    if (!(other instanceof ValueMap)) return false;
     if (this.#map.size !== other.#map.size) return false;
     for (const [k, v] of this.#map) {
       if (!other.#map.has(k) || other.#map.get(k) !== v) return false;
@@ -129,10 +129,10 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   /**
-   * Set `key` → `value`. Returns the canonical InternMap with the entry
+   * Set `key` → `value`. Returns the canonical ValueMap with the entry
    * applied. If the entry is already present and equal, returns `this`.
    */
-  set(key: K, value: V): InternMap<K, V> {
+  set(key: K, value: V): ValueMap<K, V> {
     const had = this.#map.has(key);
     const oldV = had ? this.#map.get(key)! : undefined;
     if (had && oldV === value) return this;
@@ -159,22 +159,22 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
       for (const [k, v] of self.#map) {
         if (k === key) continue;
         // has() as well as get(): `undefined` is a legitimate stored value in
-        // an InternMap (unlike in a record), so get() alone cannot tell a
+        // an ValueMap (unlike in a record), so get() alone cannot tell a
         // stored undefined from an absent key on a hash-collided candidate.
         if (!c.#map.has(k) || c.#map.get(k) !== v) return false;
       }
       return true;
     });
-    if (found !== undefined) return found as InternMap<K, V>;
+    if (found !== undefined) return found as ValueMap<K, V>;
 
     const fresh = new Map<K, V>(this.#map);
     fresh.set(key, value);
     Object.freeze(fresh);
-    return pool.register(new InternMap<K, V>(fresh, newHash, newSum), newHash) as InternMap<K, V>;
+    return pool.register(new ValueMap<K, V>(fresh, newHash, newSum), newHash) as ValueMap<K, V>;
   }
 
   /** Remove `key`. Returns `this` if `key` was not present. */
-  delete(key: K): InternMap<K, V> {
+  delete(key: K): ValueMap<K, V> {
     if (!this.#map.has(key)) return this;
     const oldV = this.#map.get(key)!;
     const kh = deepHash(key);
@@ -182,7 +182,7 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
     const newSum = (this.#rollingSum - entryHash(kh, vhOld)) >>> 0;
     const newSize = this.#map.size - 1;
     const newHash = (mix(0, newSize) ^ newSum) >>> 0;
-    if (newSize === 0) return InternMap.empty<K, V>();
+    if (newSize === 0) return ValueMap.empty<K, V>();
 
     const self = this;
     const found = pool.lookup(newHash, c => {
@@ -194,11 +194,11 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
       }
       return true;
     });
-    if (found !== undefined) return found as InternMap<K, V>;
+    if (found !== undefined) return found as ValueMap<K, V>;
 
     const fresh = new Map<K, V>();
     for (const [k, v] of this.#map) if (k !== key) fresh.set(k, v);
-    return pool.register(new InternMap<K, V>(fresh, newHash, newSum), newHash) as InternMap<K, V>;
+    return pool.register(new ValueMap<K, V>(fresh, newHash, newSum), newHash) as ValueMap<K, V>;
   }
 
   // -------------------------------------------------------------------------
@@ -206,38 +206,38 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
   // -------------------------------------------------------------------------
 
   /** Canonical empty map. */
-  static empty<K, V>(): InternMap<K, V> {
-    return EMPTY as InternMap<K, V>;
+  static empty<K, V>(): ValueMap<K, V> {
+    return EMPTY as ValueMap<K, V>;
   }
 
-  /** Canonical InternMap from an iterable of `[key, value]` entries. */
-  static from<K, V>(entries: Iterable<readonly [K, V]>): InternMap<K, V> {
+  /** Canonical ValueMap from an iterable of `[key, value]` entries. */
+  static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
     const m = new Map<K, V>();
     for (const [k, v] of entries) m.set(k, v);
-    return InternMap._fromMap(m);
+    return ValueMap._fromMap(m);
   }
 
   /**
-   * Canonical InternMap from a plain object (string keys only).
+   * Canonical ValueMap from a plain object (string keys only).
    *
    * The input is a *record*, so record semantics apply to it: a key mapped to
    * `undefined` is an absent key and is not carried into the map. To store
    * `undefined` deliberately, use {@link set} or {@link from} — inside an
-   * InternMap it is a legitimate value, distinct from absence.
+   * ValueMap it is a legitimate value, distinct from absence.
    */
-  static fromObject<V>(obj: Record<string, V>): InternMap<string, V> {
+  static fromObject<V>(obj: Record<string, V>): ValueMap<string, V> {
     const m = new Map<string, V>();
     for (const k in obj) {
       const v = obj[k];
       if (v === undefined) continue;
       m.set(k, v);
     }
-    return InternMap._fromMap(m);
+    return ValueMap._fromMap(m);
   }
 
   /** @internal Build from an existing Map (consumes the map — the caller must not keep a reference). */
-  static _fromMap<K, V>(m: Map<K, V>): InternMap<K, V> {
-    if (m.size === 0) return EMPTY as InternMap<K, V>;
+  static _fromMap<K, V>(m: Map<K, V>): ValueMap<K, V> {
+    if (m.size === 0) return EMPTY as ValueMap<K, V>;
     let sum = 0;
     for (const [k, v] of m) {
       sum = (sum + entryHash(deepHash(k), deepHash(v))) >>> 0;
@@ -250,8 +250,8 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
       }
       return true;
     });
-    if (found !== undefined) return found as InternMap<K, V>;
-    return pool.register(new InternMap<K, V>(m, hash, sum), hash) as InternMap<K, V>;
+    if (found !== undefined) return found as ValueMap<K, V>;
+    return pool.register(new ValueMap<K, V>(m, hash, sum), hash) as ValueMap<K, V>;
   }
 
   /** @internal Pool size — exposed for tests. */
@@ -260,9 +260,9 @@ export class InternMap<K, V> implements ReadonlyMap<K, V> {
   }
 }
 
-const EMPTY: InternMap<unknown, unknown> = (() => {
+const EMPTY: ValueMap<unknown, unknown> = (() => {
   const m = new Map<unknown, unknown>();
   const hash = (mix(0, 0) ^ 0) >>> 0;
-  const inst = new (InternMap as any)(m, hash, 0) as InternMap<unknown, unknown>;
+  const inst = new (ValueMap as any)(m, hash, 0) as ValueMap<unknown, unknown>;
   return pool.register(inst, hash);
 })();

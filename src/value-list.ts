@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// InternArray — persistent (immutable) array with incremental hashing
+// ValueList — persistent (immutable) array with incremental hashing
 //
 // Mutator methods (`push`, `pop`, `set`) compute the new hash from the
 // existing hash in O(1) (modulo a one-off power-of-p computation for
@@ -46,17 +46,17 @@ function powP(n: number): number {
   return result >>> 0;
 }
 
-const pool = createInternPool<InternArray<unknown>>();
+const pool = createInternPool<ValueList<unknown>>();
 
 /**
  * Persistent (immutable) array with structural identity.
  *
- * Two `InternArray` instances with element-wise `===` contents are the
+ * Two `ValueList` instances with element-wise `===` contents are the
  * same object reference. The underlying frozen array is exposed as
  * {@link array}. Mutator methods (`push`, `pop`, `set`) return a
- * canonical InternArray reusing the pool whenever possible.
+ * canonical ValueList reusing the pool whenever possible.
  */
-export class InternArray<T> {
+export class ValueList<T> {
   /** Frozen underlying JavaScript array. Safe to read directly. */
   readonly array: readonly T[];
   readonly [hashCodeSym]: number;
@@ -68,7 +68,7 @@ export class InternArray<T> {
     this.array = array;
     this[hashCodeSym] = hash;
     this.#pPow = pPow;
-    Object.freeze(this); // see InternMap — protects `array` and the cached [hashCode]
+    Object.freeze(this); // see ValueMap — protects `array` and the cached [hashCode]
   }
 
   /** Number of elements. */
@@ -82,7 +82,7 @@ export class InternArray<T> {
   }
 
   [equalsSym](other: unknown): boolean {
-    if (!(other instanceof InternArray)) return false;
+    if (!(other instanceof ValueList)) return false;
     const a = this.array;
     const b = other.array;
     if (a.length !== b.length) return false;
@@ -91,7 +91,7 @@ export class InternArray<T> {
   }
 
   /** Append `value` at the tail. Returns the canonical successor. */
-  push(value: T): InternArray<T> {
+  push(value: T): ValueList<T> {
     const vh = deepHash(value);
     const newHash = (this[hashCodeSym] + Math.imul(vh, this.#pPow)) >>> 0;
     const len = this.array.length;
@@ -105,16 +105,16 @@ export class InternArray<T> {
       for (let i = 0; i < len; i++) if (ca[i] !== sa[i]) return false;
       return true;
     });
-    if (found !== undefined) return found as InternArray<T>;
+    if (found !== undefined) return found as ValueList<T>;
     const fresh: T[] = new Array(len + 1);
     for (let i = 0; i < len; i++) fresh[i] = this.array[i] as T;
     fresh[len] = value;
     Object.freeze(fresh);
-    return pool.register(new InternArray<T>(fresh, newHash, newPPow), newHash) as InternArray<T>;
+    return pool.register(new ValueList<T>(fresh, newHash, newPPow), newHash) as ValueList<T>;
   }
 
   /** Remove the tail element. Returns the canonical successor. Empty `pop` returns `this`. */
-  pop(): InternArray<T> {
+  pop(): ValueList<T> {
     const len = this.array.length;
     if (len === 0) return this;
     const last = this.array[len - 1] as T;
@@ -129,17 +129,17 @@ export class InternArray<T> {
       for (let i = 0; i < len - 1; i++) if (ca[i] !== sa[i]) return false;
       return true;
     });
-    if (found !== undefined) return found as InternArray<T>;
+    if (found !== undefined) return found as ValueList<T>;
     const fresh: T[] = new Array(len - 1);
     for (let i = 0; i < len - 1; i++) fresh[i] = this.array[i] as T;
     Object.freeze(fresh);
-    return pool.register(new InternArray<T>(fresh, newHash, newPPow), newHash) as InternArray<T>;
+    return pool.register(new ValueList<T>(fresh, newHash, newPPow), newHash) as ValueList<T>;
   }
 
   /** Replace the element at `index`. Returns the canonical successor. */
-  set(index: number, value: T): InternArray<T> {
+  set(index: number, value: T): ValueList<T> {
     const len = this.array.length;
-    if (index < 0 || index >= len) throw new RangeError(`InternArray.set: index ${index} out of range [0, ${len})`);
+    if (index < 0 || index >= len) throw new RangeError(`ValueList.set: index ${index} out of range [0, ${len})`);
     const old = this.array[index] as T;
     if (old === value) return this;
     const oldH = deepHash(old);
@@ -159,12 +159,12 @@ export class InternArray<T> {
       }
       return true;
     });
-    if (found !== undefined) return found as InternArray<T>;
+    if (found !== undefined) return found as ValueList<T>;
     const fresh: T[] = new Array(len);
     for (let i = 0; i < len; i++) fresh[i] = this.array[i] as T;
     fresh[index] = value;
     Object.freeze(fresh);
-    return pool.register(new InternArray<T>(fresh, newHash, this.#pPow), newHash) as InternArray<T>;
+    return pool.register(new ValueList<T>(fresh, newHash, this.#pPow), newHash) as ValueList<T>;
   }
 
   // -------------------------------------------------------------------------
@@ -172,20 +172,20 @@ export class InternArray<T> {
   // -------------------------------------------------------------------------
 
   /** Canonical empty array. */
-  static empty<T>(): InternArray<T> {
-    return EMPTY as InternArray<T>;
+  static empty<T>(): ValueList<T> {
+    return EMPTY as ValueList<T>;
   }
 
-  /** Canonical InternArray for the given items (compared element-wise via `===`). */
-  static of<T>(...items: T[]): InternArray<T> {
-    return InternArray.from(items);
+  /** Canonical ValueList for the given items (compared element-wise via `===`). */
+  static of<T>(...items: T[]): ValueList<T> {
+    return ValueList.from(items);
   }
 
-  /** Canonical InternArray for the given iterable. */
-  static from<T>(items: Iterable<T> | ArrayLike<T>): InternArray<T> {
+  /** Canonical ValueList for the given iterable. */
+  static from<T>(items: Iterable<T> | ArrayLike<T>): ValueList<T> {
     const arr: T[] = Array.isArray(items) ? items.slice() : Array.from(items as Iterable<T>);
     const len = arr.length;
-    if (len === 0) return EMPTY as InternArray<T>;
+    if (len === 0) return EMPTY as ValueList<T>;
     let hash = 0;
     let pPow = 1;
     for (let i = 0; i < len; i++) {
@@ -198,9 +198,9 @@ export class InternArray<T> {
       for (let i = 0; i < len; i++) if (ca[i] !== arr[i]) return false;
       return true;
     });
-    if (found !== undefined) return found as InternArray<T>;
+    if (found !== undefined) return found as ValueList<T>;
     Object.freeze(arr);
-    return pool.register(new InternArray<T>(arr, hash, pPow), hash) as InternArray<T>;
+    return pool.register(new ValueList<T>(arr, hash, pPow), hash) as ValueList<T>;
   }
 
   /** @internal Pool size — exposed for tests. */
@@ -209,9 +209,9 @@ export class InternArray<T> {
   }
 }
 
-const EMPTY: InternArray<unknown> = (() => {
+const EMPTY: ValueList<unknown> = (() => {
   const arr: unknown[] = [];
   Object.freeze(arr);
-  const inst = new (InternArray as any)(arr, 0, 1) as InternArray<unknown>;
+  const inst = new (ValueList as any)(arr, 0, 1) as ValueList<unknown>;
   return pool.register(inst, 0);
 })();

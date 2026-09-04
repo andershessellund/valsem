@@ -39,7 +39,7 @@ means a lot of boilerplate.
   canonical instance, so **value equality becomes `===`** and hashing becomes an
   O(1) cache read.
 - **Value collections** — `HashMap` keyed by structure, and the persistent
-  `InternArray` / `InternMap` / `InternSet` / `InternString` whose *instances*
+  `ValueList` / `ValueMap` / `ValueSet` / `InternString` whose *instances*
   are canonical (equal contents ⟹ same reference).
 - **Extension points** — the `equals` / `hashCode` / `interned` symbols,
   `deepEqual.register`, and `createInternPool` let any type become a first‑class
@@ -87,8 +87,8 @@ immutable replacement:
 | --- | --- |
 | `Date` | `Temporal.Instant` — `Temporal.Instant.fromEpochMilliseconds(d.getTime())`, with [`valsem/temporal`](#temporal-valsemtemporal) |
 | `RegExp` | a plain `{ source, flags }` record — a regex is behavior, not data |
-| `Map` | [`InternMap`](#persistent-collections--canonical-instances) |
-| `Set` | [`InternSet`](#persistent-collections--canonical-instances) |
+| `Map` | [`ValueMap`](#persistent-collections--canonical-instances) |
+| `Set` | [`ValueSet`](#persistent-collections--canonical-instances) |
 | `TypedArray` / `DataView` / `ArrayBuffer` | a hex or base64 string — bytes are rewritable through *any* view over the same buffer, so no instance can be immutable |
 
 (When TC39's immutable‑`ArrayBuffer` proposal ships, a view over a buffer with
@@ -98,7 +98,7 @@ gated on that check.)
 ```ts
 deepHash(new Date(0));        // throws — names Temporal.Instant
 intern({ at: new Date(0) });  // throws
-intern(new Set([1]));         // throws — names InternSet.from
+intern(new Set([1]));         // throws — names ValueSet.from
 ```
 
 `deepEqual` is the one exception, and only because it cannot throw: it is a
@@ -195,17 +195,17 @@ semantics. Values are stored as‑is.
 
 ### Persistent collections — canonical *instances*
 
-`InternArray`, `InternMap`, `InternSet`, and `InternString` are **immutable**
+`ValueList`, `ValueMap`, `ValueSet`, and `InternString` are **immutable**
 collections whose *instances* are interned: two with equal contents are the same
 reference (`===`), carry a precomputed `[hashCode]`, and can be compared,
 deduplicated, and used as keys for free.
 
 ```ts
-import { InternArray, InternMap, InternSet } from 'valsem';
+import { ValueList, ValueMap, ValueSet } from 'valsem';
 
-InternArray.of(1, 2, 3) === InternArray.of(1, 2, 3);       // true
-InternMap.fromObject({ a: 1 }) === InternMap.fromObject({ a: 1 }); // true
-InternSet.from([1, 2]) === InternSet.from([2, 1]);          // true — unordered
+ValueList.of(1, 2, 3) === ValueList.of(1, 2, 3);       // true
+ValueMap.fromObject({ a: 1 }) === ValueMap.fromObject({ a: 1 }); // true
+ValueSet.from([1, 2]) === ValueSet.from([2, 1]);          // true — unordered
 ```
 
 Mutators are **persistent**: they return the canonical successor and reuse a
@@ -214,24 +214,24 @@ Hashing is incremental (O(1) per edit for `push`/`pop`/`set`/`delete`), which
 makes them ideal for hot state that churns through the same few configurations.
 
 ```ts
-const v0 = InternArray.empty<number>();
-const v1 = v0.push(1).push(2);   // InternArray [1, 2]
+const v0 = ValueList.empty<number>();
+const v1 = v0.push(1).push(2);   // ValueList [1, 2]
 const v2 = v1.pop();             // back to the canonical [1] — no allocation
 v2 === v0.push(1);               // true
 
-const m1 = InternMap.fromObject({ hp: 3 }).set('sp', 5);
+const m1 = ValueMap.fromObject({ hp: 3 }).set('sp', 5);
 m1.get('sp');                    // 5
-[...m1];                         // InternMap *is* a ReadonlyMap — iterate it directly
+[...m1];                         // ValueMap *is* a ReadonlyMap — iterate it directly
 ```
 
-`InternMap` **is** a `ReadonlyMap` and `InternSet` **is** a `ReadonlySet` —
-pass them anywhere those are accepted (`InternSet` includes the ES2025
+`ValueMap` **is** a `ReadonlyMap` and `ValueSet` **is** a `ReadonlySet` —
+pass them anywhere those are accepted (`ValueSet` includes the ES2025
 set‑algebra methods). Their backing collections are private: JavaScript cannot
 make a `Map` or `Set` immutable at runtime, so handing one out would let a
 single accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
-`InternArray` and `InternString` do expose their data — `array` and `value` —
+`ValueList` and `InternString` do expose their data — `array` and `value` —
 because there the platform enforces immutability for real: the array is deeply
 `Object.freeze`‑frozen and the string is a primitive. The rule: the
 representation is public exactly where the runtime can actually protect it.
@@ -386,19 +386,19 @@ built on it agrees on one definition of what each kind of thing *is*:
 | --- | --- |
 | primitive | itself (`NaN` equals `NaN`; `+0` equals `-0`) |
 | plain object (record) | the **unordered** set of `key → value` pairs, where `undefined` is not a value |
-| array / `InternArray` | the length and the **ordered** element sequence |
-| `InternMap` | the **unordered** set of `(key, value)` entries (`===` refs) |
-| `InternSet` | the **unordered** set of elements (`===` refs) |
+| array / `ValueList` | the length and the **ordered** element sequence |
+| `ValueMap` | the **unordered** set of `(key, value)` entries (`===` refs) |
+| `ValueSet` | the **unordered** set of elements (`===` refs) |
 | `InternString` | the wrapped string |
 | class with `[equals]` / registered type | whatever its handlers say |
 
 ### Iteration order is not part of the value
 
-Order is *observable* on records, `InternMap`, and `InternSet` — you can iterate
+Order is *observable* on records, `ValueMap`, and `ValueSet` — you can iterate
 them — but it is **not semantic**: it never affects `deepEqual`, `deepHash`, or
 which canonical instance you get. That has a consequence worth internalizing:
 because equal collections collapse to a *single* canonical instance, the order
-you observe on an `InternMap` or `InternSet` is whichever structurally‑equal
+you observe on an `ValueMap` or `ValueSet` is whichever structurally‑equal
 collection was pooled **first**, and can differ from run to run. Treat it as
 arbitrary.
 
@@ -406,7 +406,7 @@ Interned records are the deterministic exception: `intern` rewrites plain
 objects with **sorted keys**, so canonical records always iterate
 alphabetically — a property of the canonical form, not of your input.
 
-If order carries meaning, put it in the value: use an array / `InternArray`
+If order carries meaning, put it in the value: use an array / `ValueList`
 (of `[key, value]` pairs, for a map). An `OrderedMap` / `OrderedSet` with
 order‑sensitive equality may be added down the road.
 
@@ -429,10 +429,10 @@ position or intent makes it meaningful there:
 
 - **Arrays** are positional: `[undefined]` has length 1 and does not equal
   `[]`.
-- **`InternMap`** stores it deliberately: `m.set(k, undefined)` is a real
+- **`ValueMap`** stores it deliberately: `m.set(k, undefined)` is a real
   entry, distinct from absence (`has` tells them apart). With TypeScript, a
   `Map<K, V | undefined>` is a declared intent in a way a record's
-  `{ x: opts.x }` never is. (`InternMap.fromObject` takes a *record* as input,
+  `{ x: opts.x }` never is. (`ValueMap.fromObject` takes a *record* as input,
   so record semantics apply to it: undefined‑valued keys are not carried over.)
 
 ---
@@ -442,15 +442,16 @@ position or intent makes it meaningful there:
 - **Equality is observational substitutability.** If two values are equal they
   are interchangeable everywhere — interning depends on this, so `deepEqual`
   is stricter than a loose "same‑ish" check.
-- **Order is not part of the value** for records, `InternMap`, and `InternSet`;
-  arrays and `InternArray` are ordered. See
+- **Order is not part of the value** for records, `ValueMap`, and `ValueSet`;
+  arrays and `ValueList` are ordered. See
   [Iteration order is not part of the value](#iteration-order-is-not-part-of-the-value).
-- **Interned and `Intern*` values are frozen.** Read freely; never mutate.
+- **Interned values are frozen** — and every `ValueList`/`ValueMap`/`ValueSet`/
+  `InternString` instance is born frozen. Read freely; never mutate.
   Produce new values instead. Registered `{ immutable: true }` types (Temporal,
   your own value types) are pooled *without* freezing: they are immutable by
   contract, and freezing a type you do not own can break it.
 - **Only immutable things get value identity.** `intern` pools primitives, plain
-  data, the `Intern*` collections, and types declared immutable. The mutable
+  data, the persistent collections, and types declared immutable. The mutable
   built‑ins `Date`, `RegExp`, `Map`, and `Set` are rejected outright rather than
   passed through, so a mutable value can never sit in a pool or silently miss as
   a `HashMap` key.
@@ -479,7 +480,7 @@ position or intent makes it meaningful there:
 | `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds). |
 | `internEqual` / `internHash` | function | Equality / hashing that exploit the intern cache. |
 | `HashMap` | class | Mutable map with structural (interned) keys. |
-| `InternArray` / `InternMap` / `InternSet` / `InternString` | class | Persistent collections with canonical instances; `InternMap`/`InternSet` implement `ReadonlyMap`/`ReadonlySet`. |
+| `ValueList` / `ValueMap` / `ValueSet` / `InternString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt‑in value‑semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |

@@ -113,7 +113,7 @@ function unhashableMessage(obj: object): string {
  * ```ts
  * deepHash({ a: 1, b: 2 }) === deepHash({ b: 2, a: 1 }); // true
  * deepHash([1, 2]) !== deepHash([2, 1]);                   // true — order matters
- * deepHash(new Set([1, 2, 3]));                            // throws — use InternSet
+ * deepHash(new Set([1, 2, 3]));                            // throws — use ValueSet
  * ```
  */
 export function deepHash(value: unknown): number {

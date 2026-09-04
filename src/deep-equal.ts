@@ -54,7 +54,7 @@ export const hashCode: unique symbol = Symbol.for('valsem.hashCode') as any;
  *
  * When an object exposes `[interned] === true`, {@link intern} returns it
  * immediately without pool lookup. Persistent collections
- * ({@link InternArray}, {@link InternMap}, {@link InternSet},
+ * ({@link ValueList}, {@link ValueMap}, {@link ValueSet},
  * {@link InternString}) set this flag on their prototype so every
  * instance is recognised as canonical for free.
  */
@@ -99,9 +99,9 @@ const MUTABLE_BUILTINS = new Map<Function, string>([
     "Temporal.Instant.fromEpochMilliseconds(date.getTime()), with import 'valsem/temporal'"],
   [RegExp, 'a RegExp carries a mutable lastIndex cursor, and is behavior rather than ' +
     'data. Carry { source, flags } as a plain record instead'],
-  [Map, 'a Map can be written to after construction. Use InternMap.from(...), which ' +
+  [Map, 'a Map can be written to after construction. Use ValueMap.from(...), which ' +
     'has value semantics and canonical instances'],
-  [Set, 'a Set can be written to after construction. Use InternSet.from(...), which ' +
+  [Set, 'a Set can be written to after construction. Use ValueSet.from(...), which ' +
     'has value semantics and canonical instances'],
 ]);
 
@@ -152,7 +152,7 @@ export function _mutableBuiltinReason(ctor: Function | undefined): string | unde
  * reference semantics (only equal if `Object.is` returns `true`). That includes
  * the mutable built-ins `Date`, `RegExp`, `Map`, `Set`, and the TypedArrays,
  * which valsem does not treat as values — use `Temporal`, a `{ source, flags }`
- * record, `InternMap`, `InternSet`, or a hex/base64 string instead. `deepHash`
+ * record, `ValueMap`, `ValueSet`, or a hex/base64 string instead. `deepHash`
  * rejects them with a message naming the replacement; `deepEqual` cannot throw,
  * so it reports `false`.
  */
@@ -193,7 +193,7 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // (`{ a: undefined }` equals `{}`). The distinction is almost always an
   // accident of construction — `{ ...base, x: opts.x }`, optional arguments —
   // and `intern` erases it from the canonical form, so equality must not see
-  // it either. Model "present but empty" with `null`. (`InternMap` is the
+  // it either. Model "present but empty" with `null`. (`ValueMap` is the
   // opposite by design: storing `undefined` there is intentional, and IS
   // distinct from absence.)
   const protoA = Object.getPrototypeOf(a);

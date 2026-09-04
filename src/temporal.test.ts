@@ -106,8 +106,8 @@ describe('temporal — interning', () => {
     // every structurally equal lookup — a silent wrong answer.
     expect(() => intern(new Date(0))).toThrow(/Temporal\.Instant/);
     expect(() => intern(/a/g)).toThrow(/source, flags/);
-    expect(() => intern(new Map())).toThrow(/InternMap\.from/);
-    expect(() => intern(new Set())).toThrow(/InternSet\.from/);
+    expect(() => intern(new Map())).toThrow(/ValueMap\.from/);
+    expect(() => intern(new Set())).toThrow(/ValueSet\.from/);
     // Top-level and nested fail the same way.
     expect(() => intern({ at: new Date(0) })).toThrow(/Temporal\.Instant/);
   });

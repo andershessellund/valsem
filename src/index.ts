@@ -3,8 +3,8 @@
 //
 // Structural equality (`deepEqual`), companion hashing (`deepHash`), and global
 // interning (`intern` — structurally-equal values collapse to a single `===`
-// canonical instance), plus value collections (`InternArray`/`InternMap`/
-// `InternSet`/`InternString`, `HashMap`) and the extension points
+// canonical instance), plus value collections (`ValueList`/`ValueMap`/
+// `ValueSet`/`InternString`, `HashMap`) and the extension points
 // (`equals`/`hashCode`/`interned` symbols, `createInternPool`) that let any
 // type participate.
 //
@@ -18,9 +18,9 @@ export type { RegisterOptions } from './deep-equal.js';
 export { deepHash } from './deep-hash.js';
 export { HashMap } from './hash-map.js';
 export { intern, createInterner, internHash, internEqual } from './intern.js';
-export { InternArray } from './intern-array.js';
-export { InternMap } from './intern-map.js';
-export { InternSet } from './intern-set.js';
+export { ValueList } from './value-list.js';
+export { ValueMap } from './value-map.js';
+export { ValueSet } from './value-set.js';
 export { InternString } from './intern-string.js';
 export { createInternPool } from './intern-pool.js';
 export type { InternPool } from './intern-pool.js';

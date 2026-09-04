@@ -90,8 +90,8 @@ for delivering value semantics in JS, not part of the model.
 | primitives | `null`, `boolean`, `number`, `string`, `bigint` | `NaN` equals `NaN`; `+0` equals `-0`; `undefined` is special (§2.3) |
 | record | plain frozen object | **unordered** `key → value`; canonical form has sorted keys |
 | list | plain frozen array | **ordered**; length is semantic |
-| set | `InternSet` (implements `ReadonlySet`) | unordered, `===`-membered |
-| map | `InternMap` (implements `ReadonlyMap`) | unordered, `===`-keyed, value-keyed |
+| set | `ValueSet` (implements `ReadonlySet`) | unordered, `===`-membered |
+| map | `ValueMap` (implements `ReadonlyMap`) | unordered, `===`-keyed, value-keyed |
 | timestamp family | `Temporal.*` via `valsem/temporal` | eight kinds, registered immutable |
 | your value types | classes via symbols / registration | §5 |
 
@@ -120,7 +120,7 @@ Rationale, established empirically during design:
 | --- | --- |
 | `Date` | `Temporal.Instant.fromEpochMilliseconds(d.getTime())` + `valsem/temporal` |
 | `RegExp` | a plain `{ source, flags }` record — a regex is behavior, not data |
-| `Map` / `Set` | `InternMap` / `InternSet` |
+| `Map` / `Set` | `ValueMap` / `ValueSet` |
 | TypedArrays / buffers | hex/base64 strings for small binary; content-addressed blob references for large (transfer plane: HTTP, not the value model) |
 
 The rejection table lives in one place (`deep-equal.ts`) and is shared by every
@@ -142,15 +142,15 @@ but intentionally empty" with `null`. Two deliberate exceptions where intent is
 plausible:
 
 - **Arrays are positional**: `[undefined]` has length 1 and ≠ `[]`.
-- **`InternMap` stores `undefined` deliberately**: `m.set(k, undefined)` is a
+- **`ValueMap` stores `undefined` deliberately**: `m.set(k, undefined)` is a
   real entry, distinct from absence (`has` distinguishes). With TypeScript, a
   `Map<K, V | undefined>` is declared intent in a way a record field never is.
-  (`InternMap.fromObject` takes a *record* as input, so record semantics apply
+  (`ValueMap.fromObject` takes a *record* as input, so record semantics apply
   to it: undefined-valued keys are not carried over.)
 
 ### 2.4 Iteration order is not part of the value
 
-Order is observable on records, `InternMap`, and `InternSet`, but never
+Order is observable on records, `ValueMap`, and `ValueSet`, but never
 semantic: it does not affect equality, hashing, or which canonical instance you
 get. Consequence: because equal collections collapse to a single canonical
 instance, the order you observe is whichever equal collection was pooled
@@ -216,7 +216,7 @@ become lazy.
 Collections maintain O(1)-updatable hash state:
 
 - **Records/maps/sets**: commutative accumulator — `acc' = acc − entry(old) +
-  entry(new)`. `InternMap`/`InternSet` already do this (`rollingSum`).
+  entry(new)`. `ValueMap`/`ValueSet` already do this (`rollingSum`).
 - **Arrays/lists**: polynomial accumulator with odd multiplier `P` (invertible
   mod 2³²): `h([a₀…aₙ]) = Σ hash(aᵢ)·Pⁱ`. Composes over concatenation:
   `hash(A ++ B) = hash(A) + P^|A| · hash(B)` — each tree node (§9) caches
@@ -320,19 +320,19 @@ the contract; performance is the implementation.** Four rules:
 2. **Classes only where JavaScript lacks the primitive** — sets and value-keyed
    maps — and even then duck-typed to the native readonly interfaces.
 3. **Optimized types are opt-ins**, chosen knowingly for measured hot paths
-   (`InternArray`, `InternString`).
+   (`ValueList`, `InternString`).
 4. **Optimizations are invisible.** Same syntax, same semantics; if a user can
    tell an optimization is on other than by timing it, it's a bug.
 
-### 6.2 `InternMap` / `InternSet`
+### 6.2 `ValueMap` / `ValueSet`
 
 Persistent, immutable, canonical-instance collections: two with equal contents
 are the same reference, carry a precomputed `[hashCode]`, and update
 persistently (`set`/`delete`/`add` return the canonical successor; pool hits
 allocate nothing; incremental hashing makes successor hashes O(1)).
 
-- **They ARE the readonly interfaces**: `InternMap implements ReadonlyMap`,
-  `InternSet implements ReadonlySet` (including the ES2025 set-algebra
+- **They ARE the readonly interfaces**: `ValueMap implements ReadonlyMap`,
+  `ValueSet implements ReadonlySet` (including the ES2025 set-algebra
   methods, which return fresh native `Set`s per the standard signatures). Pass
   them anywhere those are accepted; take a mutable copy with `new Map(m)`.
 - **The backing store is a `#private` field, never exposed.** JavaScript cannot
@@ -346,12 +346,12 @@ allocate nothing; incremental hashing makes successor hashes O(1)).
   well as `get()` (stored `undefined` is legal in maps and must not alias
   absence on hash collisions — a fixed bug).
 
-The representation-visibility rule: **`InternArray.array`/`InternString.value`
+The representation-visibility rule: **`ValueList.array`/`InternString.value`
 are public because frozen arrays and primitive strings are *genuinely*
 enforceable; `#map`/`#set` are private because Map/Set immutability is not.**
 The representation is public exactly where the platform can protect it.
 
-### 6.3 `InternArray` / `InternString` — opt-in optimizations
+### 6.3 `ValueList` / `InternString` — opt-in optimizations
 
 `intern([1, 2])` already yields a canonical frozen `===`-comparable plain
 array; strings natively have value semantics. What the wrappers add is purely
@@ -477,7 +477,7 @@ Opt in when *width × edit-frequency* crosses the copy-cost threshold
 
 ### 8.2 HAMT with hash-consed nodes
 
-`InternMap`/`InternSet` backing becomes an adaptive representation — flat
+`ValueMap`/`ValueSet` backing becomes an adaptive representation — flat
 native map below ~32 entries, HAMT above — **invisibly**, behind the
 encapsulated API (the payoff of §6.2's private fields). The distinctive step:
 **intern the trie nodes themselves** (the pool stops being a cache in front of
@@ -509,7 +509,7 @@ shape-canonical (a pure function of length, tail included). The operations RRB
 accelerates are exactly the ones plain arrays are also bad at, so omitting them
 violates no expectation. The contract table:
 
-| op | plain `Array` | vector-backed `InternArray` |
+| op | plain `Array` | vector-backed `ValueList` |
 | --- | --- | --- |
 | `get(i)` | O(1) | O(log₃₂ n) — ≤ 7 hops |
 | `set(i)` → new | O(n) | O(log₃₂ n) |
@@ -603,7 +603,7 @@ append per op):
 - Delicious footnote: the benchmark's 50,000 array elements are structurally
   identical; interning collapses them to **1** object. The metric scores the
   defining feature zero while the dataset showcases it.
-- Current flat `InternArray.push`: 2.5× naive (copy-bound, O(1) hash);
+- Current flat `ValueList.push`: 2.5× naive (copy-bound, O(1) hash);
   vector-backed would top the chart by asymptotics — and must **never lead the
   marketing** (the Immutable.js trap: winning a plain-data benchmark with a
   class type convinces no one).
@@ -650,9 +650,9 @@ ops, clearly labeled).
 | 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
 | 1 | **`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission, per-call options; Mutative corpus as tests | all existing suites green; patch-emission property tests |
 | 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
-| 3 | Adaptive HAMT backing for `InternMap`/`InternSet` (invisible) | conformance + property suites; benchmark wins on large collections |
+| 3 | Adaptive HAMT backing for `ValueMap`/`ValueSet` (invisible) | conformance + property suites; benchmark wins on large collections |
 | 4 | Hash-consed nodes: O(1) equality, Δ-proportional diff, transient finalize | equality/diff benchmarks; memory-floor demonstration |
-| 5 | Vector-backed `InternArray`: leaf iteration, `toArray()` weak memo, retire `.array` | contract table holds empirically |
+| 5 | Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array` | contract table holds empirically |
 | 6 | Hardening backlog: lazy hash seeding; decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant and intern idempotence | — |
 
 Non-goals, permanently: mutable built-ins as values; cycle support; wire
@@ -667,7 +667,7 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   ineffectiveness, and measured silent HashMap misses; teaching errors added.
 - **`{ immutable: true }` gate for pooling** — hashable ≠ immutable (Date/RegExp
   counterexamples); Temporal pools unfrozen.
-- **Record `undefined` normalization; InternMap keeps stored `undefined`** —
+- **Record `undefined` normalization; ValueMap keeps stored `undefined`** —
   accident vs TS-typed intent.
 - **Encapsulated Map/Set backing; classes implement ReadonlyMap/ReadonlySet** —
   freeze is a no-op on internal slots; interop preserved by *being* the
@@ -689,3 +689,12 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
 - **Positioning: dedup and lineage-free equality, not update throughput** —
   measured 18× loss on Mutative's arena, published honestly; the arena we
   define is the one the frontend actually runs.
+- **Renamed `Intern{Map,Set,Array}` → `ValueMap`/`ValueSet`/`ValueList`** —
+  type names name model kinds; mechanism vocabulary (interning) belongs to
+  operations (`intern`, pools, the `interned` symbol). "List", not "Array":
+  names may not lie about their kind — the class has no subscript access, and
+  "list" is the model kind. `InternString` deliberately keeps its name: its
+  value is the wrapped *string* (not a distinct kind), so a `Value*` name
+  would overclaim — the class *is* the mechanism (cached hash, pooled
+  identity), and its name honestly says so. `HashMap` stays: a mutable lookup
+  structure named by mechanism is the established convention.
