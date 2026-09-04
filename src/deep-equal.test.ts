@@ -299,4 +299,25 @@ describe('deepEqual — canonical fast path', () => {
     const { ValueSet } = await import('./value-set.js');
     expect(deepEqual(ValueMap.empty(), ValueSet.empty())).toBe(false);
   });
+
+  it('distinct precomputed [hashCode]s skip [equals] entirely', () => {
+    let equalsCalls = 0;
+    class Tagged {
+      declare readonly [hashCode]: number;
+      constructor(readonly tag: string, h: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = h;
+      }
+      [equals](other: unknown): boolean {
+        equalsCalls++;
+        return other instanceof Tagged && other.tag === this.tag;
+      }
+    }
+    // Companion invariant: unequal hashes prove inequality — no [equals] call.
+    expect(deepEqual(new Tagged('a', 1), new Tagged('b', 2))).toBe(false);
+    expect(equalsCalls).toBe(0);
+    // Equal hashes still require the real comparison.
+    expect(deepEqual(new Tagged('a', 7), new Tagged('a', 7))).toBe(true);
+    expect(deepEqual(new Tagged('a', 7), new Tagged('b', 7))).toBe(false);
+    expect(equalsCalls).toBe(2);
+  });
 });

@@ -281,12 +281,16 @@ Canonical records are rebuilt with **sorted keys** and `__proto__`-safe field
 definition (a `__proto__` key from `JSON.parse` becomes an ordinary own data
 property — never a prototype swap).
 
-### 4.2 `internEqual` / `internHash`
+### 4.2 `internHash` (and the deletion of `internEqual`)
 
-Fast paths exploiting the pool: both-interned + `!==` ⟹ unequal; cached hashes
-returned in O(1). (Known wart: `internEqual` disagrees with `deepEqual` for
-non-internable values — NaN scalar aside, Dates etc. — documented as a fast
-path with preconditions.)
+`internHash` returns the cached hash in O(1) for canonical values, computing
+structurally otherwise — pure, no side effects. `internEqual` was **deleted**:
+it was a side-effecting equality predicate (its fallback interned both
+arguments — freezing the caller's objects and pooling transients no equality
+check can retain), its fast paths are exactly `deepEqual`'s canonical
+short-circuit (which also resolved the old disagree-on-non-internables wart),
+and callers wanting adoption semantics can say so explicitly:
+`intern(a) === intern(b)`.
 
 ### 4.3 `HashMap`
 
@@ -830,6 +834,16 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **internEqual deleted; [hashCode] pre-filter added to deepEqual** — the
+  audit of the new fast path surfaced that `internEqual` was a
+  side-effecting predicate: its fallback interned both arguments, FREEZING
+  the caller's objects and pooling transients an equality check cannot
+  retain (unheld canonicals die; the pool churns). Its legitimate fast
+  paths were exactly what canonical-aware `deepEqual` now does without side
+  effects, so it went; `intern(a) === intern(b)` states adoption
+  explicitly. The audit also added the one genuinely missing hash use:
+  distinct precomputed `[hashCode]`s on class instances prove inequality
+  (companion invariant) before running a potentially O(n) `[equals]`.
 - **deepEqual consults canonicality** — after the primitive checks, if both
   sides are canonical (the `[interned]` marker, or membership in the
   interner's hash cache, injected into the leaf module the same way

@@ -68,7 +68,10 @@ const equalsMethods = new Map<Function, (a: any, b: any) => boolean>();
 const hashCodeMethods = new Map<Function, (a: any) => number>();
 
 // Injected by the intern module (which imports this one — same pattern as
-// deepHash's precomputed-hash hook): membership means "canonical plain data".
+// deepHash's precomputed-hash hook). This IS the interner's hash cache:
+// membership means "canonical plain data" — a strictly stronger fact than a
+// cached hash value, since canonical + `!==` proves structural inequality
+// even when two hashes collide.
 let _canonicals: WeakMap<object, number> | null = null;
 
 /** @internal Wire the interner's hash cache in as the canonicality probe. */
@@ -198,6 +201,12 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     const eq = (a as any)[equals];
     if (typeof eq !== 'function') return false;
     if ((b as any)[equals] !== eq) return false;
+    // Hash pre-filter: the companion invariant (equal ⟹ same hash) means two
+    // distinct precomputed [hashCode]s prove inequality without running a
+    // potentially O(n) [equals].
+    const ha = (a as Record<symbol, unknown>)[hashCode];
+    const hb = (b as Record<symbol, unknown>)[hashCode];
+    if (typeof ha === 'number' && typeof hb === 'number' && ha !== hb) return false;
     return eq.call(a, b);
   }
 

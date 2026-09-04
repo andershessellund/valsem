@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest';
-import { intern, internHash, internEqual } from './intern.js';
+import { intern, internHash } from './intern.js';
 
 describe('intern', () => {
   it('returns primitives unchanged', () => {
@@ -59,23 +59,10 @@ describe('internHash', () => {
   });
 });
 
-describe('internEqual', () => {
-  it('returns true for === values', () => {
-    expect(internEqual(42, 42)).toBe(true);
-    const obj = {};
-    expect(internEqual(obj, obj)).toBe(true);
-  });
-
-  it('returns true for structurally equal values via interning', () => {
-    expect(internEqual({ a: 1 }, { a: 1 })).toBe(true);
-  });
-
-  it('returns false for distinct interned objects with same hash', () => {
-    const a = intern({ x: 1 });
-    const b = intern({ x: 2 });
-    expect(internEqual(a, b)).toBe(false);
-  });
-});
+// internEqual was deleted: a side-effecting equality predicate (its fallback
+// interned — froze and pooled — its arguments). deepEqual's canonical fast
+// path covers its short-circuits; `intern(a) === intern(b)` states adoption
+// semantics explicitly for callers who want them.
 
 describe('intern — canonical form drops undefined-valued keys', () => {
   it('{a: undefined} and {} intern to the same instance', () => {

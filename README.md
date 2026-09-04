@@ -155,10 +155,11 @@ operations, with no per‑entry finalizers, no monolithic cleanup passes, and no
 timers.
 
 ```ts
-import { internEqual, internHash } from 'valsem';
+import { deepEqual, internHash } from 'valsem';
 
-internEqual(a, { city: 'Aarhus', zip: '8000' }); // true — interns as needed
-internHash(a);                                    // cached hash, no traversal
+deepEqual(a, { city: 'Aarhus', zip: '8000' });         // true — walks the raw side
+deepEqual(a, intern({ city: 'Odense', zip: '5000' })); // false in O(1) — both canonical
+internHash(a);                                          // cached hash, no traversal
 ```
 
 **What can be interned.** Primitives are returned unchanged. Plain objects and
@@ -555,7 +556,7 @@ position or intent makes it meaningful there:
 | `deepEqual` | function | Structural equality; `.register(type, eq, hash, opts?)` adds a handler pair. |
 | `deepHash` | function | Companion structural hash (`equal ⟹ same hash`). |
 | `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds). |
-| `internEqual` / `internHash` | function | Equality / hashing that exploit the intern cache. |
+| `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
 | `HashMap` | class | Mutable map with structural (interned) keys. |
 | `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |

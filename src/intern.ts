@@ -77,32 +77,12 @@ export function internHash(value: unknown): number {
   return deepHash(value);
 }
 
-/**
- * Equality leveraging interning: if both values are interned, `===` is
- * the answer (same hash + not === ⇒ structurally distinct). Falls back to
- * `deepHash` comparison plus reference check otherwise.
- */
-export function internEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (
-    typeof a === 'object' && a !== null &&
-    typeof b === 'object' && b !== null
-  ) {
-    // Persistent-collection short-circuit: marked-interned + !== ⇒ distinct.
-    if ((a as any)[internedSym] === true && (b as any)[internedSym] === true) {
-      return false;
-    }
-    const ha = hashCache.get(a);
-    const hb = hashCache.get(b);
-    if (ha !== undefined && hb !== undefined) {
-      // Both internalized: === already returned false → structurally distinct.
-      return false;
-    }
-    // At least one not interned: intern and compare references.
-    return intern(a) === intern(b);
-  }
-  return false;
-}
+// `internEqual` used to live here — deleted. It was a side-effecting
+// predicate (its fallback interned both arguments: freezing the caller's
+// objects and pooling transients an equality check cannot retain), and its
+// fast paths are exactly what `deepEqual`'s canonical short-circuit now does
+// without side effects. Callers who WANT adoption semantics say it plainly:
+// `intern(a) === intern(b)`.
 
 // ---------------------------------------------------------------------------
 // intern() — global, recursive, weak-pooled
