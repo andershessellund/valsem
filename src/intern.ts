@@ -28,6 +28,7 @@ import {
   _equalsMethods,
   _immutableTypes,
   _mutableBuiltinReason,
+  _setCanonicals,
 } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 
@@ -45,8 +46,10 @@ const hashCache = new WeakMap<object, number>();
  */
 const accCache = new WeakMap<object, { a: number; n: number }>();
 
-// Wire it into deepHash so internalized children are hashed in O(1).
+// Wire it into deepHash so internalized children are hashed in O(1), and into
+// deepEqual as the canonicality probe (distinct canonicals are unequal in O(1)).
 _setPrecomputedHashes(hashCache);
+_setCanonicals(hashCache);
 
 // ---------------------------------------------------------------------------
 // Pool — the global weak pool, on the shared sweeper machinery

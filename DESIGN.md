@@ -830,6 +830,16 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **deepEqual consults canonicality** — after the primitive checks, if both
+  sides are canonical (the `[interned]` marker, or membership in the
+  interner's hash cache, injected into the leaf module the same way
+  deepHash's cache is), a `!==` pair is structurally distinct by the
+  canonicality invariant: O(1) false, no walk. Measured: distinct canonical
+  1000-key records 74 µs → 0.04 µs (~1800×); mixed raw trees terminate at
+  every canonical boundary; worst-case raw-vs-raw walk overhead +1.3%.
+  Trust note: the `[interned]` marker and `{ immutable: true }` were always
+  contracts — stamping them on non-canonical data has always broken
+  equality, and now does so faster.
 - **Freeze-disable experiment: measured, not shipped (negative result
   three of the phase)** — a temporary `_setFreezing(false)` switch was A/B'd
   across every arena. Event-driven big-array: zero. Collections, recurrent,

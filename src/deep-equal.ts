@@ -67,6 +67,15 @@ export const interned: unique symbol = Symbol.for('valsem.interned') as any;
 const equalsMethods = new Map<Function, (a: any, b: any) => boolean>();
 const hashCodeMethods = new Map<Function, (a: any) => number>();
 
+// Injected by the intern module (which imports this one — same pattern as
+// deepHash's precomputed-hash hook): membership means "canonical plain data".
+let _canonicals: WeakMap<object, number> | null = null;
+
+/** @internal Wire the interner's hash cache in as the canonicality probe. */
+export function _setCanonicals(map: WeakMap<object, number>): void {
+  _canonicals = map;
+}
+
 /**
  * Types whose instances are declared deeply immutable, and may therefore be
  * pooled by {@link intern} (canonical `===` instances) instead of passing
@@ -160,6 +169,18 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object')
     return a !== a && b !== b; // NaN === NaN
+
+  // Canonical fast path: equal content implies the SAME instance, so two
+  // distinct canonical values are structurally distinct — no walk needed.
+  // This also terminates mixed-tree comparisons in O(1) at every canonical
+  // boundary. (Marker covers the collections and pooled value types; the
+  // injected cache covers canonical plain data.)
+  if (
+    ((a as Record<symbol, unknown>)[interned] === true || _canonicals?.has(a) === true) &&
+    ((b as Record<symbol, unknown>)[interned] === true || _canonicals?.has(b) === true)
+  ) {
+    return false;
+  }
 
   // Array — cross-realm safe via Array.isArray
   if (Array.isArray(a)) {

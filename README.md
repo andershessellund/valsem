@@ -74,6 +74,11 @@ deepHash({ x: 1, y: 2 }) === deepHash({ y: 2, x: 1 }); // true
 primitives (including `NaN` and `±0`), plain objects (key‑order‑independent),
 and arrays (order‑sensitive). Plain‑object comparison is recursive.
 
+`deepEqual` also **consults canonicality**: because equal content collapses to
+one canonical instance, two *distinct* canonical values compare unequal in
+O(1) — no walk — and comparisons of mixed trees terminate at every canonical
+boundary. Interning your data makes `deepEqual` fast retroactively.
+
 `deepHash` is its **companion**: whenever `deepEqual(a, b)` is `true`,
 `deepHash(a) === deepHash(b)` is guaranteed (the converse is not — hashes can
 collide). Arrays hash order‑dependently. `deepHash` throws for values it cannot

@@ -264,3 +264,39 @@ describe('deepEqual — undefined is not a value in records', () => {
     expect(deepEqual([undefined], [undefined])).toBe(true);
   });
 });
+
+describe('deepEqual — canonical fast path', () => {
+  // Canonicality makes equal content the SAME instance, so deepEqual answers
+  // for two distinct canonical values in O(1), without a structural walk.
+  it('distinct canonical plain values compare unequal without a walk', async () => {
+    const { intern } = await import('./intern.js');
+    const a = intern({ k: 1, deep: [1, 2, 3] });
+    const b = intern({ k: 2, deep: [1, 2, 3] });
+    expect(deepEqual(a, b)).toBe(false);
+    expect(deepEqual(intern([1, 2]), intern([1, 3]))).toBe(false);
+  });
+
+  it('canonical vs equal raw still walks (and answers true)', async () => {
+    const { intern } = await import('./intern.js');
+    const canonical = intern({ k: 1, deep: [1, 2, 3] });
+    expect(deepEqual(canonical, { deep: [1, 2, 3], k: 1 })).toBe(true);
+    expect(deepEqual({ deep: [1, 2, 3], k: 1 }, canonical)).toBe(true);
+    expect(deepEqual(canonical, { deep: [1, 2, 3], k: 9 })).toBe(false);
+  });
+
+  it('mixed trees terminate at canonical boundaries', async () => {
+    const { intern } = await import('./intern.js');
+    const shared = intern({ payload: [1, 2, 3] });
+    const rawX = { meta: 1, data: shared };
+    const rawY = { meta: 1, data: shared };
+    expect(deepEqual(rawX, rawY)).toBe(true);
+    const other = intern({ payload: [1, 2, 4] });
+    expect(deepEqual({ meta: 1, data: shared }, { meta: 1, data: other })).toBe(false);
+  });
+
+  it('canonical collections of different kinds are unequal', async () => {
+    const { ValueMap } = await import('./value-map.js');
+    const { ValueSet } = await import('./value-set.js');
+    expect(deepEqual(ValueMap.empty(), ValueSet.empty())).toBe(false);
+  });
+});
