@@ -334,7 +334,12 @@ export class ValueList<T> {
 
   /** Canonical ValueList for the given iterable (elements interned on entry). */
   static from<T>(items: Iterable<T> | ArrayLike<T>): ValueList<T> {
-    const arr: T[] = Array.isArray(items) ? (items.slice() as T[]) : Array.from(items as Iterable<T>);
+    // Spread frozen arrays: V8's slice fast path skips frozen elements.
+    const arr: T[] = Array.isArray(items)
+      ? Object.isFrozen(items)
+        ? ([...(items as readonly T[])] as T[])
+        : (items.slice() as T[])
+      : Array.from(items as Iterable<T>);
     const len = arr.length;
     if (len === 0) return ValueList.empty<T>();
     for (let i = 0; i < len; i++) arr[i] = intern(arr[i]!);

@@ -20,7 +20,7 @@
 // `encode` reject them, naming the immutable replacement.
 // ---------------------------------------------------------------------------
 
-import { deepHash } from './deep-hash.js';
+import { deepHash, _deepHashWithAcc } from './deep-hash.js';
 import { _setPrecomputedHashes } from './deep-hash.js';
 import {
   interned as internedSym,
@@ -37,6 +37,13 @@ import { createInternPool } from './intern-pool.js';
 
 /** WeakMap from interned object → its precomputed deepHash. */
 const hashCache = new WeakMap<object, number>();
+
+/**
+ * WeakMap from canonical plain record/array → its raw hash accumulator and
+ * defined-entry count (see deep-hash's accumulator contract). Lets produce's
+ * finalize compute a successor's hash in O(changes) instead of O(width).
+ */
+const accCache = new WeakMap<object, { a: number; n: number }>();
 
 // Wire it into deepHash so internalized children are hashed in O(1).
 _setPrecomputedHashes(hashCache);
@@ -198,14 +205,21 @@ function lookupOrStore(
   matches: (candidate: object) => boolean,
   freeze: boolean,
 ): object {
+  // `freeze` ⟺ plain data valsem builds itself — capture the accumulator so
+  // successors of this canonical value hash incrementally.
+  if (freeze) {
+    const { h, acc, n } = _deepHashWithAcc(obj);
+    const existing = pool.lookup(h, matches);
+    if (existing !== undefined) return existing;
+    hashCache.set(obj, h);
+    accCache.set(obj, { a: acc, n });
+    Object.freeze(obj);
+    return pool.register(obj, h);
+  }
   const h = deepHash(obj);
-
   const existing = pool.lookup(h, matches);
   if (existing !== undefined) return existing;
-
-  // Store precomputed hash, freeze, and weakly retain in pool.
   hashCache.set(obj, h);
-  if (freeze) Object.freeze(obj);
   return pool.register(obj, h);
 }
 
@@ -270,4 +284,25 @@ export function _internPoolSize(): number {
 /** @internal O(1) probe: is this object canonical plain data (hash cached)? */
 export function _hashCacheHas(obj: object): boolean {
   return hashCache.has(obj);
+}
+
+/** @internal The cached accumulator of a canonical plain record/array. */
+export function _accOf(obj: object): { a: number; n: number } | undefined {
+  return accCache.get(obj);
+}
+
+/**
+ * @internal Canonicalize plain data whose hash and accumulator were computed
+ * incrementally (produce's finalize fast path). The caller guarantees: `obj`
+ * is in canonical form (records: sorted keys, no undefined values; children
+ * all canonical) and `h`/`acc`/`n` are exactly what `_deepHashWithAcc(obj)`
+ * would return.
+ */
+export function _internPrehashed(obj: object, h: number, acc: number, n: number): object {
+  const existing = pool.lookup(h, (c) => shallowRefEqual(c, obj));
+  if (existing !== undefined) return existing;
+  hashCache.set(obj, h);
+  accCache.set(obj, { a: acc, n });
+  Object.freeze(obj);
+  return pool.register(obj, h);
 }

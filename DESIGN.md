@@ -656,13 +656,27 @@ commit boundaries, or don't use valsem for that state.
 
 ### 9.2 Benchmark posture
 
-Measured on Mutative's own benchmark shape (50k×50-key objects + 1k map; one
-append per op):
+Measured against immer 11 and mutative 1.3 in-repo (`pnpm bench:produce`,
+`scripts/produce-bench.mjs`; canonical 10k-scale bases, novel state per op;
+libraries at shipped defaults). After the Phase-2 pass (incremental
+accumulator hashing + prehashed interning, replay finalize, virtual DraftList,
+frozen-aware copies):
 
-- naive reducer: 7,669 ops/s; post-hoc rebuild+intern: 424 ops/s — **~18×
-  slower than naive** (≈40–100× vs mutative). Decomposition: 130 µs copy +
-  ~2.2 ms hashing/pool. Engineering target with recorded ops + rolling-hash
-  caches: **2–3× naive**. Still loses the update-throughput arena — by design.
+| arena | valsem | immer (default) | mutative | standing |
+| --- | --- | --- | --- | --- |
+| 10k-entry map, one set | **3.5 µs** | 474 µs | 400 µs | **~120× ahead** (their drafts copy the container) |
+| 10k-element list, set+push | **4.8 µs** | 9.6 µs | 9.0 µs | **~2× ahead** |
+| 1000-key record, one set | **180 µs** | 208 µs | 208 µs | ahead; spread-copy floor is 153 µs |
+| 10k plain array, one item edit | 28 µs | 575 µs / 3.0 µs (no freeze) | 3.4 µs | 8× behind the unfrozen libs — the canonicality floor (frozen-base copy ≈ 9 µs, freeze+hash+pool the rest); `ValueList` is the designed answer |
+| 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
+| recurrent states (pool hits) | 48 µs | 532 µs | 2.9 µs | dedup pays here: results are `===` pooled instances |
+
+The historical 18×→2–3× target is met and beaten where the design says hot
+data belongs (the collections); flat plain arrays keep an honest 8× novelty
+tax that buys `===` equality, O(1) hashing, and process-wide dedup.
+Engineering note earned by measurement: **V8's `Array.prototype.slice` fast
+path excludes frozen-elements arrays (65× slower); spread is 9 µs** — every
+copy of a possibly-canonical array must be frozen-aware (`copyArr`).
 - Delicious footnote: the benchmark's 50,000 array elements are structurally
   identical; interning collapses them to **1** object. The metric scores the
   defining feature zero while the dataset showcases it.
@@ -712,7 +726,7 @@ ops, clearly labeled).
 | --- | --- | --- |
 | 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
 | 1 | ~~**`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission~~ done (collection-draft transients and a Mutative-derived test corpus remain) | all existing suites green; patch-emission property tests |
-| 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
+| 2 | ~~Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work~~ done (records + stable-position arrays; §9.2 table). Remaining perf backlog: mid-splice array deltas, trie transients for bulk collection drafts, withPatches overhead, small-state floor | Mutative-shape benchmark hits target ✓ |
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
 | 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
 | 5 | ~~Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array`~~ done | contract table holds empirically |
@@ -773,6 +787,22 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Phase-2 performance pass, measure-first** — built the in-repo bench
+  against immer/mutative before touching code. Changes: array deepHash moved
+  to a positional polynomial accumulator (the chained mix could not be
+  delta-updated); canonicalization now caches raw accumulators
+  (`accCache`), and produce's finalize delta-updates them —
+  `_internPrehashed` skips rehash and child walks for records with no added
+  keys and sequences whose ops keep positions stable (sets + tail splices);
+  DraftList gained a virtual mode (point edits + appended tail over the
+  base, no materialization) with persistent-replay finalize; child-drafting
+  restricted everywhere to base-positioned values (the immer rule), which
+  also fixed a patch/result divergence for drafted-after-insert material.
+  The find of the pass: **V8's `slice` fast path excludes frozen-elements
+  arrays** — 229 µs vs 3.5 µs at 10k — discovered only because the profiler
+  lied and a bisection script didn't. Every copy of possibly-canonical
+  arrays is now frozen-aware. Results in §9.2's table: three arenas ahead
+  of both libraries, the plain-array arena at an honest 8× novelty tax.
 - **Shipped `produce` after a source-level study of immer and mutative** —
   the study (repos read in full) found both share one skeleton: lazy
   copy-on-write proxy drafts, assignment maps, net patches; immer's costs are

@@ -38,7 +38,8 @@
 // applyPatches is implemented ON TOP of produce.
 // ---------------------------------------------------------------------------
 
-import { intern, _hashCacheHas } from './intern.js';
+import { intern, internHash, _hashCacheHas, _accOf, _internPrehashed } from './intern.js';
+import { _entryTerm, _recordHashOf, _arrayHashOf, _powP } from './deep-hash.js';
 import { interned as internedMarker } from './deep-equal.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
@@ -115,6 +116,8 @@ interface ObjectState extends BaseState {
   copy: Record<string, unknown> | null;
   /** true = set, false = deleted; absent key = only child-drafted. */
   assigned: Map<string, boolean> | null;
+  /** Keys whose base value was child-drafted on read. */
+  drafted: Set<string> | null;
   draft: object;
   revoke: () => void;
 }
@@ -125,6 +128,8 @@ interface ArrayState extends BaseState {
   copy: unknown[] | null;
   /** Recorded ops (intent); null once an uncapturable mutation occurred. */
   ops: SeqOp[] | null;
+  /** Indices whose base value was child-drafted on read. */
+  drafted: Set<number> | null;
   draft: unknown[];
   revoke: () => void;
 }
@@ -152,9 +157,18 @@ interface SetState extends BaseState {
 interface ListState extends BaseState {
   type: 'list';
   base: ValueList<unknown>;
-  /** Materialized working array (created on first write / child draft). */
+  /**
+   * Virtual mode (items === null): point edits over the base plus an
+   * appended tail — no O(n) materialization for get/set/push/pop flows.
+   */
+  vEdits: Map<number, unknown>;
+  vTail: unknown[];
+  /** Materialized working array — created only when a splice forces it. */
   items: unknown[] | null;
-  ops: SeqOp[] | null;
+  /** Always recorded for lists (never goes opaque). */
+  ops: SeqOp[];
+  /** Indices whose base value was child-drafted on read. */
+  drafted: Set<number>;
   draft: DraftList<unknown>;
 }
 
@@ -259,6 +273,7 @@ const objectTraps: ProxyHandler<object> = {
     // already-created child drafts come back as-is.
     if (value === state.base[prop]) {
       prepareObjCopy(state);
+      (state.drafted ??= new Set()).add(prop);
       return (state.copy![prop] = createChildDraft(value, state));
     }
     return value;
@@ -344,6 +359,7 @@ function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): Ob
     base,
     copy: null,
     assigned: null,
+    drafted: null,
     draft: null as unknown as object,
     revoke: null as unknown as () => void,
   };
@@ -362,9 +378,17 @@ function latestArr(state: ArrayState): unknown[] {
   return state.copy ?? state.base;
 }
 
+/**
+ * Copy an array that may be frozen. V8's `slice` fast path does not cover
+ * frozen-elements arrays (measured 65× slower); spread does.
+ */
+function copyArr<T>(a: readonly T[]): T[] {
+  return Object.isFrozen(a) ? [...a] : (a as T[]).slice();
+}
+
 function prepareArrCopy(state: ArrayState): void {
   if (state.copy === null) {
-    state.copy = state.base.slice();
+    state.copy = copyArr(state.base);
   }
 }
 
@@ -454,6 +478,7 @@ const arrayTraps: ProxyHandler<object> = {
     if (state.finalized || !isDraftable(value)) return value;
     if (value === state.base[index]) {
       prepareArrCopy(state);
+      (state.drafted ??= new Set()).add(index);
       return (state.copy![index] = createChildDraft(value, state));
     }
     return value;
@@ -527,6 +552,7 @@ function createArrayDraft(base: unknown[], parent?: AnyState): ArrayState {
     base,
     copy: null,
     ops: [],
+    drafted: null,
     draft: null as unknown as unknown[],
     revoke: null as unknown as () => void,
   };
@@ -756,24 +782,52 @@ export class DraftList<T> {
     return s;
   }
 
-  #items(): unknown[] {
+  /** Fold the virtual edits/tail into a materialized working array. */
+  #materialize(): unknown[] {
     const s = this.#state;
-    if (s.items === null) s.items = s.base.toArray().slice();
+    if (s.items === null) {
+      const items = [...s.base.toArray()]; // spread: the snapshot is frozen
+      for (const [i, v] of s.vEdits) items[i] = v;
+      items.push(...s.vTail);
+      s.items = items;
+      s.vEdits.clear();
+      s.vTail.length = 0;
+    }
     return s.items;
   }
 
   get length(): number {
     const s = this.#state;
-    return s.items === null ? s.base.length : s.items.length;
+    return s.items === null ? s.base.length + s.vTail.length : s.items.length;
+  }
+
+  /** Current value at `index`; only base-positioned values are child-drafted. */
+  #read(index: number): unknown {
+    const s = this.#state;
+    if (s.items !== null) return s.items[index];
+    if (index < s.base.length) {
+      return s.vEdits.has(index) ? s.vEdits.get(index) : s.base.get(index);
+    }
+    return s.vTail[index - s.base.length];
   }
 
   get(index: number): T | undefined {
     const s = this.#state;
     if (!Number.isInteger(index) || index < 0 || index >= this.length) return undefined;
-    const items = s.items;
-    const value = items === null ? s.base.get(index) : items[index];
-    if (isDraftable(value) && !s.finalized && stateOf(value) === undefined) {
-      return (this.#items()[index] = createChildDraft(value, s)) as T;
+    const value = this.#read(index);
+    // Draft only values still at their base position (assigned/inserted
+    // material is the caller's own and comes back raw — the immer rule).
+    if (
+      isDraftable(value) &&
+      !s.finalized &&
+      stateOf(value) === undefined &&
+      value === s.base.get(index)
+    ) {
+      const child = createChildDraft(value, s);
+      s.drafted.add(index);
+      if (s.items !== null) s.items[index] = child;
+      else s.vEdits.set(index, child);
+      return child as T;
     }
     return value as T;
   }
@@ -783,39 +837,49 @@ export class DraftList<T> {
     if (!Number.isInteger(index) || index < 0 || index >= this.length) {
       throw new RangeError(`DraftList.set: index ${index} out of range [0, ${this.length})`);
     }
-    const items = this.#items();
-    if (same(items[index], value)) return this;
+    const current = this.#read(index);
+    if (same(current, value)) return this;
     assertAssignable(value, s);
     markChanged(s);
-    s.ops?.push({ t: 'set', i: index, value, old: items[index] });
-    items[index] = value;
+    s.ops.push({ t: 'set', i: index, value, old: current });
+    if (s.items !== null) s.items[index] = value;
+    else if (index < s.base.length) s.vEdits.set(index, value);
+    else s.vTail[index - s.base.length] = value;
     return this;
   }
 
   push(...values: T[]): number {
     const s = this.#state;
     for (const v of values) assertAssignable(v, s);
-    const items = this.#items();
     markChanged(s);
-    s.ops?.push({ t: 'splice', i: items.length, rc: 0, inserted: values.slice(), removed: [] });
-    items.push(...values);
-    return items.length;
+    const len = this.length;
+    s.ops.push({ t: 'splice', i: len, rc: 0, inserted: values.slice(), removed: [] });
+    if (s.items !== null) s.items.push(...values);
+    else s.vTail.push(...values);
+    return len + values.length;
   }
 
   pop(): T | undefined {
     const s = this.#state;
-    const items = this.#items();
-    if (items.length === 0) return undefined;
+    const len = this.length;
+    if (len === 0) return undefined;
     markChanged(s);
-    const removed = items.pop();
-    s.ops?.push({ t: 'splice', i: items.length, rc: 1, inserted: [], removed: [removed] });
+    let removed: unknown;
+    if (s.items !== null) {
+      removed = s.items.pop();
+    } else if (s.vTail.length > 0) {
+      removed = s.vTail.pop();
+    } else {
+      removed = this.#materialize().pop();
+    }
+    s.ops.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
     return removed as T;
   }
 
   splice(start: number, deleteCount?: number, ...values: T[]): T[] {
     const s = this.#state;
     for (const v of values) assertAssignable(v, s);
-    const items = this.#items();
+    const items = this.#materialize();
     const len = items.length;
     let at = Math.trunc(start);
     at = at < 0 ? Math.max(len + at, 0) : Math.min(at, len);
@@ -825,7 +889,7 @@ export class DraftList<T> {
         : Math.min(Math.max(Math.trunc(deleteCount), 0), len - at);
     markChanged(s);
     const removed = items.splice(at, rc, ...values);
-    s.ops?.push({
+    s.ops.push({
       t: 'splice',
       i: at,
       rc,
@@ -837,10 +901,16 @@ export class DraftList<T> {
 
   *[Symbol.iterator](): IterableIterator<T> {
     const s = this.#state;
-    if (s.items === null) {
+    if (s.items !== null) {
+      yield* s.items as T[];
+    } else if (s.vEdits.size === 0 && s.vTail.length === 0) {
       yield* s.base as Iterable<T>;
     } else {
-      yield* s.items as T[];
+      const baseLen = s.base.length;
+      for (let i = 0; i < baseLen; i++) {
+        yield (s.vEdits.has(i) ? s.vEdits.get(i) : s.base.get(i)) as T;
+      }
+      yield* s.vTail as T[];
     }
   }
 
@@ -902,8 +972,11 @@ function createListDraft(base: ValueList<unknown>, parent?: AnyState): ListState
     finalized: false,
     revoked: false,
     base,
+    vEdits: new Map(),
+    vTail: [],
     items: null,
     ops: [],
+    drafted: new Set(),
     draft: null as unknown as DraftList<unknown>,
   };
   state.draft = new DraftList(INTERNAL, state);
@@ -991,28 +1064,117 @@ function finalizeState(
     case 'object':
       return finalizeObject(state, path, recorder);
     case 'array':
-      return finalizeSequence(
-        state,
-        state.copy!,
-        () => state.base.map((v) => intern(v)),
-        (resolved) => intern(resolved),
-        path,
-        recorder,
-      );
+      return finalizeArray(state, path, recorder);
     case 'list':
-      return finalizeSequence(
-        state,
-        state.items!,
-        () => state.base.toArray() as unknown[],
-        (resolved) => ValueList.from(resolved),
-        path,
-        recorder,
-      );
+      return finalizeList(state, path, recorder);
     case 'map':
       return finalizeMap(state, path, recorder);
     case 'set':
       return finalizeSet(state, path, recorder);
   }
+}
+
+/** Emit the recorded structural ops of a sequence as patches, both directions. */
+function emitSeqOps(ops: SeqOp[], path: PatchPath, recorder: PatchRecorder): void {
+  for (const op of ops) {
+    if (op.t === 'set') {
+      recorder.patches.push({
+        kind: 'list.set',
+        path,
+        index: op.i,
+        value: resolve(op.value, null, undefined),
+      });
+      recorder.inverse.unshift({
+        kind: 'list.set',
+        path,
+        index: op.i,
+        value: restoreValue(op.old),
+      });
+    } else {
+      recorder.patches.push({
+        kind: 'list.splice',
+        path,
+        index: op.i,
+        remove: op.rc,
+        insert: op.inserted.map((r) => resolve(r, null, undefined)),
+      });
+      recorder.inverse.unshift({
+        kind: 'list.splice',
+        path,
+        index: op.i,
+        remove: op.inserted.length,
+        insert: op.removed.map(restoreValue),
+      });
+    }
+  }
+}
+
+/** Net index diff plus one tail splice — the intent-lost patch fallback. */
+function emitSeqDiff(
+  base: unknown[],
+  resolved: unknown[],
+  path: PatchPath,
+  recorder: PatchRecorder,
+): void {
+  const common = Math.min(base.length, resolved.length);
+  for (let i = 0; i < common; i++) {
+    if (!same(base[i], resolved[i])) {
+      recorder.patches.push({ kind: 'list.set', path, index: i, value: resolved[i] });
+      recorder.inverse.unshift({ kind: 'list.set', path, index: i, value: base[i] });
+    }
+  }
+  if (resolved.length > common) {
+    recorder.patches.push({
+      kind: 'list.splice',
+      path,
+      index: common,
+      remove: 0,
+      insert: resolved.slice(common),
+    });
+    recorder.inverse.unshift({
+      kind: 'list.splice',
+      path,
+      index: common,
+      remove: resolved.length - common,
+      insert: [],
+    });
+  } else if (base.length > common) {
+    recorder.patches.push({
+      kind: 'list.splice',
+      path,
+      index: common,
+      remove: base.length - common,
+      insert: [],
+    });
+    recorder.inverse.unshift({
+      kind: 'list.splice',
+      path,
+      index: common,
+      remove: 0,
+      insert: base.slice(common),
+    });
+  }
+}
+
+/**
+ * If every op is a positional set or a tail splice, positions are stable:
+ * return the assigned indices and final length. Mid-sequence splices → null.
+ */
+function seqTailProfile(
+  ops: SeqOp[],
+  baseLen: number,
+): { setIdx: Set<number>; finalLen: number } | null {
+  let len = baseLen;
+  const setIdx = new Set<number>();
+  for (const op of ops) {
+    if (op.t === 'set') {
+      setIdx.add(op.i);
+    } else {
+      if (op.i + op.rc !== len) return null;
+      len = op.i + op.inserted.length;
+    }
+  }
+  return { setIdx, finalLen: len };
 }
 
 function finalizeObject(
@@ -1021,151 +1183,230 @@ function finalizeObject(
   recorder: PatchRecorder | undefined,
 ): unknown {
   const copy = state.copy!;
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(copy)) {
-    // Child-drafted (unassigned) slots emit their own deeper patches; net
-    // assignments are covered by this node's record.set patches.
-    const childPath =
-      path !== null && recorder !== undefined && state.assigned!.get(key) === undefined
-        ? [...path, key]
-        : null;
-    const resolved = resolve(copy[key], childPath, recorder);
-    if (resolved !== undefined) out[key] = resolved;
-  }
-  state.result = intern(out);
+  const base = state.base;
+  const emitting = recorder !== undefined && path !== null;
 
-  if (recorder !== undefined && path !== null) {
+  // Touched slots: assignments/deletions plus child-drafted reads. Everything
+  // else in the copy is the base's own (canonical when base is) material.
+  const touched = new Set<string>(state.assigned!.keys());
+  if (state.drafted !== null) for (const k of state.drafted) touched.add(k);
+
+  // Fast path: canonical base with a cached accumulator, and no ADDED keys
+  // (an addition lands unsorted at the end of the copy, breaking the
+  // canonical key order — those take the sorting slow path).
+  const accInfo = _accOf(base);
+  let fast = accInfo !== undefined;
+  let acc = accInfo !== undefined ? accInfo.a : 0;
+  let n = accInfo !== undefined ? accInfo.n : 0;
+
+  for (const key of touched) {
+    const hadBefore = key in base && base[key] !== undefined;
+    if (!Object.prototype.hasOwnProperty.call(copy, key)) {
+      // Deleted via delete — the copy already lacks it.
+      if (fast && hadBefore) {
+        acc = (acc - _entryTerm(key, internHash(base[key]))) >>> 0;
+        n--;
+      }
+      continue;
+    }
+    const childPath =
+      emitting && state.assigned!.get(key) === undefined ? [...path!, key] : null;
+    const resolved = resolve(copy[key], childPath, recorder);
+    if (resolved === undefined) {
+      delete copy[key]; // assigned undefined — record semantics: absent
+      if (fast && hadBefore) {
+        acc = (acc - _entryTerm(key, internHash(base[key]))) >>> 0;
+        n--;
+      }
+      continue;
+    }
+    copy[key] = resolved;
+    if (fast) {
+      if (!hadBefore) {
+        fast = false;
+      } else {
+        acc =
+          (acc -
+            _entryTerm(key, internHash(base[key])) +
+            _entryTerm(key, internHash(resolved))) >>>
+          0;
+      }
+    }
+  }
+
+  state.result = fast
+    ? _internPrehashed(copy, _recordHashOf(n, acc), acc, n)
+    : intern(copy);
+
+  if (emitting) {
     for (const [key, wasSet] of state.assigned!) {
-      const hadBefore = key in state.base;
-      const before = state.base[key];
+      const hadBefore = key in base && base[key] !== undefined;
+      const before = base[key];
       if (wasSet) {
-        const after = out[key];
+        const after = Object.prototype.hasOwnProperty.call(copy, key)
+          ? copy[key]
+          : undefined;
         if (after === undefined) {
-          // Assigned undefined: record semantics — a deletion.
-          if (hadBefore && before !== undefined) {
-            recorder.patches.push({ kind: 'record.delete', path, key });
-            recorder.inverse.unshift({ kind: 'record.set', path, key, value: intern(before) });
+          if (hadBefore) {
+            recorder.patches.push({ kind: 'record.delete', path: path!, key });
+            recorder.inverse.unshift({
+              kind: 'record.set',
+              path: path!,
+              key,
+              value: intern(before),
+            });
           }
           continue;
         }
         const beforeCanonical = hadBefore ? intern(before) : undefined;
         if (hadBefore && same(beforeCanonical, after)) continue; // netted out
-        recorder.patches.push({ kind: 'record.set', path, key, value: after });
+        recorder.patches.push({ kind: 'record.set', path: path!, key, value: after });
         recorder.inverse.unshift(
           hadBefore && beforeCanonical !== undefined
-            ? { kind: 'record.set', path, key, value: beforeCanonical }
-            : { kind: 'record.delete', path, key },
+            ? { kind: 'record.set', path: path!, key, value: beforeCanonical }
+            : { kind: 'record.delete', path: path!, key },
         );
       } else if (hadBefore) {
-        recorder.patches.push({ kind: 'record.delete', path, key });
-        recorder.inverse.unshift({ kind: 'record.set', path, key, value: intern(before) });
+        recorder.patches.push({ kind: 'record.delete', path: path!, key });
+        recorder.inverse.unshift({
+          kind: 'record.set',
+          path: path!,
+          key,
+          value: intern(before),
+        });
       }
     }
   }
   return state.result;
 }
 
-function finalizeSequence(
-  state: ArrayState | ListState,
-  items: unknown[],
-  resolvedBaseOf: () => unknown[],
-  makeResult: (resolved: unknown[]) => unknown,
+function finalizeArray(
+  state: ArrayState,
+  path: PatchPath | null,
+  recorder: PatchRecorder | undefined,
+): unknown {
+  const copy = state.copy!;
+  const emitting = recorder !== undefined && path !== null;
+  const opsMode = state.ops !== null;
+
+  if (emitting && opsMode) emitSeqOps(state.ops!, path!, recorder);
+
+  const accInfo = _accOf(state.base);
+  const profile = opsMode ? seqTailProfile(state.ops!, state.base.length) : null;
+
+  if (accInfo !== undefined && profile !== null && profile.finalLen === copy.length) {
+    // Fast path — stable positions: delta-update the cached accumulator,
+    // resolving only touched slots in place on the copy. O(touched).
+    const L = state.base.length;
+    const L2 = copy.length;
+    const minL = Math.min(L, L2);
+    const assignedIdx = profile.setIdx;
+    let acc = accInfo.a | 0;
+    const touched = new Set(assignedIdx);
+    if (state.drafted !== null) for (const i of state.drafted) touched.add(i);
+    for (const i of touched) {
+      if (i >= minL) continue; // dropped tail / appended region (below)
+      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
+      const resolved = resolve(copy[i], childPath, recorder);
+      copy[i] = resolved;
+      acc =
+        (acc +
+          Math.imul(internHash(resolved) - internHash(state.base[i]), _powP(i))) |
+        0;
+    }
+    if (L2 > L) {
+      for (let i = L; i < L2; i++) {
+        const resolved = resolve(copy[i], null, recorder);
+        copy[i] = resolved;
+        acc = (acc + Math.imul(internHash(resolved), _powP(i))) | 0;
+      }
+    } else {
+      for (let i = L2; i < L; i++) {
+        acc = (acc - Math.imul(internHash(state.base[i]), _powP(i))) | 0;
+      }
+    }
+    acc = acc >>> 0;
+    state.result = _internPrehashed(copy, _arrayHashOf(L2, acc), acc, L2);
+    return state.result;
+  }
+
+  // Slow path: resolve everything, intern; net diff when intent was lost.
+  const resolved = new Array<unknown>(copy.length);
+  for (let i = 0; i < copy.length; i++) {
+    const st = stateOf(copy[i]);
+    const childPath =
+      emitting && opsMode && st !== undefined && !st.finalized ? [...path!, i] : null;
+    resolved[i] = resolve(copy[i], childPath, recorder);
+  }
+  state.result = intern(resolved);
+  if (emitting && !opsMode) {
+    // Array.from (not .map): the base may be frozen — see copyArr.
+    emitSeqDiff(
+      Array.from(state.base, (v) => intern(v)),
+      resolved,
+      path!,
+      recorder,
+    );
+  }
+  return state.result;
+}
+
+function finalizeList(
+  state: ListState,
   path: PatchPath | null,
   recorder: PatchRecorder | undefined,
 ): unknown {
   const emitting = recorder !== undefined && path !== null;
-  const opsMode = emitting && state.ops !== null;
+  if (emitting) emitSeqOps(state.ops, path!, recorder);
 
-  // 1) Structural intent first: replay the op log (positions from the log,
-  //    operand refs resolved to canonical — later mutations of inserted
-  //    drafts are reflected, consistently, in both directions).
-  if (opsMode) {
-    for (const op of state.ops!) {
-      if (op.t === 'set') {
-        recorder.patches.push({
-          kind: 'list.set',
-          path: path!,
-          index: op.i,
-          value: resolve(op.value, null, undefined),
-        });
-        recorder.inverse.unshift({
-          kind: 'list.set',
-          path: path!,
-          index: op.i,
-          value: restoreValue(op.old),
-        });
-      } else {
-        recorder.patches.push({
-          kind: 'list.splice',
-          path: path!,
-          index: op.i,
-          remove: op.rc,
-          insert: op.inserted.map((r) => resolve(r, null, undefined)),
-        });
-        recorder.inverse.unshift({
-          kind: 'list.splice',
-          path: path!,
-          index: op.i,
-          remove: op.inserted.length,
-          insert: op.removed.map(restoreValue),
-        });
-      }
+  const assignedIdx = new Set<number>();
+  for (const op of state.ops) if (op.t === 'set') assignedIdx.add(op.i);
+
+  if (state.items === null) {
+    // Virtual mode: replay point edits and the appended tail onto the base
+    // persistently — O(edits · log n), no materialization ever happened.
+    let result = state.base;
+    for (const [i, v] of state.vEdits) {
+      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
+      result = result.set(i, resolve(v, childPath, recorder));
     }
+    for (const v of state.vTail) {
+      result = result.push(resolve(v, null, recorder));
+    }
+    state.result = result;
+    return result;
   }
 
-  // 2) Resolve the final items. In ops mode, an item that is still an
-  //    unfinalized draft was mutated in place (never assigned): its deeper
-  //    patches are emitted at its final index — valid after the ops above.
+  const items = state.items;
+  const profile = seqTailProfile(state.ops, state.base.length);
+  if (profile !== null && profile.finalLen === items.length) {
+    // Materialized but positions stable: replay persistently all the same.
+    const L = state.base.length;
+    const L2 = items.length;
+    const minL = Math.min(L, L2);
+    let result = state.base;
+    const touched = new Set(assignedIdx);
+    for (const i of state.drafted) touched.add(i);
+    for (const i of touched) {
+      if (i >= minL) continue;
+      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
+      result = result.set(i, resolve(items[i], childPath, recorder));
+    }
+    for (let k = L2; k < L; k++) result = result.pop();
+    for (let i = L; i < L2; i++) result = result.push(resolve(items[i], null, recorder));
+    state.result = result;
+    return result;
+  }
+
+  // Mid-sequence splices: rebuild from the resolved items.
   const resolved = new Array<unknown>(items.length);
   for (let i = 0; i < items.length; i++) {
     const st = stateOf(items[i]);
-    const childPath = opsMode && st !== undefined && !st.finalized ? [...path!, i] : null;
+    const childPath =
+      emitting && st !== undefined && !st.finalized ? [...path!, i] : null;
     resolved[i] = resolve(items[i], childPath, recorder);
   }
-  state.result = makeResult(resolved);
-
-  // 3) Intent lost: net index diff plus one tail splice.
-  if (emitting && !opsMode) {
-    const base = resolvedBaseOf();
-    const common = Math.min(base.length, resolved.length);
-    for (let i = 0; i < common; i++) {
-      if (!same(base[i], resolved[i])) {
-        recorder.patches.push({ kind: 'list.set', path: path!, index: i, value: resolved[i] });
-        recorder.inverse.unshift({ kind: 'list.set', path: path!, index: i, value: base[i] });
-      }
-    }
-    if (resolved.length > common) {
-      recorder.patches.push({
-        kind: 'list.splice',
-        path: path!,
-        index: common,
-        remove: 0,
-        insert: resolved.slice(common),
-      });
-      recorder.inverse.unshift({
-        kind: 'list.splice',
-        path: path!,
-        index: common,
-        remove: resolved.length - common,
-        insert: [],
-      });
-    } else if (base.length > common) {
-      recorder.patches.push({
-        kind: 'list.splice',
-        path: path!,
-        index: common,
-        remove: base.length - common,
-        insert: [],
-      });
-      recorder.inverse.unshift({
-        kind: 'list.splice',
-        path: path!,
-        index: common,
-        remove: 0,
-        insert: base.slice(common),
-      });
-    }
-  }
+  state.result = ValueList.from(resolved);
   return state.result;
 }
 

@@ -56,6 +56,55 @@ function scramble(h: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Accumulator forms — the incremental-hashing contract
+//
+// Records and arrays hash through an ACCUMULATOR that is a sum (mod 2³²) of
+// independent per-entry terms, so a canonical base's cached accumulator can
+// be delta-updated in O(changes) by produce's finalize:
+//
+//   record: acc = Σ entryTerm(key, valueHash)          (commutative)
+//   array:  acc = Σ elementTerm(i, elementHash)        (positional, P odd)
+//
+// and the final hash folds in the count/length. These helpers are the single
+// source of truth for both the from-scratch and the incremental paths.
+// ---------------------------------------------------------------------------
+
+const P = 0x9e3779b1 | 0; // odd (golden-ratio derived) — positional multiplier
+
+/** @internal P^n mod 2³² via square-and-multiply. */
+export function _powP(n: number): number {
+  let result = 1;
+  let base = P;
+  let e = n >>> 0;
+  while (e > 0) {
+    if (e & 1) result = Math.imul(result, base);
+    base = Math.imul(base, base);
+    e >>>= 1;
+  }
+  return result | 0;
+}
+
+/** @internal One record entry's accumulator term. */
+export function _entryTerm(key: string, valueHash: number): number {
+  return scramble(mix(hashString(key), valueHash));
+}
+
+/** @internal One array element's accumulator term. */
+export function _elementTerm(index: number, elementHash: number): number {
+  return Math.imul(elementHash, _powP(index));
+}
+
+/** @internal Fold a record accumulator into the final hash. */
+export function _recordHashOf(keyCount: number, acc: number): number {
+  return mix(mix(TAG_OBJECT, keyCount), acc >>> 0);
+}
+
+/** @internal Fold an array accumulator into the final hash. */
+export function _arrayHashOf(length: number, acc: number): number {
+  return mix(mix(TAG_ARRAY, length), acc >>> 0);
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostics
 // ---------------------------------------------------------------------------
 
@@ -142,13 +191,16 @@ export function deepHash(value: unknown): number {
     if (cached !== undefined) return cached;
   }
 
-  // Array — order-dependent
+  // Array — order-dependent positional accumulator (see the accumulator
+  // contract above: this form is what makes array hashes delta-updatable).
   if (Array.isArray(obj)) {
-    let h = mix(TAG_ARRAY, obj.length);
+    let acc = 0;
+    let pPow = 1;
     for (let i = 0; i < obj.length; i++) {
-      h = mix(h, deepHash(obj[i]));
+      acc = (acc + Math.imul(deepHash(obj[i]), pPow)) | 0;
+      pPow = Math.imul(pPow, P);
     }
-    return h;
+    return _arrayHashOf(obj.length, acc);
   }
 
   // [hashCode] symbol — class-defined hash (takes priority over registry).
@@ -175,8 +227,35 @@ export function deepHash(value: unknown): number {
   for (const k in rec) {
     const v = rec[k];
     if (v === undefined) continue; // undefined-valued key ≡ absent (matches deepEqual)
-    acc = (acc + scramble(mix(hashString(k), deepHash(v)))) >>> 0;
+    acc = (acc + _entryTerm(k, deepHash(v))) >>> 0;
     keyCount++;
   }
-  return mix(mix(TAG_OBJECT, keyCount), acc);
+  return _recordHashOf(keyCount, acc);
+}
+
+/**
+ * @internal deepHash for a plain record or array, also returning the raw
+ * accumulator (and defined-key count for records) so canonicalization can
+ * cache them for incremental finalize hashing.
+ */
+export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: number } {
+  if (Array.isArray(obj)) {
+    let acc = 0;
+    let pPow = 1;
+    for (let i = 0; i < obj.length; i++) {
+      acc = (acc + Math.imul(deepHash(obj[i]), pPow)) | 0;
+      pPow = Math.imul(pPow, P);
+    }
+    return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
+  }
+  const rec = obj as Record<string, unknown>;
+  let acc = 0;
+  let n = 0;
+  for (const k in rec) {
+    const v = rec[k];
+    if (v === undefined) continue;
+    acc = (acc + _entryTerm(k, deepHash(v))) >>> 0;
+    n++;
+  }
+  return { h: _recordHashOf(n, acc), acc, n };
 }
