@@ -339,7 +339,7 @@ the contract; performance is the implementation.** Four rules:
 2. **Classes only where JavaScript lacks the primitive** — sets and value-keyed
    maps — and even then duck-typed to the native readonly interfaces.
 3. **Optimized types are opt-ins**, chosen knowingly for measured hot paths
-   (`ValueList`, `InternString`).
+   (`ValueList`, `InternedString`).
 4. **Optimizations are invisible.** Same syntax, same semantics; if a user can
    tell an optimization is on other than by timing it, it's a bug.
 
@@ -365,12 +365,12 @@ allocate nothing; incremental hashing makes successor hashes O(1)).
   well as `get()` (stored `undefined` is legal in maps and must not alias
   absence on hash collisions — a fixed bug).
 
-The representation-visibility rule: **`ValueList.array`/`InternString.value`
+The representation-visibility rule: **`ValueList.array`/`InternedString.value`
 are public because frozen arrays and primitive strings are *genuinely*
 enforceable; `#map`/`#set` are private because Map/Set immutability is not.**
 The representation is public exactly where the platform can protect it.
 
-### 6.3 `ValueList` / `InternString` — opt-in optimizations
+### 6.3 `ValueList` / `InternedString` — opt-in optimizations
 
 `intern([1, 2])` already yields a canonical frozen `===`-comparable plain
 array; strings natively have value semantics. What the wrappers add is purely
@@ -722,8 +722,10 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   type names name model kinds; mechanism vocabulary (interning) belongs to
   operations (`intern`, pools, the `interned` symbol). "List", not "Array":
   names may not lie about their kind — the class has no subscript access, and
-  "list" is the model kind. `InternString` deliberately keeps its name: its
+  "list" is the model kind. The string wrapper keeps a mechanism name: its
   value is the wrapped *string* (not a distinct kind), so a `Value*` name
   would overclaim — the class *is* the mechanism (cached hash, pooled
-  identity), and its name honestly says so. `HashMap` stays: a mutable lookup
-  structure named by mechanism is the established convention.
+  identity), and its name honestly says so. (Initially kept verbatim as
+  `InternString`; renamed `InternedString` shortly after — the adjective is
+  the grammatical form, "an interned string".) `HashMap` stays: a mutable
+  lookup structure named by mechanism is the established convention.

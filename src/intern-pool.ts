@@ -156,7 +156,7 @@ if (typeof FinalizationRegistry === 'function') {
  * Members are retained via `WeakRef` and reclaimed by the shared incremental
  * sweeper (see the module header), so an instance leaves the pool once
  * nothing else references it. This backs the persistent
- * {@link ValueList}/{@link ValueMap}/{@link ValueSet}/{@link InternString}
+ * {@link ValueList}/{@link ValueMap}/{@link ValueSet}/{@link InternedString}
  * collections and any consumer value type (see {@link createInternPool}).
  *
  * The high-level entry point is {@link InternPool.intern}; the lower-level

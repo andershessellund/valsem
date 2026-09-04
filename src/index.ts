@@ -4,7 +4,7 @@
 // Structural equality (`deepEqual`), companion hashing (`deepHash`), and global
 // interning (`intern` — structurally-equal values collapse to a single `===`
 // canonical instance), plus value collections (`ValueList`/`ValueMap`/
-// `ValueSet`/`InternString`, `HashMap`) and the extension points
+// `ValueSet`/`InternedString`, `HashMap`) and the extension points
 // (`equals`/`hashCode`/`interned` symbols, `createInternPool`) that let any
 // type participate.
 //
@@ -21,7 +21,7 @@ export { intern, createInterner, internHash, internEqual } from './intern.js';
 export { ValueList } from './value-list.js';
 export { ValueMap } from './value-map.js';
 export { ValueSet } from './value-set.js';
-export { InternString } from './intern-string.js';
+export { InternedString } from './interned-string.js';
 export { createInternPool } from './intern-pool.js';
 export type { InternPool } from './intern-pool.js';
 export { configureHasher, createMarvin32Hasher, getHashSeed } from './hasher.js';

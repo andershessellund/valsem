@@ -1,29 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { InternString } from './intern-string.js';
+import { InternedString } from './interned-string.js';
 import { hashCode, interned } from './deep-equal.js';
 
-describe('InternString', () => {
+describe('InternedString', () => {
   it('equal strings produce identical instances', () => {
-    expect(InternString.for('hello')).toBe(InternString.for('hello'));
+    expect(InternedString.for('hello')).toBe(InternedString.for('hello'));
   });
 
   it('different strings produce distinct instances', () => {
-    expect(InternString.for('hello')).not.toBe(InternString.for('world'));
+    expect(InternedString.for('hello')).not.toBe(InternedString.for('world'));
   });
 
   it('empty string is canonical', () => {
-    expect(InternString.for('')).toBe(InternString.for(''));
+    expect(InternedString.for('')).toBe(InternedString.for(''));
   });
 
   it('exposes value and toString', () => {
-    const s = InternString.for('abc');
+    const s = InternedString.for('abc');
     expect(s.value).toBe('abc');
     expect(s.toString()).toBe('abc');
     expect(`${s}`).toBe('abc');
   });
 
   it('exposes [hashCode] as number and [interned]', () => {
-    const s = InternString.for('abc');
+    const s = InternedString.for('abc');
     expect(typeof s[hashCode]).toBe('number');
     expect(s[interned]).toBe(true);
   });

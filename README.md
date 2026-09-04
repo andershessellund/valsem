@@ -41,7 +41,7 @@ means a lot of boilerplate.
   canonical instance, so **value equality becomes `===`** and hashing becomes an
   O(1) cache read.
 - **Value collections** — `HashMap` keyed by structure, and the persistent
-  `ValueList` / `ValueMap` / `ValueSet` / `InternString` whose *instances*
+  `ValueList` / `ValueMap` / `ValueSet` / `InternedString` whose *instances*
   are canonical (equal contents ⟹ same reference).
 - **Extension points** — the `equals` / `hashCode` / `interned` symbols,
   `deepEqual.register`, and `createInternPool` let any type become a first‑class
@@ -200,7 +200,7 @@ semantics. Values are stored as‑is.
 
 ### Persistent collections — canonical *instances*
 
-`ValueList`, `ValueMap`, `ValueSet`, and `InternString` are **immutable**
+`ValueList`, `ValueMap`, `ValueSet`, and `InternedString` are **immutable**
 collections whose *instances* are interned: two with equal contents are the same
 reference (`===`), carry a precomputed `[hashCode]`, and can be compared,
 deduplicated, and used as keys for free.
@@ -236,12 +236,12 @@ make a `Map` or `Set` immutable at runtime, so handing one out would let a
 single accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
-`ValueList` and `InternString` do expose their data — `array` and `value` —
+`ValueList` and `InternedString` do expose their data — `array` and `value` —
 because there the platform enforces immutability for real: the array is deeply
 `Object.freeze`‑frozen and the string is a primitive. The rule: the
 representation is public exactly where the runtime can actually protect it.
 
-`InternString` wraps a string and precomputes its hash once, turning repeated
+`InternedString` wraps a string and precomputes its hash once, turning repeated
 `deepHash`/key lookups on the same string into O(1) reads.
 
 ---
@@ -394,7 +394,7 @@ built on it agrees on one definition of what each kind of thing *is*:
 | array / `ValueList` | the length and the **ordered** element sequence |
 | `ValueMap` | the **unordered** set of `(key, value)` entries (`===` refs) |
 | `ValueSet` | the **unordered** set of elements (`===` refs) |
-| `InternString` | the wrapped string |
+| `InternedString` | the wrapped string |
 | class with `[equals]` / registered type | whatever its handlers say |
 
 ### Iteration order is not part of the value
@@ -451,7 +451,7 @@ position or intent makes it meaningful there:
   arrays and `ValueList` are ordered. See
   [Iteration order is not part of the value](#iteration-order-is-not-part-of-the-value).
 - **Interned values are frozen** — and every `ValueList`/`ValueMap`/`ValueSet`/
-  `InternString` instance is born frozen. Read freely; never mutate.
+  `InternedString` instance is born frozen. Read freely; never mutate.
   Produce new values instead. Registered `{ immutable: true }` types (Temporal,
   your own value types) are pooled *without* freezing: they are immutable by
   contract, and freezing a type you do not own can break it.
@@ -487,7 +487,7 @@ position or intent makes it meaningful there:
 | `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds). |
 | `internEqual` / `internHash` | function | Equality / hashing that exploit the intern cache. |
 | `HashMap` | class | Mutable map with structural (interned) keys. |
-| `ValueList` / `ValueMap` / `ValueSet` / `InternString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
+| `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt‑in value‑semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |

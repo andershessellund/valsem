@@ -55,7 +55,7 @@ export const hashCode: unique symbol = Symbol.for('valsem.hashCode') as any;
  * When an object exposes `[interned] === true`, {@link intern} returns it
  * immediately without pool lookup. Persistent collections
  * ({@link ValueList}, {@link ValueMap}, {@link ValueSet},
- * {@link InternString}) set this flag on their prototype so every
+ * {@link InternedString}) set this flag on their prototype so every
  * instance is recognised as canonical for free.
  */
 export const interned: unique symbol = Symbol.for('valsem.interned') as any;
