@@ -2,8 +2,13 @@
 // deepEqual — tests
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+
+// The mutable-builtin comparisons below intentionally trigger the development
+// expectation warnings (tested in deep-equal-warnings.test.ts) — keep the
+// suite output clean.
+vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 describe('deepEqual', () => {
   // --- Primitives ---

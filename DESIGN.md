@@ -834,6 +834,16 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **The first-contact gap closed: development warnings on mutable-builtin
+  comparison** — the totality settlement (below) left one real hazard:
+  `deepEqual(new Set(), new Set()) === false` is correct and silent, and a
+  newcomer's first probe meets it. Resolution consistent with both prior
+  settlements: LOUD WITHOUT THROWING — comparing two distinct instances of
+  the same mutable-builtin type logs a once-per-type development warning
+  (the shared teaching text, plus the tier-1 registration pointer), gated
+  on NODE_ENV via structural globalThis access (the module stays
+  runtime-neutral), fired only on the cold class-instance fallthrough.
+  Totality, memo-gate safety, and production silence all intact.
 - **Should deepEqual throw on incomparable input? No — settled** — asked
   directly and answered on three grounds. Principled: for mutable objects
   reference equality IS the correct equality (substitutability — two Dates

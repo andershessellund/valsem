@@ -160,6 +160,46 @@ export function _mutableBuiltinReason(ctor: Function | undefined): string | unde
 }
 
 // ---------------------------------------------------------------------------
+// Development expectation guard
+//
+// deepEqual is deliberately total: two distinct mutable-builtin instances
+// compare UNEQUAL by reference, and that answer is correct (substitutability
+// — see the README). But it is also the single most surprising cell for
+// newcomers expecting lodash-style content comparison. So in development,
+// the exact diverging case — two distinct instances of the same
+// mutable-builtin type — warns once per type with the teaching text. Loud
+// without throwing: the totality contract and the memo-gate use cases are
+// untouched.
+// ---------------------------------------------------------------------------
+
+// Structural globalThis access — this leaf module stays runtime-neutral and
+// does not compile against Node or DOM ambient globals (the hasher's Crypto
+// precedent).
+const _g = globalThis as {
+  process?: { env?: Record<string, string | undefined> };
+  console?: { warn?: (message: string) => void };
+};
+
+const DEV = _g.process?.env?.NODE_ENV !== 'production';
+
+const warnedMutableCompare = new Set<Function>();
+
+/** @internal Test-only: allow the once-per-type warnings to fire again. */
+export function _resetEqualityWarnings(): void {
+  warnedMutableCompare.clear();
+}
+
+function warnMutableComparison(ctor: Function, reason: string): void {
+  if (!DEV || warnedMutableCompare.has(ctor) || _g.console?.warn === undefined) return;
+  warnedMutableCompare.add(ctor);
+  _g.console.warn(
+    `valsem: deepEqual compared two distinct ${ctor.name} instances — they compare by ` +
+      `REFERENCE, because ${reason}. To compare them by content anyway, register handlers ` +
+      `with deepEqual.register(${ctor.name}, …). (Development-only warning, once per type.)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // deepEqual
 // ---------------------------------------------------------------------------
 
@@ -247,7 +287,15 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // opposite by design: storing `undefined` there is intentional, and IS
   // distinct from absence.)
   const protoA = Object.getPrototypeOf(a);
-  if (protoA !== Object.prototype && protoA !== null) return false;
+  if (protoA !== Object.prototype && protoA !== null) {
+    // Cold fallthrough: same-type mutable-builtin pairs get the development
+    // expectation warning (distinct instances, correct-but-surprising false).
+    if (a.constructor === b.constructor) {
+      const reason = MUTABLE_BUILTINS.get(a.constructor as Function);
+      if (reason !== undefined) warnMutableComparison(a.constructor as Function, reason);
+    }
+    return false;
+  }
   const protoB = Object.getPrototypeOf(b);
   if (protoB !== Object.prototype && protoB !== null) return false;
 

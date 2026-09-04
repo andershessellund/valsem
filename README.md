@@ -123,6 +123,11 @@ at the boundaries that admit data into value‑land (`deepHash`, `intern`, the
 collections, `produce`), each error naming the immutable replacement. If you
 need to know why two things are unequal, hash one.
 
+Because the reference answer is correct *and* famously surprising, comparing
+two **distinct instances of the same mutable built‑in** logs a one‑time
+development warning naming the replacement (`new Set()` vs `new Set()` is the
+classic first encounter). Production builds stay silent; nothing ever throws.
+
 If your application truly wants, say, Date‑by‑time equality, the escape hatch
 exists and is **contained**: `deepEqual.register(Date, (a, b) => a.getTime()
 === b.getTime(), d => d.getTime() >>> 0)` makes `deepEqual`/`deepHash` answer
