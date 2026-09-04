@@ -80,6 +80,61 @@ describe('produce — plain objects and arrays', () => {
     expect(produce(base, (d) => void d.sort((a, b) => b - a))).toBe(intern([3, 2, 1]));
   });
 
+  it('virtual array drafts read, iterate, and search without materializing', () => {
+    const base = intern([1, 2, 3]) as number[];
+    const next = produce(base, (d) => {
+      d[1] = 9;
+      d.push(5);
+      expect(d.length).toBe(4);
+      expect(d[1]).toBe(9);
+      expect(d[3]).toBe(5);
+      expect([...d]).toEqual([1, 9, 3, 5]); // iterator through virtual reads
+      expect(d.indexOf(9)).toBe(1);
+      expect(d.includes(5)).toBe(true);
+      const seen: number[] = [];
+      d.forEach((v) => seen.push(v));
+      expect(seen).toEqual([1, 9, 3, 5]);
+      expect(2 in d).toBe(true);
+      expect(9 in d).toBe(false);
+    });
+    expect(next).toBe(intern([1, 9, 3, 5]));
+  });
+
+  it('ownKeys-style reads materialize and stay correct', () => {
+    const base = intern([1, 2]) as number[];
+    const next = produce(base, (d) => {
+      d.push(3);
+      expect(Object.keys(d)).toEqual(['0', '1', '2']);
+      d[0] = 7; // mutate after materialization
+    });
+    expect(next).toBe(intern([7, 2, 3]));
+  });
+
+  it('mixes child drafts with virtual tail ops', () => {
+    const base = intern({ arr: [{ n: 1 }, { n: 2 }] }) as { arr: { n: number }[] };
+    const next = produce(base, (d) => {
+      d.arr[0]!.n = 10;
+      d.arr.push({ n: 3 });
+      d.arr.pop();
+      d.arr.push({ n: 4 });
+    });
+    expect(next).toBe(intern({ arr: [{ n: 10 }, { n: 2 }, { n: 4 }] }));
+    expect(next.arr[1]).toBe(base.arr[1]);
+  });
+
+  it('repeated identical produces return the identical instance', () => {
+    const base = intern({ arr: Array.from({ length: 100 }, (_, i) => ({ id: i, v: 0 })) });
+    const results = new Set<unknown>();
+    for (let i = 0; i < 20; i++) {
+      results.add(
+        produce(base, (d) => {
+          d.arr[50]!.v = i % 3;
+        }),
+      );
+    }
+    expect(results.size).toBe(3); // one canonical instance per distinct state
+  });
+
   it('drafts objects inside arrays', () => {
     const base = intern([{ n: 1 }, { n: 2 }]) as { n: number }[];
     const next = produce(base, (d) => {

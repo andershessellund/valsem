@@ -669,7 +669,7 @@ frozen-aware copies):
 | 1000-key record, one set | **180 µs** | 208 µs | 208 µs | ahead; spread-copy floor is 153 µs |
 | 10k plain array, one item edit | 28 µs | 575 µs / 3.0 µs (no freeze) | 3.4 µs | 8× behind the unfrozen libs — the canonicality floor (frozen-base copy ≈ 9 µs, freeze+hash+pool the rest); `ValueList` is the designed answer |
 | 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
-| recurrent states (pool hits) | 48 µs | 532 µs | 2.9 µs | dedup pays here: results are `===` pooled instances |
+| recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | **fastest — and the only `===` results.** Transition memoization: a successor is a pure function of (canonical base, exact delta), so a repeat produce is O(touched) with no copy, no hash walk, no compare |
 
 The historical 18×→2–3× target is met and beaten where the design says hot
 data belongs (the collections); flat plain arrays keep an honest 8× novelty
@@ -787,6 +787,24 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Transition memoization + virtual array drafts (Phase-2, second pass)** —
+  the recurrent arena was 17× behind mutative (48 µs vs 2.9) because
+  recognizing a recurring successor cost O(n): a draft-time copy of the 10k
+  base plus a frozen-read-taxed structural compare on the pool hit. Two
+  changes: plain-array drafts gained DraftList's virtual mode (point edits +
+  appended tail; push/pop/index ops never copy; iteration and read-only
+  methods work virtually via prototype dispatch through the traps; only
+  ownKeys/mid-splices/sort materialize), and finalize now memoizes
+  **transitions** — `WeakMap<canonical base, recent {delta, WeakRef
+  successor}>` — sound because a successor is a pure function of (base
+  identity, exact delta), so a repeat produce verifies O(touched) with no
+  hash trust and builds nothing. Result: recurrent 48 µs → **1.5 µs — the
+  fastest in the arena, 2× ahead of mutative — returning `===` pooled
+  instances**. Two instructive misses en route: the bench originally
+  discarded its results, so the weakly-pooled states died under GC and every
+  lookup missed (real recurrence means the states are held — the bench now
+  holds them); and a transition cap of 8 thrashed against the 10-state cycle
+  (now 16).
 - **Phase-2 performance pass, measure-first** — built the in-repo bench
   against immer/mutative before touching code. Changes: array deepHash moved
   to a positional polynomial accumulator (the chained mix could not be

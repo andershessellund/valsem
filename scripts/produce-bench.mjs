@@ -216,26 +216,31 @@ function makeItems(n) {
 
 // --- recurrent -------------------------------------------------------------
 {
-  console.log(`\nrecurrent — big-array arena, states cycle through 10 configurations`);
+  console.log(
+    `\nrecurrent — big-array arena, 10 configurations cycling, results HELD (as a real app holds recurring states)`,
+  );
   const mid = N >> 1;
   const valsemBase = intern({ arr: makeItems(N) });
+  const heldV = new Array(10);
   bench('valsem produce', (i) => {
-    valsemProduce(valsemBase, (d) => {
+    heldV[i % 10] = valsemProduce(valsemBase, (d) => {
       d.arr[mid].value = i % 10;
     });
   });
 
   setAutoFreeze(true);
   const immerBase = immerProduce({ arr: makeItems(N) }, () => {});
+  const heldI = new Array(10);
   bench('immer', (i) => {
-    immerProduce(immerBase, (d) => {
+    heldI[i % 10] = immerProduce(immerBase, (d) => {
       d.arr[mid].value = i % 10;
     });
   });
 
   const mutativeBase = { arr: makeItems(N) };
+  const heldM = new Array(10);
   bench('mutative', (i) => {
-    mutativeCreate(mutativeBase, (d) => {
+    heldM[i % 10] = mutativeCreate(mutativeBase, (d) => {
       d.arr[mid].value = i % 10;
     });
   });

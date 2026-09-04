@@ -125,6 +125,13 @@ interface ObjectState extends BaseState {
 interface ArrayState extends BaseState {
   type: 'array';
   base: unknown[];
+  /**
+   * Virtual mode (copy === null): point edits over the base plus an appended
+   * tail — index reads/writes and push/pop never copy the base. A structural
+   * op with unstable positions (shift/unshift/splice/sort/…) materializes.
+   */
+  vEdits: Map<number, unknown>;
+  vTail: unknown[];
   copy: unknown[] | null;
   /** Recorded ops (intent); null once an uncapturable mutation occurred. */
   ops: SeqOp[] | null;
@@ -374,10 +381,6 @@ function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): Ob
 // Plain-array drafts (Proxy + method interception)
 // ---------------------------------------------------------------------------
 
-function latestArr(state: ArrayState): unknown[] {
-  return state.copy ?? state.base;
-}
-
 /**
  * Copy an array that may be frozen. V8's `slice` fast path does not cover
  * frozen-elements arrays (measured 65× slower); spread does.
@@ -386,39 +389,66 @@ function copyArr<T>(a: readonly T[]): T[] {
   return Object.isFrozen(a) ? [...a] : (a as T[]).slice();
 }
 
-function prepareArrCopy(state: ArrayState): void {
-  if (state.copy === null) {
-    state.copy = copyArr(state.base);
-  }
+function arrLen(state: ArrayState): number {
+  return state.copy !== null ? state.copy.length : state.base.length + state.vTail.length;
 }
 
-/** Mutating methods captured as intent. */
+function arrRead(state: ArrayState, i: number): unknown {
+  if (state.copy !== null) return state.copy[i];
+  if (i < state.base.length) {
+    return state.vEdits.has(i) ? state.vEdits.get(i) : state.base[i];
+  }
+  return state.vTail[i - state.base.length];
+}
+
+/** Fold the virtual edits/tail into a materialized working copy. */
+function materializeArr(state: ArrayState): unknown[] {
+  if (state.copy === null) {
+    const c = copyArr(state.base);
+    for (const [i, v] of state.vEdits) c[i] = v;
+    c.push(...state.vTail);
+    state.copy = c;
+    state.vEdits.clear();
+    state.vTail.length = 0;
+  }
+  return state.copy;
+}
+
+/** Mutating methods captured as intent. push/pop stay virtual; the rest materialize. */
 const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> = {
   push(state, args) {
-    const at = state.copy!.length;
-    state.copy!.push(...args);
+    const at = arrLen(state);
     state.ops?.push({ t: 'splice', i: at, rc: 0, inserted: args.slice(), removed: [] });
-    return state.copy!.length;
+    if (state.copy !== null) state.copy.push(...args);
+    else state.vTail.push(...args);
+    return at + args.length;
   },
   pop(state) {
-    if (state.copy!.length === 0) return undefined;
-    const removed = state.copy!.pop();
-    state.ops?.push({ t: 'splice', i: state.copy!.length, rc: 1, inserted: [], removed: [removed] });
+    const len = arrLen(state);
+    if (len === 0) return undefined;
+    let removed: unknown;
+    if (state.copy !== null) removed = state.copy.pop();
+    else if (state.vTail.length > 0) removed = state.vTail.pop();
+    else removed = materializeArr(state).pop();
+    state.ops?.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
     return removed;
   },
   shift(state) {
-    if (state.copy!.length === 0) return undefined;
-    const removed = state.copy!.shift();
+    const copy = materializeArr(state);
+    if (copy.length === 0) return undefined;
+    const removed = copy.shift();
     state.ops?.push({ t: 'splice', i: 0, rc: 1, inserted: [], removed: [removed] });
     return removed;
   },
   unshift(state, args) {
-    state.copy!.unshift(...args);
+    const copy = materializeArr(state);
+    copy.unshift(...args);
     state.ops?.push({ t: 'splice', i: 0, rc: 0, inserted: args.slice(), removed: [] });
-    return state.copy!.length;
+    return copy.length;
   },
   splice(state, args) {
-    const len = state.copy!.length;
+    const copy = materializeArr(state);
+    const len = copy.length;
     let start = Math.trunc((args[0] as number) ?? 0);
     start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
     const rc =
@@ -426,7 +456,7 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
         ? len - start
         : Math.min(Math.max(Math.trunc(args[1] as number), 0), len - start);
     const items = args.slice(2);
-    const removed = state.copy!.splice(start, rc, ...items);
+    const removed = copy.splice(start, rc, ...items);
     state.ops?.push({
       t: 'splice',
       i: start,
@@ -451,7 +481,6 @@ const arrayTraps: ProxyHandler<object> = {
       if (captured !== undefined) {
         return (...args: unknown[]) => {
           for (const a of args) assertAssignable(a, state);
-          prepareArrCopy(state);
           markChanged(state);
           return captured(state, args);
         };
@@ -461,39 +490,46 @@ const arrayTraps: ProxyHandler<object> = {
           prop
         ]!;
         return (...args: unknown[]) => {
-          prepareArrCopy(state);
+          const copy = materializeArr(state);
           markChanged(state);
           state.ops = null; // intent lost — net diff at finalize
-          return fn.apply(state.copy!, args);
+          return fn.apply(copy, args);
         };
       }
     }
-    const source = latestArr(state);
-    if (prop === 'length') return source.length;
+    if (prop === 'length') return arrLen(state);
     if (typeof prop === 'symbol' || !/^\d+$/.test(prop)) {
-      return Reflect.get(source, prop, state.draft);
+      // Methods and symbols come off Array.prototype; index reads and length
+      // during their execution route back through these traps, so iteration
+      // and the read-only methods work virtually.
+      return Reflect.get(state.copy ?? state.base, prop, state.draft);
     }
     const index = Number(prop);
-    const value = source[index];
+    const value = arrRead(state, index);
     if (state.finalized || !isDraftable(value)) return value;
     if (value === state.base[index]) {
-      prepareArrCopy(state);
       (state.drafted ??= new Set()).add(index);
-      return (state.copy![index] = createChildDraft(value, state));
+      const child = createChildDraft(value, state);
+      if (state.copy !== null) state.copy[index] = child;
+      else state.vEdits.set(index, child);
+      return child;
     }
     return value;
   },
   has(target, prop) {
-    return prop in latestArr((target as [ArrayState])[0]!);
+    const state = (target as [ArrayState])[0]!;
+    if (typeof prop === 'string' && /^\d+$/.test(prop)) return Number(prop) < arrLen(state);
+    return prop in (state.copy ?? state.base);
   },
   ownKeys(target) {
-    return Reflect.ownKeys(latestArr((target as [ArrayState])[0]!));
+    // Needs the full key list — the one read that forces materialization.
+    return Reflect.ownKeys(materializeArr((target as [ArrayState])[0]!));
   },
   set(target, prop, value) {
     const state = (target as [ArrayState])[0]!;
     assertUnrevoked(state);
     if (prop === 'length') {
-      prepareArrCopy(state);
+      materializeArr(state);
       markChanged(state);
       state.ops = null;
       state.copy!.length = value as number;
@@ -503,17 +539,22 @@ const arrayTraps: ProxyHandler<object> = {
       throw new TypeError(`valsem: arrays take integer indices, got ${String(prop)}`);
     }
     const index = Number(prop);
-    const current = latestArr(state)[index];
-    if (same(value, current) && index < latestArr(state).length) return true;
+    const len = arrLen(state);
+    const current = index < len ? arrRead(state, index) : undefined;
+    if (same(value, current) && index < len) return true;
     assertAssignable(value, state);
-    prepareArrCopy(state);
     markChanged(state);
-    if (index >= state.copy!.length) {
-      state.ops = null; // sparse growth: net diff
-    } else {
-      state.ops?.push({ t: 'set', i: index, value, old: state.copy![index] });
+    if (index >= len) {
+      // Sparse growth: net diff.
+      const copy = materializeArr(state);
+      state.ops = null;
+      copy[index] = value;
+      return true;
     }
-    state.copy![index] = value;
+    state.ops?.push({ t: 'set', i: index, value, old: current });
+    if (state.copy !== null) state.copy[index] = value;
+    else if (index < state.base.length) state.vEdits.set(index, value);
+    else state.vTail[index - state.base.length] = value;
     return true;
   },
   deleteProperty(target, prop) {
@@ -521,14 +562,29 @@ const arrayTraps: ProxyHandler<object> = {
     return arrayTraps.set!.call(this, target, prop, undefined, (target as [ArrayState])[0]!.draft);
   },
   getOwnPropertyDescriptor(target, prop) {
-    const owner = latestArr((target as [ArrayState])[0]!);
-    const desc = Reflect.getOwnPropertyDescriptor(owner, prop);
+    const state = (target as [ArrayState])[0]!;
+    if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+      const index = Number(prop);
+      if (index >= arrLen(state)) return undefined;
+      return {
+        writable: true,
+        configurable: true,
+        enumerable: true,
+        value: arrRead(state, index),
+      };
+    }
+    if (prop === 'length') {
+      return { writable: true, configurable: false, enumerable: false, value: arrLen(state) };
+    }
+    const desc = Reflect.getOwnPropertyDescriptor(state.copy ?? state.base, prop);
     if (!desc) return desc;
     return {
       writable: true,
-      configurable: prop !== 'length',
+      configurable: true,
       enumerable: desc.enumerable,
-      value: (owner as unknown as Record<string | symbol, unknown>)[prop],
+      value: (state.copy ?? (state.base as unknown as Record<string | symbol, unknown>))[
+        prop as never
+      ],
     };
   },
   getPrototypeOf() {
@@ -550,6 +606,8 @@ function createArrayDraft(base: unknown[], parent?: AnyState): ArrayState {
     finalized: false,
     revoked: false,
     base,
+    vEdits: new Map(),
+    vTail: [],
     copy: null,
     ops: [],
     drafted: null,
@@ -1280,57 +1338,155 @@ function finalizeObject(
   return state.result;
 }
 
+// ---------------------------------------------------------------------------
+// Transition memoization — repeat produces skip O(n) verification
+//
+// A successor is a pure function of (canonical base, exact delta). Caching a
+// few recent transitions per base makes recurrent states resolve in
+// O(touched): matching base identity + delta identity PROVES the result,
+// with no hash trust and no structural walk.
+// ---------------------------------------------------------------------------
+
+interface Transition {
+  h: number;
+  len: number;
+  keys: number[]; // touched base-region indices, ascending
+  vals: unknown[]; // their resolved canonical values
+  app: unknown[]; // resolved appended region
+  ref: WeakRef<object>;
+}
+
+const transitions = new WeakMap<object, Transition[]>();
+const TRANSITION_CAP = 16;
+
+function lookupTransition(
+  base: object,
+  h: number,
+  len: number,
+  keys: number[],
+  vals: unknown[],
+  app: unknown[],
+): object | undefined {
+  const list = transitions.get(base);
+  if (list === undefined) return undefined;
+  for (let t = 0; t < list.length; t++) {
+    const entry = list[t]!;
+    if (
+      entry.h !== h ||
+      entry.len !== len ||
+      entry.keys.length !== keys.length ||
+      entry.app.length !== app.length
+    ) {
+      continue;
+    }
+    let ok = true;
+    for (let k = 0; ok && k < keys.length; k++) {
+      ok = entry.keys[k] === keys[k] && same(entry.vals[k], vals[k]);
+    }
+    for (let k = 0; ok && k < app.length; k++) ok = same(entry.app[k], app[k]);
+    if (!ok) continue;
+    const result = entry.ref.deref();
+    if (result === undefined) {
+      list.splice(t, 1);
+      t--;
+      continue;
+    }
+    return result;
+  }
+  return undefined;
+}
+
+function storeTransition(
+  base: object,
+  h: number,
+  len: number,
+  keys: number[],
+  vals: unknown[],
+  app: unknown[],
+  result: object,
+): void {
+  let list = transitions.get(base);
+  if (list === undefined) transitions.set(base, (list = []));
+  list.unshift({ h, len, keys, vals, app, ref: new WeakRef(result) });
+  if (list.length > TRANSITION_CAP) list.pop();
+}
+
 function finalizeArray(
   state: ArrayState,
   path: PatchPath | null,
   recorder: PatchRecorder | undefined,
 ): unknown {
-  const copy = state.copy!;
   const emitting = recorder !== undefined && path !== null;
   const opsMode = state.ops !== null;
 
   if (emitting && opsMode) emitSeqOps(state.ops!, path!, recorder);
 
-  const accInfo = _accOf(state.base);
-  const profile = opsMode ? seqTailProfile(state.ops!, state.base.length) : null;
+  const base = state.base;
+  const accInfo = _accOf(base);
+  const profile = opsMode ? seqTailProfile(state.ops!, base.length) : null;
+  const virtual = state.copy === null;
+  const L = base.length;
+  const L2 = arrLen(state);
 
-  if (accInfo !== undefined && profile !== null && profile.finalLen === copy.length) {
-    // Fast path — stable positions: delta-update the cached accumulator,
-    // resolving only touched slots in place on the copy. O(touched).
-    const L = state.base.length;
-    const L2 = copy.length;
+  if (accInfo !== undefined && profile !== null && profile.finalLen === L2) {
+    // Fast path — stable positions. Assemble the exact delta (touched
+    // indices with resolved values, plus the appended region), delta-update
+    // the accumulator, and try the transition cache before building
+    // anything O(n).
     const minL = Math.min(L, L2);
     const assignedIdx = profile.setIdx;
     let acc = accInfo.a | 0;
+
     const touched = new Set(assignedIdx);
     if (state.drafted !== null) for (const i of state.drafted) touched.add(i);
-    for (const i of touched) {
+    const keys: number[] = [];
+    const vals: unknown[] = [];
+    for (const i of [...touched].sort((a, b) => a - b)) {
       if (i >= minL) continue; // dropped tail / appended region (below)
       const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
-      const resolved = resolve(copy[i], childPath, recorder);
-      copy[i] = resolved;
-      acc =
-        (acc +
-          Math.imul(internHash(resolved) - internHash(state.base[i]), _powP(i))) |
-        0;
+      const resolved = resolve(arrRead(state, i), childPath, recorder);
+      if (same(resolved, base[i])) continue; // netted out
+      keys.push(i);
+      vals.push(resolved);
+      acc = (acc + Math.imul(internHash(resolved) - internHash(base[i]), _powP(i))) | 0;
     }
-    if (L2 > L) {
-      for (let i = L; i < L2; i++) {
-        const resolved = resolve(copy[i], null, recorder);
-        copy[i] = resolved;
-        acc = (acc + Math.imul(internHash(resolved), _powP(i))) | 0;
-      }
-    } else {
-      for (let i = L2; i < L; i++) {
-        acc = (acc - Math.imul(internHash(state.base[i]), _powP(i))) | 0;
-      }
+    const app: unknown[] = [];
+    for (let i = L; i < L2; i++) {
+      const resolved = resolve(arrRead(state, i), null, recorder);
+      app.push(resolved);
+      acc = (acc + Math.imul(internHash(resolved), _powP(i))) | 0;
+    }
+    for (let i = L2; i < L; i++) {
+      acc = (acc - Math.imul(internHash(base[i]), _powP(i))) | 0;
     }
     acc = acc >>> 0;
-    state.result = _internPrehashed(copy, _arrayHashOf(L2, acc), acc, L2);
+
+    if (keys.length === 0 && app.length === 0 && L2 === L) {
+      // Everything netted out: the successor IS the (canonical) base.
+      state.result = base;
+      return base;
+    }
+
+    const h = _arrayHashOf(L2, acc);
+    const hit = lookupTransition(base, h, L2, keys, vals, app);
+    if (hit !== undefined) {
+      state.result = hit;
+      return hit;
+    }
+
+    // Build the successor — the only O(n) step, skipped entirely on a hit.
+    const out = virtual ? copyArr(base) : state.copy!;
+    for (let k = 0; k < keys.length; k++) out[keys[k]!] = vals[k];
+    for (let k = 0; k < app.length; k++) out[L + k] = app[k];
+    out.length = L2;
+    state.result = _internPrehashed(out, h, acc, L2);
+    storeTransition(base, h, L2, keys, vals, app, state.result as object);
     return state.result;
   }
 
-  // Slow path: resolve everything, intern; net diff when intent was lost.
+  // Slow path: materialize, resolve everything, intern; net diff when intent
+  // was lost.
+  const copy = materializeArr(state);
   const resolved = new Array<unknown>(copy.length);
   for (let i = 0; i < copy.length; i++) {
     const st = stateOf(copy[i]);
