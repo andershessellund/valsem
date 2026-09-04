@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest';
-import { deepEqual, equals, hashCode } from './deep-equal.js';
+import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
 
 describe('deepEqual', () => {
   // --- Primitives ---
@@ -319,5 +319,28 @@ describe('deepEqual — canonical fast path', () => {
     expect(deepEqual(new Tagged('a', 7), new Tagged('a', 7))).toBe(true);
     expect(deepEqual(new Tagged('a', 7), new Tagged('b', 7))).toBe(false);
     expect(equalsCalls).toBe(2);
+  });
+});
+
+describe('deepEqual — marked vs unmarked is NOT a shortcut', () => {
+  it('a fresh, not-yet-pooled instance equals its marked canonical', async () => {
+    const { createInternPool } = await import('./intern-pool.js');
+    const pool = createInternPool<Pt>();
+    class Pt {
+      declare readonly [hashCode]: number;
+      constructor(readonly x: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = x >>> 0;
+      }
+      [equals](other: unknown): boolean {
+        return other instanceof Pt && other.x === this.x;
+      }
+    }
+    const canonical = pool.intern(new Pt(42)); // marked [interned]
+    const fresh = new Pt(42); // unmarked — the pre-pooling duplicate
+    expect((canonical as Record<symbol, unknown>)[interned as unknown as symbol]).toBe(true);
+    expect((fresh as Record<symbol, unknown>)[interned as unknown as symbol]).toBeUndefined();
+    expect(deepEqual(canonical, fresh)).toBe(true); // must walk, not shortcut
+    expect(deepEqual(fresh, canonical)).toBe(true);
+    expect(deepEqual(canonical, new Pt(43))).toBe(false);
   });
 });

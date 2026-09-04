@@ -176,8 +176,16 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // Canonical fast path: equal content implies the SAME instance, so two
   // distinct canonical values are structurally distinct — no walk needed.
   // This also terminates mixed-tree comparisons in O(1) at every canonical
-  // boundary. (Marker covers the collections and pooled value types; the
-  // injected cache covers canonical plain data.)
+  // boundary. The marker covers collections and pooled value types; the
+  // injected cache covers canonical plain data.
+  //
+  // Evaluation order is deliberate, cheapest test first via short-circuit:
+  // per side, the [interned] property read runs BEFORE the WeakMap lookup
+  // (both-marked pairs never touch the map), and a raw `a` fails the first
+  // conjunct without ever examining `b`. Note that one-marked/one-not does
+  // NOT imply unequal — a fresh, not-yet-pooled instance can equal its
+  // marked canonical (the createInternPool pattern) — so mixed pairs fall
+  // through to the [equals] dispatch below.
   if (
     ((a as Record<symbol, unknown>)[interned] === true || _canonicals?.has(a) === true) &&
     ((b as Record<symbol, unknown>)[interned] === true || _canonicals?.has(b) === true)
