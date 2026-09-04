@@ -153,10 +153,11 @@ plausible:
 Order is observable on records, `ValueMap`, and `ValueSet`, but never
 semantic: it does not affect equality, hashing, or which canonical instance you
 get. Consequence: because equal collections collapse to a single canonical
-instance, the order you observe is whichever equal collection was pooled
-*first* — treat it as arbitrary. (Interned records are the deterministic
-exception: canonical records have sorted keys.) Hash-consed HAMT backing (§8)
-will upgrade collection iteration order to content-determined. If order carries
+instance, the order you observe carries no meaning. On `ValueMap`/`ValueSet`
+it is **content-determined** (hash-consed HAMT backing, §8.2 — shipped): equal
+collections iterate identically, in seeded-hash order — stable within a
+process, different across runs, arbitrary by design. (Interned records are the
+deterministic exception: canonical records have sorted keys.) If order carries
 meaning, put it in the value (a list of pairs); an order-sensitive
 `OrderedMap`/`OrderedSet` may exist someday.
 
@@ -192,8 +193,9 @@ backstop.
 
 Mechanics: type tags mixed into every hash (arrays ≠ records ≠ sets with
 similar content); records hash order-independently (commutative scrambled sum);
-arrays order-dependently (polynomial); collections carry incremental hash state
-(§3.4). Throws for anything without a hash handler — with teaching errors
+arrays order-dependently (polynomial); `ValueList` carries incremental hash
+state (§3.4), while `ValueMap`/`ValueSet` hashes are their consed root-node
+hashes (§8.2) — computed once per novel node, O(1) to read. Throws for anything without a hash handler — with teaching errors
 (unregistered Temporal names the `valsem/temporal` import).
 
 ### 3.3 Seeded, flood-resistant leaf hashing
@@ -213,10 +215,13 @@ become lazy.
 
 ### 3.4 Incremental hashing
 
-Collections maintain O(1)-updatable hash state:
+Collections keep hashing off the read path:
 
-- **Records/maps/sets**: commutative accumulator — `acc' = acc − entry(old) +
-  entry(new)`. `ValueMap`/`ValueSet` already do this (`rollingSum`).
+- **Records/maps/sets**: a commutative accumulator (`acc' = acc − entry(old) +
+  entry(new)`) is the scheme for record finalize-hashing under `produce`.
+  `ValueMap`/`ValueSet` formerly kept such a `rollingSum`; since the consed
+  HAMT swap their hash *is* the root node's consed hash — structural, cached
+  per node, and shared with every equal subtree.
 - **Arrays/lists**: polynomial accumulator with odd multiplier `P` (invertible
   mod 2³²): `h([a₀…aₙ]) = Σ hash(aᵢ)·Pⁱ`. Composes over concatenation:
   `hash(A ++ B) = hash(A) + P^|A| · hash(B)` — each tree node (§9) caches
@@ -345,10 +350,13 @@ the contract; performance is the implementation.** Four rules:
 
 ### 6.2 `ValueMap` / `ValueSet`
 
-Persistent, immutable, canonical-instance collections: two with equal contents
-are the same reference, carry a precomputed `[hashCode]`, and update
-persistently (`set`/`delete`/`add` return the canonical successor; pool hits
-allocate nothing; incremental hashing makes successor hashes O(1)).
+Persistent, immutable, canonical-instance collections on the hash-consed CHAMP
+trie (§8.2): two with equal contents are the same reference — **lineage-free**,
+since equal content converges on the same consed root however it was built —
+carry the root's hash as their precomputed `[hashCode]`, compare in O(1)
+(`[equals]` is a root pointer comparison), and update persistently
+(`set`/`delete`/`add` path-copy O(log n) nodes and share the rest; an
+unchanged write returns `this`).
 
 - **They ARE the readonly interfaces**: `ValueMap implements ReadonlyMap`,
   `ValueSet implements ReadonlySet` (including the ES2025 set-algebra
@@ -357,13 +365,15 @@ allocate nothing; incremental hashing makes successor hashes O(1)).
 - **The backing store is a `#private` field, never exposed.** JavaScript cannot
   make a `Map`/`Set` immutable at runtime (`Object.freeze` is a no-op on their
   internal slots — verified: a "frozen" backing map could be mutated, corrupting
-  the pool). Encapsulation removes the hole instead of guarding it — and later
-  allows the HAMT swap invisibly. Instances themselves are frozen; internal
-  accumulators are `#private`.
-- Entry membership is by **reference** (`===`) — intern your keys/elements
-  (decode does this automatically). Fast-path pool predicates use `has()` as
-  well as `get()` (stored `undefined` is legal in maps and must not alias
-  absence on hash collisions — a fixed bug).
+  the pool). Encapsulation removes the hole instead of guarding it — and is
+  exactly what let the HAMT swap land invisibly. Instances themselves are
+  frozen; the trie root and size are `#private`.
+- Entry membership is by **SameValueZero** (`===` plus NaN-equals-NaN, as
+  native Map/Set) — intern your keys/elements (decode does this
+  automatically). Stored `undefined` is legal in maps and distinct from
+  absence (`trieGet` returns a sentinel, never `undefined`, for a miss); the
+  wrapper canonicalizes through a `WeakMap<root, wrapper>` — ephemeron
+  semantics, no scan, no sweep.
 
 The representation-visibility rule: **`ValueList.array`/`InternedString.value`
 are public because frozen arrays and primitive strings are *genuinely*
@@ -494,13 +504,19 @@ property**: children compare `===` and have cached hashes — cost is container
 Opt in when *width × edit-frequency* crosses the copy-cost threshold
 (empirically tens-to-hundreds of elements; benchmark-gated).
 
-### 8.2 HAMT with hash-consed nodes
+### 8.2 HAMT with hash-consed nodes — **shipped** for `ValueMap`/`ValueSet`
 
-`ValueMap`/`ValueSet` backing becomes an adaptive representation — flat
-native map below ~32 entries, HAMT above — **invisibly**, behind the
-encapsulated API (the payoff of §6.2's private fields). The distinctive step:
-**intern the trie nodes themselves** (the pool stops being a cache in front of
-the data structure and becomes the data structure):
+`ValueMap`/`ValueSet` are backed by a hash-consed CHAMP trie (`hamt.ts`,
+stride 2 for maps, 1 for sets), swapped in **invisibly** behind the
+encapsulated API (the payoff of §6.2's private fields). The deferred piece is
+the adaptive flat small-map representation — low urgency, since a ≤32-entry
+collection is already a single root node unless hashes share a 5-bit prefix.
+CHAMP canonical form (non-root arity ≥ 2; deletes inline single-entry
+subtrees upward, unwinding prefix chains; collision nodes keep a canonical
+member order via type rank + per-instance ordinals) makes the shape a pure
+function of content, which is what licenses the distinctive step: **intern
+the trie nodes themselves** (the pool stops being a cache in front of the
+data structure and becomes the data structure):
 
 - HAMT shape is a function of the key-hash set — history-independent — so with
   node interning, equal maps are the same nodes to the root: **equality is
@@ -669,8 +685,8 @@ ops, clearly labeled).
 | 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
 | 1 | **`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission, per-call options; Mutative corpus as tests | all existing suites green; patch-emission property tests |
 | 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
-| 3 | Adaptive HAMT backing for `ValueMap`/`ValueSet` (invisible) | conformance + property suites; benchmark wins on large collections |
-| 4 | Hash-consed nodes: O(1) equality, Δ-proportional diff, transient finalize | equality/diff benchmarks; memory-floor demonstration |
+| 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
+| 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
 | 5 | Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array` | contract table holds empirically |
 | 6 | Hardening backlog: lazy hash seeding; decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant and intern idempotence | — |
 
@@ -718,6 +734,17 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   only on the removal path (owner-deref per visit cost 2.4×), and hold the
   backstop registry from a module binding (an unreferenced
   `FinalizationRegistry` is collected and its callbacks silently stop).
+- **Shipped the hash-consed CHAMP backing for `ValueMap`/`ValueSet`** —
+  equality became a root pointer comparison and canonicality became
+  lineage-free at the node level; the collection hash became the consed root
+  hash (replacing the rolling sums); iteration order upgraded from
+  pooled-first to content-determined; wrappers canonicalize via
+  `WeakMap<root, wrapper>` ephemerons. Canonical form pinned by fuzz suites
+  (shuffled builds, op-walk mirrors, per-run seed variation) plus a
+  total-collision suite under a degenerate `configureHasher` — which also
+  fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
+  SameValueZero throughout). Deferred: the adaptive flat small-map form (a
+  ≤32-entry collection is already one root node); node-level set algebra.
 - **Renamed `Intern{Map,Set,Array}` → `ValueMap`/`ValueSet`/`ValueList`** —
   type names name model kinds; mechanism vocabulary (interning) belongs to
   operations (`intern`, pools, the `interned` symbol). "List", not "Array":

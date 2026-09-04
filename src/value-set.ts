@@ -1,94 +1,108 @@
 // ---------------------------------------------------------------------------
-// ValueSet — persistent (immutable) set with incremental hashing
+// ValueSet — persistent (immutable) set on a hash-consed CHAMP trie
 //
-// Same scheme as {@link ValueMap} but per-element instead of per-entry.
-//
-//     elementHash(v) = scramble(hashValue)
-//     rollingSum     = Σ elementHash(vᵢ)        (commutative)
-//     h              = mix(TAG_INTERN_SET, size) ⊕ rollingSum
+// Same architecture as {@link ValueMap} at stride 1 (member-only slots): the
+// backing trie is hash-consed, so equal content yields the same root node,
+// deep equality is a pointer comparison on roots, updates share all
+// untouched structure, and iteration order is content-determined.
 // ---------------------------------------------------------------------------
 
-import { deepHash } from './deep-hash.js';
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { createInternPool } from './intern-pool.js';
+import { internHash } from './intern.js';
+import {
+  createTrieConfig,
+  trieGet,
+  trieInsert,
+  trieRemove,
+  trieKeys,
+  NOT_FOUND,
+  _trieStats,
+  type HNode,
+} from './hamt.js';
 
-function mix(seed: number, hash: number): number {
-  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
-}
+const CFG = createTrieConfig(1);
 
-function scramble(h: number): number {
-  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
-  h = Math.imul(h ^ (h >>> 13), 0x45d9f3b);
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
-const pool = createInternPool<ValueSet<unknown>>();
+/** Canonical wrapper per root — ephemeron-collected with the root itself. */
+const wrappers = new WeakMap<HNode, ValueSet<unknown>>();
 
 /**
  * Persistent (immutable) set with structural identity.
  *
  * Two `ValueSet` instances containing the same `===` elements are the same
- * object reference.
+ * object reference — lineage-free, because the backing trie is hash-consed:
+ * sets built independently, in different orders, or via add/delete detours
+ * converge on one canonical instance, and deep equality is a pointer
+ * comparison.
  *
- * **Iteration order is unspecified.** Element order is not part of the value —
- * `{1, 2}` and `{2, 1}` are the *same* canonical instance — so the order you
- * observe is whichever structurally-equal set was pooled first, and can differ
- * between runs. Never depend on it; if order carries meaning, use an
- * `ValueList` (a future `OrderedSet` may cover this).
+ * **Iteration order is unspecified but content-determined.** Element order is
+ * not part of the value — `{1, 2}` and `{2, 1}` are the *same* canonical
+ * instance — so equal sets iterate identically, in an order driven by
+ * (per-process, seeded) element hashes. Never attach meaning to it; if order
+ * carries meaning, use a `ValueList`.
  *
- * The backing `Set` is a private field — never exposed, because JavaScript has
- * no way to make a `Set` immutable at runtime (`Object.freeze` does not reach
- * its internal slots), and handing it out would let one accidental `add()`
- * corrupt the shared canonical instance and its cached hash. Instead the
- * ValueSet **is** a `ReadonlySet` itself: pass it anywhere one is accepted,
- * and take a mutable copy with `new Set(internSet)` when you need one.
+ * The backing trie is a private field — never exposed. The ValueSet **is** a
+ * `ReadonlySet` itself: pass it anywhere one is accepted, and take a mutable
+ * copy with `new Set(valueSet)` when you need one.
  */
 export class ValueSet<T> implements ReadonlySet<T> {
-  readonly #set: Set<T>;
+  readonly #root: HNode;
+  readonly #size: number;
   readonly [hashCodeSym]: number;
   readonly [internedSym]: true = true;
-  readonly #rollingSum: number;
 
-  private constructor(set: Set<T>, hash: number, rollingSum: number) {
-    this.#set = set;
-    this[hashCodeSym] = hash;
-    this.#rollingSum = rollingSum;
-    Object.freeze(this); // see ValueMap — protects the cached [hashCode] too
+  private constructor(root: HNode, size: number) {
+    this.#root = root;
+    this.#size = size;
+    this[hashCodeSym] = root.h;
+    Object.freeze(this); // protects the cached [hashCode] too
+  }
+
+  static #for<T>(root: HNode, size: number): ValueSet<T> {
+    const hit = wrappers.get(root);
+    if (hit !== undefined) return hit as ValueSet<T>;
+    const fresh = new ValueSet<unknown>(root, size);
+    wrappers.set(root, fresh);
+    return fresh as ValueSet<T>;
   }
 
   /** Number of elements. */
   get size(): number {
-    return this.#set.size;
+    return this.#size;
   }
 
-  /** Whether the canonical `value` is present (matched by reference). */
+  /** Whether the canonical `value` is present (matched by SameValueZero). */
   has(value: T): boolean {
-    return this.#set.has(value);
+    return trieGet(CFG, this.#root, internHash(value), value) !== NOT_FOUND;
   }
 
-  /** Iterate the elements (unspecified order — see the class docs). */
+  /** Iterate the elements (content-determined order — see the class docs). */
   values(): SetIterator<T> {
-    return this.#set.values();
+    return trieKeys(CFG, this.#root) as SetIterator<T>;
   }
 
-  /** Iterate the elements (unspecified order — see the class docs). */
+  /** Iterate the elements (content-determined order — see the class docs). */
   [Symbol.iterator](): SetIterator<T> {
-    return this.#set.values();
+    return this.values();
   }
 
   /** Alias of {@link values}, as `ReadonlySet.keys` is. */
   keys(): SetIterator<T> {
-    return this.#set.keys();
+    return this.values();
   }
 
   /** Iterate `[value, value]` pairs, as `ReadonlySet.entries` does. */
   entries(): SetIterator<[T, T]> {
-    return this.#set.entries();
+    const root = this.#root;
+    return (function* () {
+      for (const v of trieKeys(CFG, root)) yield [v, v] as [T, T];
+    })() as SetIterator<[T, T]>;
   }
 
   /** Call `fn` for each element, as `ReadonlySet.forEach` does. */
   forEach(fn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: unknown): void {
-    this.#set.forEach((v) => fn.call(thisArg, v, v, this));
+    for (const v of trieKeys(CFG, this.#root)) {
+      fn.call(thisArg, v as T, v as T, this);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -97,91 +111,62 @@ export class ValueSet<T> implements ReadonlySet<T> {
   // one is harmless; wrap with ValueSet.from(...) to get a canonical value.
   // -------------------------------------------------------------------------
 
+  #native(): Set<T> {
+    return new Set<T>(trieKeys(CFG, this.#root) as Iterable<T>);
+  }
+
   /** Elements in this set, `other`, or both — a fresh native `Set`. */
   union<U>(other: ReadonlySetLike<U>): Set<T | U> {
-    return this.#set.union(other);
+    return this.#native().union(other);
   }
 
   /** Elements in both this set and `other` — a fresh native `Set`. */
   intersection<U>(other: ReadonlySetLike<U>): Set<T & U> {
-    return this.#set.intersection(other);
+    return this.#native().intersection(other);
   }
 
   /** Elements in this set but not `other` — a fresh native `Set`. */
   difference<U>(other: ReadonlySetLike<U>): Set<T> {
-    return this.#set.difference(other);
+    return this.#native().difference(other);
   }
 
   /** Elements in exactly one of this set and `other` — a fresh native `Set`. */
   symmetricDifference<U>(other: ReadonlySetLike<U>): Set<T | U> {
-    return this.#set.symmetricDifference(other);
+    return this.#native().symmetricDifference(other);
   }
 
   /** Whether every element of this set is in `other`. */
   isSubsetOf(other: ReadonlySetLike<unknown>): boolean {
-    return this.#set.isSubsetOf(other);
+    return this.#native().isSubsetOf(other);
   }
 
   /** Whether this set contains every element of `other`. */
   isSupersetOf(other: ReadonlySetLike<unknown>): boolean {
-    return this.#set.isSupersetOf(other);
+    return this.#native().isSupersetOf(other);
   }
 
   /** Whether this set shares no element with `other`. */
   isDisjointFrom(other: ReadonlySetLike<unknown>): boolean {
-    return this.#set.isDisjointFrom(other);
+    return this.#native().isDisjointFrom(other);
   }
 
   [equalsSym](other: unknown): boolean {
-    if (!(other instanceof ValueSet)) return false;
-    if (this.#set.size !== other.#set.size) return false;
-    for (const v of this.#set) if (!other.#set.has(v)) return false;
-    return true;
+    // Hash consing makes deep equality a pointer comparison on roots.
+    return other instanceof ValueSet && (other as ValueSet<T>).#root === this.#root;
   }
 
   /** Add `value`. Returns `this` if already present. */
   add(value: T): ValueSet<T> {
-    if (this.#set.has(value)) return this;
-    const vh = scramble(deepHash(value));
-    const newSum = (this.#rollingSum + vh) >>> 0;
-    const newSize = this.#set.size + 1;
-    const newHash = (mix(0, newSize) ^ newSum) >>> 0;
-
-    const self = this;
-    const found = pool.lookup(newHash, c => {
-      if (c.#set.size !== newSize) return false;
-      if (!c.#set.has(value)) return false;
-      for (const v of self.#set) if (!c.#set.has(v)) return false;
-      return true;
-    });
-    if (found !== undefined) return found as ValueSet<T>;
-
-    const fresh = new Set<T>(this.#set);
-    fresh.add(value);
-    return pool.register(new ValueSet<T>(fresh, newHash, newSum), newHash) as ValueSet<T>;
+    const r = trieInsert(CFG, this.#root, 0, internHash(value), [value]);
+    if (r === null) return this;
+    return ValueSet.#for<T>(r.node, this.#size + 1);
   }
 
   /** Remove `value`. Returns `this` if not present. */
   delete(value: T): ValueSet<T> {
-    if (!this.#set.has(value)) return this;
-    const vh = scramble(deepHash(value));
-    const newSum = (this.#rollingSum - vh) >>> 0;
-    const newSize = this.#set.size - 1;
-    const newHash = (mix(0, newSize) ^ newSum) >>> 0;
-    if (newSize === 0) return ValueSet.empty<T>();
-
-    const self = this;
-    const found = pool.lookup(newHash, c => {
-      if (c.#set.size !== newSize) return false;
-      if (c.#set.has(value)) return false;
-      for (const v of self.#set) if (v !== value && !c.#set.has(v)) return false;
-      return true;
-    });
-    if (found !== undefined) return found as ValueSet<T>;
-
-    const fresh = new Set<T>();
-    for (const v of this.#set) if (v !== value) fresh.add(v);
-    return pool.register(new ValueSet<T>(fresh, newHash, newSum), newHash) as ValueSet<T>;
+    const r = trieRemove(CFG, this.#root, 0, internHash(value), value);
+    if (r === null) return this;
+    return ValueSet.#for<T>(r.node as HNode, this.#size - 1);
   }
 
   // -------------------------------------------------------------------------
@@ -190,39 +175,25 @@ export class ValueSet<T> implements ReadonlySet<T> {
 
   /** Canonical empty set. */
   static empty<T>(): ValueSet<T> {
-    return EMPTY as ValueSet<T>;
+    return ValueSet.#for<T>(CFG.empty, 0);
   }
 
   /** Canonical ValueSet from an iterable of values. */
   static from<T>(values: Iterable<T>): ValueSet<T> {
-    const s = new Set<T>(values);
-    return ValueSet._fromSet(s);
+    let root: HNode = CFG.empty;
+    let size = 0;
+    for (const v of values) {
+      const r = trieInsert(CFG, root, 0, internHash(v), [v]);
+      if (r !== null) {
+        root = r.node;
+        size++;
+      }
+    }
+    return ValueSet.#for<T>(root, size);
   }
 
-  /** @internal Build from an existing Set (consumes the set — the caller must not keep a reference). */
-  static _fromSet<T>(s: Set<T>): ValueSet<T> {
-    if (s.size === 0) return EMPTY as ValueSet<T>;
-    let sum = 0;
-    for (const v of s) sum = (sum + scramble(deepHash(v))) >>> 0;
-    const hash = (mix(0, s.size) ^ sum) >>> 0;
-    const found = pool.lookup(hash, c => {
-      if (c.#set.size !== s.size) return false;
-      for (const v of s) if (!c.#set.has(v)) return false;
-      return true;
-    });
-    if (found !== undefined) return found as ValueSet<T>;
-    return pool.register(new ValueSet<T>(s, hash, sum), hash) as ValueSet<T>;
-  }
-
-  /** @internal Pool size — exposed for tests. */
-  static _poolSize(): number {
-    return pool.size();
+  /** @internal Trie node-pool sizes — exposed for sharing tests. */
+  static _nodeStats(): { bnodes: number; cnodes: number } {
+    return _trieStats(CFG);
   }
 }
-
-const EMPTY: ValueSet<unknown> = (() => {
-  const s = new Set<unknown>();
-  const hash = (mix(0, 0) ^ 0) >>> 0;
-  const inst = new (ValueSet as any)(s, hash, 0) as ValueSet<unknown>;
-  return pool.register(inst, hash);
-})();

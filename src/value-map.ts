@@ -1,204 +1,151 @@
 // ---------------------------------------------------------------------------
-// ValueMap — persistent (immutable) map with incremental hashing
+// ValueMap — persistent (immutable) map on a hash-consed CHAMP trie
 //
-// Mutator methods (`set`, `delete`) compute the new hash from the
-// existing hash in O(1), look up the canonical instance in the pool,
-// and **skip allocation entirely on a hit**. This is the workhorse
-// for value-types like `BudgetVector` where the same few configurations
-// recur millions of times.
+// The backing structure (hamt.ts) is hash-consed: equal content yields the
+// SAME root node object, process-wide. Consequences:
 //
-// Hash scheme: order-independent entry sum
+//   * deep equality of two ValueMaps is `#root === #root` — O(1), lineage-free
+//     (two maps built independently, in any order, converge);
+//   * the wrapper itself canonicalizes through a WeakMap keyed by root
+//     (ephemeron semantics — no scan, no sweep needed);
+//   * updates path-copy O(log n) nodes and share the rest with every other
+//     map holding equal subtrees — memory sits at the distinct-subtree floor;
+//   * iteration order is structure-determined, hence content-determined: two
+//     equal maps iterate identically (still arbitrary-looking — never
+//     semantic).
 //
-//     entryHash(k, v) = scramble(hashKey + hashValue · q)        (odd q)
-//     rollingSum      = Σ entryHash(kᵢ, vᵢ)        (commutative)
-//     h               = mix(TAG_INTERN_MAP, size) ⊕ rollingSum
-//
-// Updates:
-//     set(k, v) [new]:    sum' = sum + entryHash(k, v);          size' = size+1
-//     set(k, v) [exists]: sum' = sum − entryHash(k,oldV) + entryHash(k, v)
-//     delete(k):          sum' = sum − entryHash(k, oldV);       size' = size−1
+// The map hash is the consed root hash: O(1) to read, computed once per novel
+// node, never recomputed for shared structure.
 // ---------------------------------------------------------------------------
 
-import { deepHash } from './deep-hash.js';
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { createInternPool } from './intern-pool.js';
+import { internHash } from './intern.js';
+import {
+  createTrieConfig,
+  trieGet,
+  trieInsert,
+  trieRemove,
+  trieEntries,
+  trieKeys,
+  NOT_FOUND,
+  _trieStats,
+  type HNode,
+} from './hamt.js';
 
-const Q = 0xc2b2ae3d | 0;          // odd; second-prime spread for value mixing
+const CFG = createTrieConfig(2);
 
-/** Ordered hash combine — boost-style. */
-function mix(seed: number, hash: number): number {
-  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
-}
-
-/** Avalanche scramble for unordered accumulation. */
-function scramble(h: number): number {
-  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
-  h = Math.imul(h ^ (h >>> 13), 0x45d9f3b);
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
-function entryHash(kh: number, vh: number): number {
-  return scramble((kh + Math.imul(vh, Q)) >>> 0);
-}
-
-const pool = createInternPool<ValueMap<unknown, unknown>>();
+/** Canonical wrapper per root — ephemeron-collected with the root itself. */
+const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
 
 /**
  * Persistent (immutable) map with structural identity.
  *
  * Two `ValueMap` instances with the same set of `(===, ===)` entries are the
- * same object reference.
+ * same object reference — and because the backing trie is hash-consed, that
+ * holds *lineage-free*: maps built independently, in different orders, or via
+ * insert/delete detours all converge on one canonical instance, and deep
+ * equality between any two ValueMaps is a pointer comparison.
  *
- * **Iteration order is unspecified.** Entry order is not part of the value —
- * `{a→1, b→2}` and `{b→2, a→1}` are the *same* canonical instance — so the
- * order you observe is whichever structurally-equal map was pooled first, and
- * can differ between runs. Never depend on it; if order carries meaning, use an
- * `ValueList` of `[key, value]` pairs (a future `OrderedMap` may cover this).
+ * **Iteration order is unspecified but content-determined.** Entry order is
+ * not part of the value — `{a→1, b→2}` and `{b→2, a→1}` are the *same*
+ * canonical instance — so equal maps iterate identically, in an order driven
+ * by (per-process, seeded) key hashes. Never attach meaning to it; if order
+ * carries meaning, use a `ValueList` of `[key, value]` pairs.
  *
- * The backing `Map` is a private field — never exposed, because JavaScript has
- * no way to make a `Map` immutable at runtime (`Object.freeze` does not reach
- * its internal slots), and handing it out would let one accidental `set()`
- * corrupt the shared canonical instance and its cached hash. Instead the
- * ValueMap **is** a `ReadonlyMap` itself: pass it anywhere one is accepted,
- * and take a mutable copy with `new Map(internMap)` when you need one.
+ * The backing trie is a private field — never exposed. The ValueMap **is** a
+ * `ReadonlyMap` itself: pass it anywhere one is accepted, and take a mutable
+ * copy with `new Map(valueMap)` when you need one.
  */
 export class ValueMap<K, V> implements ReadonlyMap<K, V> {
-  readonly #map: Map<K, V>;
+  readonly #root: HNode;
+  readonly #size: number;
   readonly [hashCodeSym]: number;
   readonly [internedSym]: true = true;
-  /** Σ entryHash(kᵢ, vᵢ) — used for incremental updates. */
-  readonly #rollingSum: number;
 
-  private constructor(map: Map<K, V>, hash: number, rollingSum: number) {
-    this.#map = map;
-    this[hashCodeSym] = hash;
-    this.#rollingSum = rollingSum;
-    // The instance itself is frozen (the backing Map is a private field, so
-    // this covers everything reachable): reassigning a public field like the
-    // cached [hashCode] would silently corrupt pool identity.
+  private constructor(root: HNode, size: number) {
+    this.#root = root;
+    this.#size = size;
+    this[hashCodeSym] = root.h;
+    // The instance is frozen: reassigning a public field like the cached
+    // [hashCode] would silently corrupt canonical identity.
     Object.freeze(this);
+  }
+
+  static #for<K, V>(root: HNode, size: number): ValueMap<K, V> {
+    const hit = wrappers.get(root);
+    if (hit !== undefined) return hit as ValueMap<K, V>;
+    const fresh = new ValueMap<unknown, unknown>(root, size);
+    wrappers.set(root, fresh);
+    return fresh as ValueMap<K, V>;
   }
 
   /** Number of entries. */
   get size(): number {
-    return this.#map.size;
+    return this.#size;
   }
 
-  /** Whether the canonical `key` is present (matched by reference). */
+  /** Whether the canonical `key` is present (matched by SameValueZero). */
   has(key: K): boolean {
-    return this.#map.has(key);
+    return trieGet(CFG, this.#root, internHash(key), key) !== NOT_FOUND;
   }
 
   /** The value for the canonical `key`, or `undefined` if absent. */
   get(key: K): V | undefined {
-    return this.#map.get(key);
+    const r = trieGet(CFG, this.#root, internHash(key), key);
+    return r === NOT_FOUND ? undefined : (r as V);
   }
 
-  /** Iterate the keys (unspecified order — see the class docs). */
+  /** Iterate the keys (content-determined order — see the class docs). */
   keys(): MapIterator<K> {
-    return this.#map.keys();
+    return trieKeys(CFG, this.#root) as MapIterator<K>;
   }
 
-  /** Iterate the values (unspecified order — see the class docs). */
+  /** Iterate the values (content-determined order — see the class docs). */
   values(): MapIterator<V> {
-    return this.#map.values();
+    const root = this.#root;
+    return (function* () {
+      for (const [, v] of trieEntries(CFG, root)) yield v as V;
+    })() as MapIterator<V>;
   }
 
-  /** Iterate the `[key, value]` entries (unspecified order — see the class docs). */
+  /** Iterate the `[key, value]` entries (content-determined order — see the class docs). */
   entries(): MapIterator<[K, V]> {
-    return this.#map.entries();
+    return trieEntries(CFG, this.#root) as MapIterator<[K, V]>;
   }
 
-  /** Iterate the `[key, value]` entries (unspecified order — see the class docs). */
+  /** Iterate the `[key, value]` entries (content-determined order — see the class docs). */
   [Symbol.iterator](): MapIterator<[K, V]> {
-    return this.#map.entries();
+    return this.entries();
   }
 
   /** Call `fn` for each entry, as `ReadonlyMap.forEach` does. */
   forEach(fn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
-    this.#map.forEach((v, k) => fn.call(thisArg, v, k, this));
+    for (const [k, v] of trieEntries(CFG, this.#root)) {
+      fn.call(thisArg, v as V, k as K, this);
+    }
   }
 
   [equalsSym](other: unknown): boolean {
-    if (!(other instanceof ValueMap)) return false;
-    if (this.#map.size !== other.#map.size) return false;
-    for (const [k, v] of this.#map) {
-      if (!other.#map.has(k) || other.#map.get(k) !== v) return false;
-    }
-    return true;
+    // Hash consing makes deep equality a pointer comparison on roots.
+    return other instanceof ValueMap && (other as ValueMap<K, V>).#root === this.#root;
   }
 
   /**
    * Set `key` → `value`. Returns the canonical ValueMap with the entry
-   * applied. If the entry is already present and equal, returns `this`.
+   * applied. If the entry is already present and SameValueZero-equal,
+   * returns `this`.
    */
   set(key: K, value: V): ValueMap<K, V> {
-    const had = this.#map.has(key);
-    const oldV = had ? this.#map.get(key)! : undefined;
-    if (had && oldV === value) return this;
-
-    const kh = deepHash(key);
-    const vhNew = deepHash(value);
-    let newSum: number;
-    let newSize: number;
-    if (had) {
-      const vhOld = deepHash(oldV as V);
-      newSum = (this.#rollingSum - entryHash(kh, vhOld) + entryHash(kh, vhNew)) >>> 0;
-      newSize = this.#map.size;
-    } else {
-      newSum = (this.#rollingSum + entryHash(kh, vhNew)) >>> 0;
-      newSize = this.#map.size + 1;
-    }
-    const newHash = (mix(0, newSize) ^ newSum) >>> 0;
-
-    const self = this;
-    const found = pool.lookup(newHash, c => {
-      if (c.#map.size !== newSize) return false;
-      // Candidate must contain (key, value) and otherwise match self.
-      if (!c.#map.has(key) || c.#map.get(key) !== value) return false;
-      for (const [k, v] of self.#map) {
-        if (k === key) continue;
-        // has() as well as get(): `undefined` is a legitimate stored value in
-        // an ValueMap (unlike in a record), so get() alone cannot tell a
-        // stored undefined from an absent key on a hash-collided candidate.
-        if (!c.#map.has(k) || c.#map.get(k) !== v) return false;
-      }
-      return true;
-    });
-    if (found !== undefined) return found as ValueMap<K, V>;
-
-    const fresh = new Map<K, V>(this.#map);
-    fresh.set(key, value);
-    Object.freeze(fresh);
-    return pool.register(new ValueMap<K, V>(fresh, newHash, newSum), newHash) as ValueMap<K, V>;
+    const r = trieInsert(CFG, this.#root, 0, internHash(key), [key, value]);
+    if (r === null) return this;
+    return ValueMap.#for<K, V>(r.node, this.#size + (r.added ? 1 : 0));
   }
 
   /** Remove `key`. Returns `this` if `key` was not present. */
   delete(key: K): ValueMap<K, V> {
-    if (!this.#map.has(key)) return this;
-    const oldV = this.#map.get(key)!;
-    const kh = deepHash(key);
-    const vhOld = deepHash(oldV);
-    const newSum = (this.#rollingSum - entryHash(kh, vhOld)) >>> 0;
-    const newSize = this.#map.size - 1;
-    const newHash = (mix(0, newSize) ^ newSum) >>> 0;
-    if (newSize === 0) return ValueMap.empty<K, V>();
-
-    const self = this;
-    const found = pool.lookup(newHash, c => {
-      if (c.#map.size !== newSize) return false;
-      if (c.#map.has(key)) return false;
-      for (const [k, v] of self.#map) {
-        if (k === key) continue;
-        if (!c.#map.has(k) || c.#map.get(k) !== v) return false; // see set()
-      }
-      return true;
-    });
-    if (found !== undefined) return found as ValueMap<K, V>;
-
-    const fresh = new Map<K, V>();
-    for (const [k, v] of this.#map) if (k !== key) fresh.set(k, v);
-    return pool.register(new ValueMap<K, V>(fresh, newHash, newSum), newHash) as ValueMap<K, V>;
+    const r = trieRemove(CFG, this.#root, 0, internHash(key), key);
+    if (r === null) return this;
+    return ValueMap.#for<K, V>(r.node as HNode, this.#size - 1);
   }
 
   // -------------------------------------------------------------------------
@@ -207,14 +154,21 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Canonical empty map. */
   static empty<K, V>(): ValueMap<K, V> {
-    return EMPTY as ValueMap<K, V>;
+    return ValueMap.#for<K, V>(CFG.empty, 0);
   }
 
   /** Canonical ValueMap from an iterable of `[key, value]` entries. */
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
-    const m = new Map<K, V>();
-    for (const [k, v] of entries) m.set(k, v);
-    return ValueMap._fromMap(m);
+    let root: HNode = CFG.empty;
+    let size = 0;
+    for (const [k, v] of entries) {
+      const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
+      if (r !== null) {
+        root = r.node;
+        if (r.added) size++;
+      }
+    }
+    return ValueMap.#for<K, V>(root, size);
   }
 
   /**
@@ -222,47 +176,26 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
    *
    * The input is a *record*, so record semantics apply to it: a key mapped to
    * `undefined` is an absent key and is not carried into the map. To store
-   * `undefined` deliberately, use {@link set} or {@link from} — inside an
+   * `undefined` deliberately, use {@link set} or {@link from} — inside a
    * ValueMap it is a legitimate value, distinct from absence.
    */
   static fromObject<V>(obj: Record<string, V>): ValueMap<string, V> {
-    const m = new Map<string, V>();
+    let root: HNode = CFG.empty;
+    let size = 0;
     for (const k in obj) {
       const v = obj[k];
       if (v === undefined) continue;
-      m.set(k, v);
-    }
-    return ValueMap._fromMap(m);
-  }
-
-  /** @internal Build from an existing Map (consumes the map — the caller must not keep a reference). */
-  static _fromMap<K, V>(m: Map<K, V>): ValueMap<K, V> {
-    if (m.size === 0) return EMPTY as ValueMap<K, V>;
-    let sum = 0;
-    for (const [k, v] of m) {
-      sum = (sum + entryHash(deepHash(k), deepHash(v))) >>> 0;
-    }
-    const hash = (mix(0, m.size) ^ sum) >>> 0;
-    const found = pool.lookup(hash, c => {
-      if (c.#map.size !== m.size) return false;
-      for (const [k, v] of m) {
-        if (!c.#map.has(k) || c.#map.get(k) !== v) return false;
+      const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
+      if (r !== null) {
+        root = r.node;
+        if (r.added) size++;
       }
-      return true;
-    });
-    if (found !== undefined) return found as ValueMap<K, V>;
-    return pool.register(new ValueMap<K, V>(m, hash, sum), hash) as ValueMap<K, V>;
+    }
+    return ValueMap.#for<string, V>(root, size);
   }
 
-  /** @internal Pool size — exposed for tests. */
-  static _poolSize(): number {
-    return pool.size();
+  /** @internal Trie node-pool sizes — exposed for sharing tests. */
+  static _nodeStats(): { bnodes: number; cnodes: number } {
+    return _trieStats(CFG);
   }
 }
-
-const EMPTY: ValueMap<unknown, unknown> = (() => {
-  const m = new Map<unknown, unknown>();
-  const hash = (mix(0, 0) ^ 0) >>> 0;
-  const inst = new (ValueMap as any)(m, hash, 0) as ValueMap<unknown, unknown>;
-  return pool.register(inst, hash);
-})();

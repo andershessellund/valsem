@@ -64,12 +64,20 @@ describe('ValueMap', () => {
 
   it('iteration', () => {
     const a = ValueMap.fromObject<number>({ a: 1, b: 2 });
-    expect([...a.entries()]).toEqual([['a', 1], ['b', 2]]);
-    expect([...a.keys()]).toEqual(['a', 'b']);
-    expect([...a.values()]).toEqual([1, 2]);
+    // Order is content-determined but unspecified (seeded hashes) — sort.
+    expect([...a.entries()].sort()).toEqual([['a', 1], ['b', 2]]);
+    expect([...a.keys()].sort()).toEqual(['a', 'b']);
+    expect([...a.values()].sort()).toEqual([1, 2]);
     expect(a.size).toBe(2);
     expect(a.get('a')).toBe(1);
     expect(a.has('a')).toBe(true);
+  });
+
+  it('iterates equal maps identically, whatever their construction order', () => {
+    const a = ValueMap.fromObject<number>({ a: 1, b: 2, c: 3, d: 4 });
+    const b = ValueMap.from<string, number>([['d', 4], ['c', 3], ['b', 2], ['a', 1]]);
+    expect(b).toBe(a);
+    expect([...b.entries()]).toEqual([...a.entries()]);
   });
 
   it('hashes do not collide for swapped key/value', () => {
@@ -96,7 +104,7 @@ describe('ValueMap — encapsulation & the ReadonlyMap contract', () => {
       expect(self).toBe(m);
       seen.push([k, v]);
     });
-    expect(seen).toEqual([['a', 2], ['b', 1]]);
+    expect(seen.sort()).toEqual([['a', 2], ['b', 1]]);
   });
 
   it('yields a mutable copy via the iterator, leaving the value untouched', () => {

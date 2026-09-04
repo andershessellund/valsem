@@ -213,10 +213,15 @@ ValueMap.fromObject({ a: 1 }) === ValueMap.fromObject({ a: 1 }); // true
 ValueSet.from([1, 2]) === ValueSet.from([2, 1]);          // true — unordered
 ```
 
-Mutators are **persistent**: they return the canonical successor and reuse a
-pooled instance whenever the result already exists, allocating nothing on a hit.
-Hashing is incremental (O(1) per edit for `push`/`pop`/`set`/`delete`), which
-makes them ideal for hot state that churns through the same few configurations.
+Mutators are **persistent**: they return the canonical successor, sharing all
+untouched structure and allocating nothing when the result already exists.
+`ValueMap` and `ValueSet` are backed by **hash‑consed tries**: equal content
+converges on the very same tree nodes process‑wide — however and in whatever
+order it was built — so deep equality between two maps or sets is a pointer
+comparison, an update copies only an O(log n) path, and equal subtrees are
+stored once. `ValueList` hashes incrementally (O(1) per `push`/`pop`/`set`).
+All of them are ideal for hot state that churns through the same few
+configurations.
 
 ```ts
 const v0 = ValueList.empty<number>();
@@ -401,11 +406,10 @@ built on it agrees on one definition of what each kind of thing *is*:
 
 Order is *observable* on records, `ValueMap`, and `ValueSet` — you can iterate
 them — but it is **not semantic**: it never affects `deepEqual`, `deepHash`, or
-which canonical instance you get. That has a consequence worth internalizing:
-because equal collections collapse to a *single* canonical instance, the order
-you observe on an `ValueMap` or `ValueSet` is whichever structurally‑equal
-collection was pooled **first**, and can differ from run to run. Treat it as
-arbitrary.
+which canonical instance you get. On `ValueMap`/`ValueSet` the order is
+**content‑determined**: equal collections iterate identically, in an order
+driven by the per‑process, seeded hashes of the contents — stable within a
+process, different across runs, and never meaningful. Treat it as arbitrary.
 
 Interned records are the deterministic exception: `intern` rewrites plain
 objects with **sorted keys**, so canonical records always iterate
