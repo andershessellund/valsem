@@ -24,6 +24,7 @@
 // ---------------------------------------------------------------------------
 
 import { createInternPool } from '../dist/intern-pool.js';
+import { createSweeper, createCirclePool } from './circle-pool.mjs';
 
 const N = Number(process.argv[2] ?? 500_000);
 const BATCH = 5_000;
@@ -40,6 +41,9 @@ const yieldTask = () => new Promise((resolve) => setImmediate(resolve));
 async function drain() {
   for (let i = 0; i < 5; i++) {
     gc();
+    // Two turns: FinalizationRegistry callbacks are queued as their own task
+    // after GC and may land behind the first setImmediate.
+    await yieldTask();
     await yieldTask();
   }
 }
@@ -103,6 +107,21 @@ function makeFRPool() {
     },
   };
 }
+
+function makeCircle(name, opts) {
+  const pool = createCirclePool(createSweeper(opts));
+  return {
+    name,
+    lookup: pool.lookup,
+    register: pool.register,
+    live: pool.live,
+    metaSlots: pool.metaSlots,
+  };
+}
+const makeCirclePoolContender = () => makeCircle('circle', {});
+// With the backstop, GC epochs pay the death tax — lookups pay nothing.
+const makeCircleGcContender = () =>
+  makeCircle('circ+gc', { gcBackstop: true, lookupBudget: 0 });
 
 function makeNoCleanupPool() {
   const buckets = new Map();
@@ -296,30 +315,36 @@ async function runContender(makePool) {
 console.log(`pool-gc-bench: N=${N} ops/phase, batch=${BATCH}, node ${process.version}\n`);
 
 const all = [];
-for (const make of [makeSweepPool, makeFRPool, makeNoCleanupPool]) {
+for (const make of [
+  makeSweepPool,
+  makeFRPool,
+  makeCirclePoolContender,
+  makeCircleGcContender,
+  makeNoCleanupPool,
+]) {
   const r = await runContender(make);
   all.push(r);
   console.log(`— ${r.name} done`);
 }
 
-console.log('\nphase          | pool  |    wall ms |  Mops/s | max batch ms | max gap ms');
-console.log('---------------|-------|-----------:|--------:|-------------:|----------:');
+console.log('\nphase          | pool    |    wall ms |  Mops/s | max batch ms | max gap ms');
+console.log('---------------|---------|-----------:|--------:|-------------:|----------:');
 for (const phase of ['churn', 'reuse', 'workingSet', 'hits']) {
   for (const r of all) {
     const p = r[phase];
     console.log(
-      `${phase.padEnd(14)} | ${r.name.padEnd(5)} | ${ms(p.wall).toFixed(1).padStart(10)} | ${mops(p.wall).padStart(7)} | ${ms(p.maxBatch).toFixed(2).padStart(12)} | ${ms(p.maxGap).toFixed(2).padStart(10)}`,
+      `${phase.padEnd(14)} | ${r.name.padEnd(7)} | ${ms(p.wall).toFixed(1).padStart(10)} | ${mops(p.wall).padStart(7)} | ${ms(p.maxBatch).toFixed(2).padStart(12)} | ${ms(p.maxGap).toFixed(2).padStart(10)}`,
     );
   }
 }
 
 console.log('\ndormancy (grow → drop all → stop; what stays behind)');
-console.log('pool  | entries | live | meta slots | retained KB');
-console.log('------|--------:|-----:|-----------:|-----------:');
+console.log('pool    | entries | live | meta slots | retained KB');
+console.log('--------|--------:|-----:|-----------:|-----------:');
 for (const r of all) {
   const d = r.dormancy;
   const meta = Number.isNaN(d.metaSlots) ? 'n/a' : String(d.metaSlots);
   console.log(
-    `${r.name.padEnd(5)} | ${String(d.entries).padStart(7)} | ${String(d.live).padStart(4)} | ${meta.padStart(10)} | ${String(d.retainedKB).padStart(11)}`,
+    `${r.name.padEnd(7)} | ${String(d.entries).padStart(7)} | ${String(d.live).padStart(4)} | ${meta.padStart(10)} | ${String(d.retainedKB).padStart(11)}`,
   );
 }
