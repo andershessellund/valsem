@@ -222,10 +222,12 @@ Collections keep hashing off the read path:
   `ValueMap`/`ValueSet` formerly kept such a `rollingSum`; since the consed
   HAMT swap their hash *is* the root node's consed hash — structural, cached
   per node, and shared with every equal subtree.
-- **Arrays/lists**: polynomial accumulator with odd multiplier `P` (invertible
-  mod 2³²): `h([a₀…aₙ]) = Σ hash(aᵢ)·Pⁱ`. Composes over concatenation:
-  `hash(A ++ B) = hash(A) + P^|A| · hash(B)` — each tree node (§9) caches
-  `(hash, P^size)` and computes from children in O(1).
+- **Arrays/lists**: for plain arrays (produce finalize-hashing), a polynomial
+  accumulator with odd multiplier `P` (invertible mod 2³²):
+  `h([a₀…aₙ]) = Σ hash(aᵢ)·Pⁱ`, composing over concatenation as
+  `hash(A ++ B) = hash(A) + P^|A| · hash(B)`. `ValueList` formerly kept such
+  an accumulator (`pPow`); since the vector rebuild its hash is derived from
+  its consed root and tail nodes — structural, cached per node.
 
 Planned: cache the raw accumulators on canonical instances so `produce`
 finalization hashes in O(changes), not O(width) (§10.3).
@@ -375,17 +377,21 @@ unchanged write returns `this`).
   wrapper canonicalizes through a `WeakMap<root, wrapper>` — ephemeron
   semantics, no scan, no sweep.
 
-The representation-visibility rule: **`ValueList.array`/`InternedString.value`
-are public because frozen arrays and primitive strings are *genuinely*
-enforceable; `#map`/`#set` are private because Map/Set immutability is not.**
-The representation is public exactly where the platform can protect it.
+The representation-visibility rule: **`InternedString.value` is public because
+a primitive string is *genuinely* enforceable; the collections' backing trees
+are private because nothing else is.** The representation is public exactly
+where the platform can protect it. (`ValueList.array` was public under the
+flat-array backing for the same reason; the vector rebuild retired it —
+`toArray()` provides the frozen snapshot on demand.)
 
 ### 6.3 `ValueList` / `InternedString` — opt-in optimizations
 
 `intern([1, 2])` already yields a canonical frozen `===`-comparable plain
 array; strings natively have value semantics. What the wrappers add is purely
-performance: O(1) incremental successor hashing on `push`/`pop`/`set`,
-zero-allocation pool hits, a precomputed string hash. Accordingly they are
+performance: `ValueList` is the hash-consed radix vector of §8.3 (O(log n)
+persistent `push`/`pop`/`set` with structural sharing; equality is two
+pointer comparisons on root and tail; `toArray()` snapshots on demand), and
+`InternedString` precomputes a string's hash once. Accordingly they are
 **opt-ins for measured hot paths, not defaults** — and on the wire they are
 *hints* (`valsem.list`, `valsem.string`), not model types: a hint-blind
 endpoint decodes them as the plain model value.
@@ -535,7 +541,7 @@ data structure and becomes the data structure):
   cross the wire); iteration order becomes content-determined (an honesty
   *upgrade* over pool-history order).
 
-### 8.3 Lists: dense radix vector, not RRB
+### 8.3 Lists: dense radix vector, not RRB — **shipped**
 
 RRB's O(log n) concat/slice comes from history-*dependent* relaxed nodes —
 which breaks canonical shape and with it hash-consing, O(1) equality, and
@@ -559,14 +565,18 @@ shipped.
 
 ### 8.4 `toArray()` and the cache laws
 
-- `toArray(): readonly T[]` — explicitly O(n), returns the **interned** flat
-  array. Cross-representation unity: `list.toArray() === intern([...same])` —
-  one canonical flat per list value, process-wide. A per-instance `WeakRef`
-  memoizes the flatten; the *consumer* owns the lifetime by holding or
-  dropping the result. Safe in render by construction (stable reference —
-  Immutable.js's `toJS()` with the curse removed).
-- The `.array` property is retired on vector backing: **properties are O(1);
-  methods may cost.**
+- `toArray(): readonly T[]` — explicitly O(n), returns a **frozen** flat
+  array, weakly memoized per instance; the *consumer* owns the lifetime by
+  holding or dropping the result. Since equal lists are one canonical
+  instance, per-instance memoization already means one stable snapshot per
+  list *value* — safe in render by construction (Immutable.js's `toJS()` with
+  the curse removed). As-built deviation from the earlier sketch: the
+  snapshot is **not** passed through `intern()` — deep-interning would swap
+  non-canonical object elements for their canonical equals, making
+  `toArray()[i] !== list.get(i)`, and a snapshot that lies about element
+  identity breaks the collection's own membership-by-identity contract.
+- The `.array` property is retired on vector backing (**done**): **properties
+  are O(1); methods may cost.**
 - **Per-instance caches on canonical values inherit canonical lifetimes** —
   interning makes values long-lived by design, so: O(1)-sized caches may be
   strong; **O(n)-sized caches must be evictable or must not exist** (the
@@ -687,7 +697,7 @@ ops, clearly labeled).
 | 2 | Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work | Mutative-shape benchmark hits target |
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
 | 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
-| 5 | Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array` | contract table holds empirically |
+| 5 | ~~Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array`~~ done | contract table holds empirically |
 | 6 | Hardening backlog: lazy hash seeding; decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant and intern idempotence | — |
 
 Non-goals, permanently: mutable built-ins as values; cycle support; wire
@@ -745,6 +755,15 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Shipped the hash-consed dense radix vector for `ValueList`** — trunk of
+  full 32-wide consed leaves + consed tail (the tail is itself a leaf node,
+  so wrapper equality is two pointer comparisons); trunk/tail split and tree
+  height are pure functions of length, so push-building, `from()`, and
+  set/pop detours converge instance-exactly (pinned across the 32/1024
+  boundaries and height collapse). `.array` retired in favor of `get(i)`,
+  index-order iteration, and `toArray()` — a frozen, weakly-memoized
+  snapshot deliberately NOT deep-interned: swapping elements for canonical
+  equals would break `toArray()[i] === list.get(i)` identity fidelity.
 - **Renamed `Intern{Map,Set,Array}` → `ValueMap`/`ValueSet`/`ValueList`** —
   type names name model kinds; mechanism vocabulary (interning) belongs to
   operations (`intern`, pools, the `interned` symbol). "List", not "Array":

@@ -215,13 +215,12 @@ ValueSet.from([1, 2]) === ValueSet.from([2, 1]);          // true — unordered
 
 Mutators are **persistent**: they return the canonical successor, sharing all
 untouched structure and allocating nothing when the result already exists.
-`ValueMap` and `ValueSet` are backed by **hash‑consed tries**: equal content
+All three collections are backed by **hash‑consed trees** (a CHAMP trie for
+`ValueMap`/`ValueSet`, a dense radix vector for `ValueList`): equal content
 converges on the very same tree nodes process‑wide — however and in whatever
-order it was built — so deep equality between two maps or sets is a pointer
-comparison, an update copies only an O(log n) path, and equal subtrees are
-stored once. `ValueList` hashes incrementally (O(1) per `push`/`pop`/`set`).
-All of them are ideal for hot state that churns through the same few
-configurations.
+order it was built — so deep equality is a pointer comparison, an update
+copies only an O(log n) path, and equal subtrees are stored once. Ideal for
+hot state that churns through the same few configurations.
 
 ```ts
 const v0 = ValueList.empty<number>();
@@ -241,10 +240,13 @@ make a `Map` or `Set` immutable at runtime, so handing one out would let a
 single accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
-`ValueList` and `InternedString` do expose their data — `array` and `value` —
-because there the platform enforces immutability for real: the array is deeply
-`Object.freeze`‑frozen and the string is a primitive. The rule: the
-representation is public exactly where the runtime can actually protect it.
+`ValueList` is a hash‑consed radix vector behind the same rule: read with
+`get(i)` (a few array hops), iterate in index order, and take a frozen
+plain‑array snapshot with `toArray()` — explicitly O(n), weakly memoized per
+instance, elements preserved by identity. `InternedString` *does* expose its
+datum — `value` — because there the platform enforces immutability for real:
+a string is a primitive. The rule: the representation is public exactly where
+the runtime can actually protect it.
 
 `InternedString` wraps a string and precomputes its hash once, turning repeated
 `deepHash`/key lookups on the same string into O(1) reads.
