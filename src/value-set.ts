@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { internHash } from './intern.js';
+import { intern, internHash } from './intern.js';
 import {
   createTrieConfig,
   trieGet,
@@ -28,11 +28,12 @@ const wrappers = new WeakMap<HNode, ValueSet<unknown>>();
 /**
  * Persistent (immutable) set with structural identity.
  *
- * Two `ValueSet` instances containing the same `===` elements are the same
- * object reference — lineage-free, because the backing trie is hash-consed:
- * sets built independently, in different orders, or via add/delete detours
- * converge on one canonical instance, and deep equality is a pointer
- * comparison.
+ * Elements are **interned on entry**, so two `ValueSet` instances with
+ * structurally equal contents are the same object reference — lineage-free,
+ * because the backing trie is hash-consed: sets built independently, in
+ * different orders, or via add/delete detours converge on one canonical
+ * instance, and deep equality is a pointer comparison. Membership probes
+ * are canonicalized, so `has`/`delete` accept any structurally equal value.
  *
  * **Iteration order is unspecified but content-determined.** Element order is
  * not part of the value — `{1, 2}` and `{2, 1}` are the *same* canonical
@@ -70,8 +71,9 @@ export class ValueSet<T> implements ReadonlySet<T> {
     return this.#size;
   }
 
-  /** Whether the canonical `value` is present (matched by SameValueZero). */
+  /** Whether a structurally equal `value` is present (the probe is canonicalized). */
   has(value: T): boolean {
+    value = intern(value);
     return trieGet(CFG, this.#root, internHash(value), value) !== NOT_FOUND;
   }
 
@@ -155,15 +157,17 @@ export class ValueSet<T> implements ReadonlySet<T> {
     return other instanceof ValueSet && (other as ValueSet<T>).#root === this.#root;
   }
 
-  /** Add `value`. Returns `this` if already present. */
+  /** Add `value` (interned on entry). Returns `this` if a structural equal is present. */
   add(value: T): ValueSet<T> {
+    value = intern(value);
     const r = trieInsert(CFG, this.#root, 0, internHash(value), [value]);
     if (r === null) return this;
     return ValueSet.#for<T>(r.node, this.#size + 1);
   }
 
-  /** Remove `value`. Returns `this` if not present. */
+  /** Remove a structurally equal `value`. Returns `this` if not present. */
   delete(value: T): ValueSet<T> {
+    value = intern(value);
     const r = trieRemove(CFG, this.#root, 0, internHash(value), value);
     if (r === null) return this;
     return ValueSet.#for<T>(r.node as HNode, this.#size - 1);
@@ -178,11 +182,12 @@ export class ValueSet<T> implements ReadonlySet<T> {
     return ValueSet.#for<T>(CFG.empty, 0);
   }
 
-  /** Canonical ValueSet from an iterable of values. */
+  /** Canonical ValueSet from an iterable of values (interned on entry). */
   static from<T>(values: Iterable<T>): ValueSet<T> {
     let root: HNode = CFG.empty;
     let size = 0;
-    for (const v of values) {
+    for (const raw of values) {
+      const v = intern(raw);
       const r = trieInsert(CFG, root, 0, internHash(v), [v]);
       if (r !== null) {
         root = r.node;

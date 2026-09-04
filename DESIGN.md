@@ -90,8 +90,8 @@ for delivering value semantics in JS, not part of the model.
 | primitives | `null`, `boolean`, `number`, `string`, `bigint` | `NaN` equals `NaN`; `+0` equals `-0`; `undefined` is special (§2.3) |
 | record | plain frozen object | **unordered** `key → value`; canonical form has sorted keys |
 | list | plain frozen array | **ordered**; length is semantic |
-| set | `ValueSet` (implements `ReadonlySet`) | unordered, `===`-membered |
-| map | `ValueMap` (implements `ReadonlyMap`) | unordered, `===`-keyed, value-keyed |
+| set | `ValueSet` (implements `ReadonlySet`) | unordered; members interned on entry (structural membership) |
+| map | `ValueMap` (implements `ReadonlyMap`) | unordered; keys and values interned on entry (structural, value-keyed) |
 | timestamp family | `Temporal.*` via `valsem/temporal` | eight kinds, registered immutable |
 | your value types | classes via symbols / registration | §5 |
 
@@ -370,12 +370,20 @@ unchanged write returns `this`).
   the pool). Encapsulation removes the hole instead of guarding it — and is
   exactly what let the HAMT swap land invisibly. Instances themselves are
   frozen; the trie root and size are `#private`.
-- Entry membership is by **SameValueZero** (`===` plus NaN-equals-NaN, as
-  native Map/Set) — intern your keys/elements (decode does this
-  automatically). Stored `undefined` is legal in maps and distinct from
-  absence (`trieGet` returns a sentinel, never `undefined`, for a miss); the
-  wrapper canonicalizes through a `WeakMap<root, wrapper>` — ephemeron
-  semantics, no scan, no sweep.
+- **Keys, values, and members are interned on entry** — the invariant, not a
+  convention: everything stored is a canonical value or primitive, so
+  structurally equal raw inputs converge on one canonical collection, raw
+  plain data is frozen at the door (closing the mutation-poisoning hazard —
+  a mutable stored element could otherwise change under its cached hashes
+  and split canonicality), and lookups canonicalize their probe so
+  `get`/`has`/`delete` accept any structural equal. Internally slots compare
+  by SameValueZero, which — on canonical contents — *is* structural
+  equality. Stored `undefined` is legal in maps and distinct from absence
+  (`trieGet` returns a sentinel, never `undefined`, for a miss); the wrapper
+  canonicalizes through a `WeakMap<root, wrapper>` — ephemeron semantics, no
+  scan, no sweep. (Class instances carrying their own `[equals]`/`[hashCode]`
+  but no pool pass through `intern` unchanged — for those, identity
+  semantics and mutation discipline rest with their author.)
 
 The representation-visibility rule: **`InternedString.value` is public because
 a primitive string is *genuinely* enforceable; the collections' backing trees
@@ -565,16 +573,16 @@ shipped.
 
 ### 8.4 `toArray()` and the cache laws
 
-- `toArray(): readonly T[]` — explicitly O(n), returns a **frozen** flat
+- `toArray(): readonly T[]` — explicitly O(n), returns the **interned** flat
   array, weakly memoized per instance; the *consumer* owns the lifetime by
-  holding or dropping the result. Since equal lists are one canonical
-  instance, per-instance memoization already means one stable snapshot per
-  list *value* — safe in render by construction (Immutable.js's `toJS()` with
-  the curse removed). As-built deviation from the earlier sketch: the
-  snapshot is **not** passed through `intern()` — deep-interning would swap
-  non-canonical object elements for their canonical equals, making
-  `toArray()[i] !== list.get(i)`, and a snapshot that lies about element
-  identity breaks the collection's own membership-by-identity contract.
+  holding or dropping the result. Cross-representation unity holds:
+  `list.toArray() === intern([...sameContents])` — one canonical flat per
+  list value, process-wide — and `toArray()[i] === get(i)` always, because
+  elements are already canonical (interned on entry). Safe in render by
+  construction (Immutable.js's `toJS()` with the curse removed). (History:
+  the first vector landing skipped the interning on an element-identity
+  fidelity argument — valid only under the identity-membership semantics
+  that intern-on-entry then replaced; see the decision log.)
 - The `.array` property is retired on vector backing (**done**): **properties
   are O(1); methods may cost.**
 - **Per-instance caches on canonical values inherit canonical lifetimes** —
@@ -761,9 +769,21 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   height are pure functions of length, so push-building, `from()`, and
   set/pop detours converge instance-exactly (pinned across the 32/1024
   boundaries and height collapse). `.array` retired in favor of `get(i)`,
-  index-order iteration, and `toArray()` — a frozen, weakly-memoized
-  snapshot deliberately NOT deep-interned: swapping elements for canonical
-  equals would break `toArray()[i] === list.get(i)` identity fidelity.
+  index-order iteration, and `toArray()`. (The first landing skipped
+  interning the snapshot on an identity-fidelity argument — superseded one
+  step later by intern-on-entry, below.)
+- **Keys, values, and members intern on entry (identity → structural
+  membership)** — prompted by the observation that under identity
+  membership the collections could not keep their own canonicality promise:
+  a mutable raw element could be mutated after insert, changing its hash
+  under the cached node hashes and splitting equal content into distinct
+  "canonical" instances (`ValueList.of(o) !== ValueList.of(o)` after
+  `o.a = 2`) — the same silent-wrong-answer genus that expelled Date and
+  native Map/Set. Interning at the door makes canonical-all-the-way-down an
+  invariant: raw structural equals converge, stored plain data is frozen,
+  probes canonicalize, and `toArray()` is the interned flat with
+  `toArray()[i] === get(i)` — restoring the original §8.4 sketch, whose
+  fidelity objection only held under the replaced semantics.
 - **Renamed `Intern{Map,Set,Array}` → `ValueMap`/`ValueSet`/`ValueList`** —
   type names name model kinds; mechanism vocabulary (interning) belongs to
   operations (`intern`, pools, the `interned` symbol). "List", not "Array":

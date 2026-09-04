@@ -222,6 +222,13 @@ order it was built — so deep equality is a pointer comparison, an update
 copies only an O(log n) path, and equal subtrees are stored once. Ideal for
 hot state that churns through the same few configurations.
 
+Elements, keys, and values are **interned on entry**: everything stored is a
+canonical value or primitive. Structurally equal raw inputs converge
+(`ValueList.of({ a: 1 }) === ValueList.of({ a: 1 })`), raw plain data is
+frozen at the door — a stored element can never be mutated out from under its
+cached hashes — and lookups canonicalize their probe, so `get`/`has`/`delete`
+accept any structurally equal key.
+
 ```ts
 const v0 = ValueList.empty<number>();
 const v1 = v0.push(1).push(2);   // ValueList [1, 2]
@@ -241,9 +248,9 @@ single accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
 `ValueList` is a hash‑consed radix vector behind the same rule: read with
-`get(i)` (a few array hops), iterate in index order, and take a frozen
-plain‑array snapshot with `toArray()` — explicitly O(n), weakly memoized per
-instance, elements preserved by identity. `InternedString` *does* expose its
+`get(i)` (a few array hops), iterate in index order, and take the interned
+frozen snapshot with `toArray()` — explicitly O(n), weakly memoized, with
+`toArray()[i] === get(i)` always. `InternedString` *does* expose its
 datum — `value` — because there the platform enforces immutability for real:
 a string is a primitive. The rule: the representation is public exactly where
 the runtime can actually protect it.
@@ -399,8 +406,8 @@ built on it agrees on one definition of what each kind of thing *is*:
 | primitive | itself (`NaN` equals `NaN`; `+0` equals `-0`) |
 | plain object (record) | the **unordered** set of `key → value` pairs, where `undefined` is not a value |
 | array / `ValueList` | the length and the **ordered** element sequence |
-| `ValueMap` | the **unordered** set of `(key, value)` entries (`===` refs) |
-| `ValueSet` | the **unordered** set of elements (`===` refs) |
+| `ValueMap` | the **unordered** set of `(key, value)` entries (canonical values — interned on entry) |
+| `ValueSet` | the **unordered** set of elements (canonical values — interned on entry) |
 | `InternedString` | the wrapped string |
 | class with `[equals]` / registered type | whatever its handlers say |
 

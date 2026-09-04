@@ -11,10 +11,13 @@
 // built (push sequences, from(), set/pop detours — all one canonical
 // instance), and [equals] is two pointer comparisons (root and tail).
 //
-// The representation is a #private tree; the old public `.array` is retired
-// (there is no longer a platform-enforceable flat representation to expose).
-// `toArray()` materializes a frozen snapshot on demand — O(n), weakly
-// memoized per instance, elements preserved by identity.
+// Elements are **interned on entry** (push/set/from): everything stored is a
+// canonical value or primitive, so structurally equal raw inputs converge on
+// one canonical list, and a stored element can never be mutated out from
+// under its cached hashes. The representation is a #private tree; the old
+// public `.array` is retired (there is no longer a platform-enforceable flat
+// representation to expose). `toArray()` materializes the interned flat
+// array on demand — O(n), weakly memoized per instance.
 //
 // RRB-style O(1) concat/slice is deliberately absent: relaxed nodes make the
 // shape history-dependent, which breaks canonical form — and plain arrays
@@ -24,7 +27,7 @@
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
-import { internHash } from './intern.js';
+import { intern, internHash } from './intern.js';
 
 const BITS = 5;
 const WIDTH = 32;
@@ -161,11 +164,13 @@ const snapshots = new WeakMap<ValueList<unknown>, WeakRef<readonly unknown[]>>()
 /**
  * Persistent (immutable) list with structural identity.
  *
- * Two `ValueList` instances with element-wise SameValueZero contents are the
- * same object reference — lineage-free, because the backing radix vector is
- * hash-consed: lists built by pushes, by `from()`, or through set/pop
- * detours converge on one canonical instance, and deep equality is two
- * pointer comparisons.
+ * Elements are **interned on entry**, so two `ValueList` instances with
+ * structurally equal contents are the same object reference — lineage-free,
+ * because the backing radix vector is hash-consed: lists built by pushes, by
+ * `from()`, or through set/pop detours converge on one canonical instance,
+ * and deep equality is two pointer comparisons. Raw plain-data elements are
+ * canonicalized (and frozen) the way `intern()` does; what `get(i)` returns
+ * is the canonical instance.
  *
  * Element access is `get(i)` (O(log₃₂ n) — a few array hops), iteration
  * streams the tree in index order, and `toArray()` materializes a frozen
@@ -224,15 +229,16 @@ export class ValueList<T> {
   }
 
   /**
-   * A frozen plain-array snapshot of the elements — O(n), weakly memoized
-   * per instance (repeat calls return the same array while it stays alive).
-   * Elements are preserved by identity.
+   * The **interned** flat-array snapshot of the elements — O(n) on first
+   * call, weakly memoized per instance. Elements are already canonical
+   * (interned on entry), so `toArray()[i] === get(i)` always, and the
+   * cross-representation unity `list.toArray() === intern([...sameContents])`
+   * holds: one canonical flat array per list value, process-wide.
    */
   toArray(): readonly T[] {
     const memo = snapshots.get(this as ValueList<unknown>)?.deref();
     if (memo !== undefined) return memo as readonly T[];
-    const out = [...this];
-    Object.freeze(out);
+    const out = intern([...this]) as readonly T[];
     snapshots.set(this as ValueList<unknown>, new WeakRef(out));
     return out;
   }
@@ -246,8 +252,9 @@ export class ValueList<T> {
     );
   }
 
-  /** Append `value`. Returns the canonical successor. */
+  /** Append `value` (interned on entry). Returns the canonical successor. */
   push(value: T): ValueList<T> {
+    value = intern(value);
     const tailSlots = this.#tail.slots;
     if (tailSlots.length < WIDTH) {
       const newTail = consLeaf([...tailSlots, value]);
@@ -292,11 +299,12 @@ export class ValueList<T> {
     return ValueList.#of<T>(root, shift, leaf, this.#length - 1);
   }
 
-  /** Replace the element at `index`. Returns the canonical successor. */
+  /** Replace the element at `index` (interned on entry). Returns the canonical successor. */
   set(index: number, value: T): ValueList<T> {
     if (!Number.isInteger(index) || index < 0 || index >= this.#length) {
       throw new RangeError(`ValueList.set: index ${index} out of range [0, ${this.#length})`);
     }
+    value = intern(value);
     const trunkLen = this.#trunkLen;
     if (index >= trunkLen) {
       const ti = index - trunkLen;
@@ -324,11 +332,12 @@ export class ValueList<T> {
     return ValueList.from(items);
   }
 
-  /** Canonical ValueList for the given iterable. */
+  /** Canonical ValueList for the given iterable (elements interned on entry). */
   static from<T>(items: Iterable<T> | ArrayLike<T>): ValueList<T> {
     const arr: T[] = Array.isArray(items) ? (items.slice() as T[]) : Array.from(items as Iterable<T>);
     const len = arr.length;
     if (len === 0) return ValueList.empty<T>();
+    for (let i = 0; i < len; i++) arr[i] = intern(arr[i]!);
     // Trunk/tail split is a pure function of the length: the tail holds the
     // last ((len − 1) % 32) + 1 elements, the trunk the (multiple-of-32) rest.
     const trunkLen = ((len - 1) >>> BITS) << BITS;

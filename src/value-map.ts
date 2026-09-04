@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { internHash } from './intern.js';
+import { intern, internHash } from './intern.js';
 import {
   createTrieConfig,
   trieGet,
@@ -40,11 +40,13 @@ const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
 /**
  * Persistent (immutable) map with structural identity.
  *
- * Two `ValueMap` instances with the same set of `(===, ===)` entries are the
- * same object reference — and because the backing trie is hash-consed, that
- * holds *lineage-free*: maps built independently, in different orders, or via
- * insert/delete detours all converge on one canonical instance, and deep
- * equality between any two ValueMaps is a pointer comparison.
+ * Keys and values are **interned on entry**, so two `ValueMap` instances
+ * with structurally equal entries are the same object reference — and
+ * because the backing trie is hash-consed, that holds *lineage-free*: maps
+ * built independently, in different orders, or via insert/delete detours all
+ * converge on one canonical instance, and deep equality between any two
+ * ValueMaps is a pointer comparison. Lookups canonicalize their probe, so
+ * `get`/`has`/`delete` accept any structurally equal key.
  *
  * **Iteration order is unspecified but content-determined.** Entry order is
  * not part of the value — `{a→1, b→2}` and `{b→2, a→1}` are the *same*
@@ -84,13 +86,15 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     return this.#size;
   }
 
-  /** Whether the canonical `key` is present (matched by SameValueZero). */
+  /** Whether a structurally equal `key` is present (the probe is canonicalized). */
   has(key: K): boolean {
+    key = intern(key);
     return trieGet(CFG, this.#root, internHash(key), key) !== NOT_FOUND;
   }
 
-  /** The value for the canonical `key`, or `undefined` if absent. */
+  /** The value under a structurally equal `key`, or `undefined` if absent. */
   get(key: K): V | undefined {
+    key = intern(key);
     const r = trieGet(CFG, this.#root, internHash(key), key);
     return r === NOT_FOUND ? undefined : (r as V);
   }
@@ -131,18 +135,21 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   /**
-   * Set `key` → `value`. Returns the canonical ValueMap with the entry
-   * applied. If the entry is already present and SameValueZero-equal,
-   * returns `this`.
+   * Set `key` → `value` (both interned on entry). Returns the canonical
+   * ValueMap with the entry applied. If a structurally equal entry is
+   * already present, returns `this`.
    */
   set(key: K, value: V): ValueMap<K, V> {
+    key = intern(key);
+    value = intern(value);
     const r = trieInsert(CFG, this.#root, 0, internHash(key), [key, value]);
     if (r === null) return this;
     return ValueMap.#for<K, V>(r.node, this.#size + (r.added ? 1 : 0));
   }
 
-  /** Remove `key`. Returns `this` if `key` was not present. */
+  /** Remove a structurally equal `key`. Returns `this` if not present. */
   delete(key: K): ValueMap<K, V> {
+    key = intern(key);
     const r = trieRemove(CFG, this.#root, 0, internHash(key), key);
     if (r === null) return this;
     return ValueMap.#for<K, V>(r.node as HNode, this.#size - 1);
@@ -157,11 +164,13 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     return ValueMap.#for<K, V>(CFG.empty, 0);
   }
 
-  /** Canonical ValueMap from an iterable of `[key, value]` entries. */
+  /** Canonical ValueMap from an iterable of `[key, value]` entries (interned on entry). */
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
     let root: HNode = CFG.empty;
     let size = 0;
-    for (const [k, v] of entries) {
+    for (const [rawK, rawV] of entries) {
+      const k = intern(rawK);
+      const v = intern(rawV);
       const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
       if (r !== null) {
         root = r.node;
@@ -183,8 +192,9 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     let root: HNode = CFG.empty;
     let size = 0;
     for (const k in obj) {
-      const v = obj[k];
-      if (v === undefined) continue;
+      const raw = obj[k];
+      if (raw === undefined) continue;
+      const v = intern(raw);
       const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
       if (r !== null) {
         root = r.node;

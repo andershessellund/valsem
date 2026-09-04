@@ -82,16 +82,16 @@ describe('ValueList', () => {
     expect([...a]).toEqual([10, 20, 30]);
   });
 
-  it('toArray() returns a frozen snapshot, memoized per instance', () => {
+  it('toArray() returns the interned frozen snapshot, memoized per instance', () => {
     const a = ValueList.of(1, 2, 3);
     const snap = a.toArray();
     expect(Array.isArray(snap)).toBe(true);
     expect(Object.isFrozen(snap)).toBe(true);
     expect(snap).toEqual([1, 2, 3]);
     expect(a.toArray()).toBe(snap); // weakly memoized
-    // Elements are preserved by identity.
-    const obj = { id: 1 };
-    expect(ValueList.of(obj).toArray()[0]).toBe(obj);
+    // Elements come back canonical — identical to what get() returns.
+    const l = ValueList.of({ id: 1 });
+    expect(l.toArray()[0]).toBe(l.get(0));
   });
 
   it('[equals] uses kind discriminator', () => {
