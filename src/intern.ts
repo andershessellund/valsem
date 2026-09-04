@@ -5,8 +5,9 @@
 //   1. Structural equality → reference equality (===)
 //   2. Hash code is precomputed and cached in a WeakMap (O(1) deepHash)
 //   3. The interner does NOT hold strong references — canonical copies may
-//      be garbage-collected when no other references exist; their entries
-//      are then removed from the pool via FinalizationRegistry.
+//      be garbage-collected when no other references exist; their pool
+//      metadata is then reclaimed by the shared incremental sweeper
+//      (see intern-pool.ts for the design and its measured rationale).
 //
 // Supported value types: primitives (returned as-is), plain objects, arrays,
 // and any type registered as `{ immutable: true }` via `deepEqual.register`
@@ -28,6 +29,7 @@ import {
   _immutableTypes,
   _mutableBuiltinReason,
 } from './deep-equal.js';
+import { createInternPool } from './intern-pool.js';
 
 // ---------------------------------------------------------------------------
 // Shared precomputed hash cache
@@ -40,22 +42,10 @@ const hashCache = new WeakMap<object, number>();
 _setPrecomputedHashes(hashCache);
 
 // ---------------------------------------------------------------------------
-// Pool — hash → bucket of WeakRefs to canonical objects
+// Pool — the global weak pool, on the shared sweeper machinery
 // ---------------------------------------------------------------------------
 
-const pool = new Map<number, Set<WeakRef<object>>>();
-
-interface FinalizerEntry {
-  hash: number;
-  ref: WeakRef<object>;
-}
-
-const registry = new FinalizationRegistry<FinalizerEntry>(({ hash, ref }) => {
-  const bucket = pool.get(hash);
-  if (!bucket) return;
-  bucket.delete(ref);
-  if (bucket.size === 0) pool.delete(hash);
-});
+const pool = createInternPool<object>();
 
 // ---------------------------------------------------------------------------
 // Public lookup helpers
@@ -210,26 +200,13 @@ function lookupOrStore(
 ): object {
   const h = deepHash(obj);
 
-  let bucket = pool.get(h);
-  if (bucket) {
-    for (const ref of bucket) {
-      const candidate = ref.deref();
-      if (candidate !== undefined && matches(candidate)) {
-        return candidate;
-      }
-    }
-  } else {
-    bucket = new Set();
-    pool.set(h, bucket);
-  }
+  const existing = pool.lookup(h, matches);
+  if (existing !== undefined) return existing;
 
   // Store precomputed hash, freeze, and weakly retain in pool.
   hashCache.set(obj, h);
   if (freeze) Object.freeze(obj);
-  const ref = new WeakRef(obj);
-  bucket.add(ref);
-  registry.register(obj, { hash: h, ref });
-  return obj;
+  return pool.register(obj, h);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,14 +262,7 @@ function shallowRefEqual(a: object, b: object): boolean {
 // Test-only inspection (not exported from the package barrel)
 // ---------------------------------------------------------------------------
 
-/** @internal Pool size — exposed for tests. */
+/** @internal Live pool size — exposed for tests. */
 export function _internPoolSize(): number {
-  let n = 0;
-  for (const bucket of pool.values()) n += bucket.size;
-  return n;
-}
-
-/** @internal Number of distinct hash buckets — exposed for tests. */
-export function _internBucketCount(): number {
-  return pool.size;
+  return pool.size();
 }

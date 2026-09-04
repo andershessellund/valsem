@@ -7,8 +7,10 @@ global interning, and immutable value collections.
 npm install valsem
 ```
 
-> Requires a runtime with `WeakRef` and `FinalizationRegistry` (Node 14.6+, and
-> all current browsers). Ships as ES modules with full TypeScript types.
+> Requires a runtime with `WeakRef` (Node 14.6+, and all current browsers).
+> `FinalizationRegistry` is optional — when present, valsem uses a single
+> sentinel as a GC-epoch hint for pool cleanup, never one cell per value.
+> Ships as ES modules with full TypeScript types.
 
 ---
 
@@ -137,9 +139,12 @@ That yields three properties at once:
 2. **Hashing is O(1)** — the hash is cached on the canonical instance.
 3. **Sharing is automatic** — identical subtrees are stored once.
 
-The pool holds values **weakly** (via `WeakRef` + `FinalizationRegistry`), so
-canonical instances are garbage‑collected once you stop referencing them —
-interning does not leak memory.
+The pool holds values **weakly** (via `WeakRef`), so canonical instances are
+garbage‑collected once you stop referencing them — interning does not leak
+memory. Pool bookkeeping is reclaimed by an incremental, traffic‑driven
+sweeper (plus a single GC‑epoch sentinel): a bounded constant tax on pool
+operations, with no per‑entry finalizers, no monolithic cleanup passes, and no
+timers.
 
 ```ts
 import { internEqual, internHash } from 'valsem';
@@ -456,7 +461,9 @@ position or intent makes it meaningful there:
   passed through, so a mutable value can never sit in a pool or silently miss as
   a `HashMap` key.
 - **The global pool is weak.** Canonical instances are reclaimed by GC when
-  unreferenced; interning will not grow memory without bound.
+  unreferenced; interning will not grow memory without bound. Pool metadata is
+  swept incrementally as a bounded tax on pool traffic — cleanup work is
+  proportional to use, zero when idle.
 - **No cycle handling.** `deepEqual` / `deepHash` / `intern` assume acyclic,
   data‑shaped values. Cyclic graphs are out of scope.
 - **Hashing is seeded and flood‑resistant.** The default leaf hash is a

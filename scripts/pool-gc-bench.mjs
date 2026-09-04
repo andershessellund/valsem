@@ -1,11 +1,14 @@
 // ---------------------------------------------------------------------------
 // pool-gc-bench — sweep-based InternPool vs FinalizationRegistry-based pool.
 //
-// Compares three cleanup strategies over identical Map<hash, Set<WeakRef>>
-// bucket structures:
+// Compares cleanup strategies over hash-bucketed WeakRef pools:
 //
-//   sweep    — the shipped InternPool (threshold sweep inside register)
-//   fr       — FinalizationRegistry per entry (the global pool's mechanism)
+//   shipped  — the InternPool as shipped (circle sweeper + GC-epoch backstop
+//              since the strategy swap; formerly a threshold sweep)
+//   fr       — FinalizationRegistry per entry (the global pool's pre-swap
+//              mechanism)
+//   circle   — the standalone circle prototype, no backstop, lookups pay 1
+//   circ+gc  — the standalone prototype in the shipped configuration
 //   none     — no cleanup at all (baseline; isolates each strategy's tax)
 //
 // Methodology notes:
@@ -53,7 +56,7 @@ async function drain() {
 function makeSweepPool() {
   const pool = createInternPool();
   return {
-    name: 'sweep',
+    name: 'shipped',
     lookup: (hash, predicate) => pool.lookup(hash, predicate),
     register: (value, hash) => pool.register(value, hash),
     live: () => pool.size(),

@@ -231,8 +231,9 @@ finalization hashes in O(changes), not O(width) (§10.3).
 
 ### 4.1 Mechanics
 
-A global `Map<hash, Set<WeakRef<object>>>` plus a `WeakMap<object, hash>`
-cache. `intern(value)`:
+A global pool of `hash → bucket record` (the singleton `WeakRef` is inlined in
+the record; a true hash collision promotes it to an array) plus a
+`WeakMap<object, hash>` cache. `intern(value)`:
 
 - primitives return as-is;
 - objects marked `[interned]` or already in the hash cache return immediately;
@@ -246,10 +247,28 @@ cache. `intern(value)`:
 - everything else (unregistered class instances) passes through; the four
   mutable built-in families **throw**.
 
-On a miss: the hash is cached, plain data is **frozen**, a `WeakRef` enters the
-pool, and a `FinalizationRegistry` removes dead entries. The pool holds nothing
-alive: canonical instances are reclaimed when unreferenced. **Interning does
-not leak.**
+On a miss: the hash is cached, plain data is **frozen**, and a `WeakRef` enters
+the pool. The pool holds nothing alive: canonical instances are reclaimed when
+unreferenced. **Interning does not leak.**
+
+Pool *metadata* (records, dead refs) is reclaimed by a global **incremental
+sweeper**: every pool's bucket records sit in one circular doubly-linked list,
+and a cursor advances around it under a strict budget. The cleanup bill splits
+three ways — **registrations pay a traffic tax** (a few slots of sweep credit
+each, batched so the fixed cost lands once per ~16 ops), **GC epochs pay the
+death tax** (ONE `FinalizationRegistry` sentinel — O(1) cells total, never per
+entry — fires after each GC, the only event that can create dead refs, and
+runs one bounded slice), and **lookups pay nothing**. An empty bucket unlinks
+itself and deletes its map entry through a per-pool shared `WeakRef` to the
+owning map, so a dropped pool's metadata unwinds wholesale as the cursor meets
+it. The guarantee: *dead metadata anywhere is reclaimed within O(metadata /
+budget) registrations or a few GC epochs, whichever comes first; nothing grows
+without traffic, everything shrinks with any traffic; no monolithic sweep
+pass, no per-entry finalizers, no timers.* Chosen over per-entry
+`FinalizationRegistry` and over monolithic threshold sweeps **on measurement**
+(`scripts/pool-gc-bench.mjs`): equal-or-better wall time, and both pause
+pathologies — 15–54 ms in-batch threshold-sweep passes, 10–18 ms post-GC
+finalization storms — flattened to baseline GC levels.
 
 Canonical records are rebuilt with **sorted keys** and `__proto__`-safe field
 definition (a `__proto__` key from `JSON.parse` becomes an ordinary own data
@@ -491,7 +510,7 @@ the data structure and becomes the data structure):
   changed frontier only.
 - **Memory hits the distinct-subtree floor**: maximal sharing process-wide,
   weakly held, GC'd. (Pedigree: hash-consing → ROBDD unique tables → Merkle
-  DAGs; `FinalizationRegistry` provides what BDD engines hand-roll.)
+  DAGs; the incremental pool sweeper provides what BDD engines hand-roll.)
 - **Diff becomes Δ-proportional**: pointer-pruned descent — a 100k-entry map
   with 3 changes diffs in ~3·log n. End-to-end: edit → O(Δ log n) finalize →
   O(Δ log n) diff → minimal wire patch. The live-query dream, made asymptotic.
@@ -689,6 +708,16 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
 - **Positioning: dedup and lineage-free equality, not update throughput** —
   measured 18× loss on Mutative's arena, published honestly; the arena we
   define is the one the frontend actually runs.
+- **Replaced per-entry `FinalizationRegistry` and threshold sweeps with the
+  global incremental circle sweeper + O(1) GC-epoch sentinel** — decided on
+  measurement, not argument (`scripts/pool-gc-bench.mjs`): per-entry FR was
+  *not* slower on throughput (refuting the initial argument) but storms
+  10–18 ms in post-GC tasks; threshold sweeps pause 15–54 ms in-batch; the
+  circle+backstop matched or beat both on wall time with both pause shapes at
+  baseline. Two measured traps now baked into the design: deref the owner
+  only on the removal path (owner-deref per visit cost 2.4×), and hold the
+  backstop registry from a module binding (an unreferenced
+  `FinalizationRegistry` is collected and its callbacks silently stop).
 - **Renamed `Intern{Map,Set,Array}` → `ValueMap`/`ValueSet`/`ValueList`** —
   type names name model kinds; mechanism vocabulary (interning) belongs to
   operations (`intern`, pools, the `interned` symbol). "List", not "Array":
