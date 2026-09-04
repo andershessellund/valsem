@@ -830,6 +830,19 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Freeze-disable experiment: measured, not shipped (negative result
+  three of the phase)** — a temporary `_setFreezing(false)` switch was A/B'd
+  across every arena. Event-driven big-array: zero. Collections, recurrent,
+  small-churn: zero. Sync-burst big-array: −9–15%. The one genuine,
+  regime-independent cost found: `Object.freeze` on records is ~38 ns per
+  property (−21% on the 1000-key arena — where `ValueMap` is 30× faster
+  than either freeze setting anyway). Conclusion: the phase-2 optimizations
+  (shadow copies, transition memoization, virtual drafts) removed every
+  path where frozenness was expensive — freezing is now effectively free
+  where the library's shapes and regimes live, so no escape hatch ships and
+  the safety invariant stands without a performance caveat. The switch was
+  reverted; the produce bench gained the honest big-array scenario
+  (held results, one produce per macrotask) as a permanent in-suite arena.
 - **The AddToKeptObjects correction (amending the entry below)** — pressed
   on whether 26 µs could be real ("do we re-hash the entire array?" — no:
   hashing is O(1) delta), the bisection was redone under a

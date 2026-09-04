@@ -3,6 +3,9 @@
 //
 // Shapes:
 //   big-array   { arr: [N items] }, modify one item's field   (the Mutative arena)
+//   big-array (held, macrotask) — same shape under the honest regime: results
+//               retained, one produce per task (see scripts/big-array-bench.mjs
+//               for clean per-process runs of this arena)
 //   wide-record 1000-key record, modify one value
 //   value-map   ValueMap(N) via DraftMap.set (valsem) vs Map drafts (immer/mutative)
 //   value-list  ValueList(N) set+push (valsem) vs array (immer/mutative)
@@ -92,6 +95,61 @@ function makeItems(n) {
     arr[mid] = { ...arr[mid], value: i };
     return { ...plainBase, arr };
   });
+}
+
+// --- big-array, held + macrotask (the arena of record, in-suite) ------------
+{
+  console.log(
+    `\nbig-array (held, macrotask per op) — results retained in a 50-ring, one produce per task`,
+  );
+  const yieldTask = () => new Promise((r) => setImmediate(r));
+  async function benchTask(name, fn, iterations = ITER) {
+    const ring = new Array(50);
+    for (let i = 0; i < Math.min(200, iterations); i++) {
+      ring[i % 50] = fn(i);
+      await yieldTask();
+    }
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < iterations; i++) {
+      ring[i % 50] = fn(i);
+      await yieldTask();
+    }
+    const total = Number(process.hrtime.bigint() - t0) / iterations / 1000;
+    const y0 = process.hrtime.bigint();
+    for (let i = 0; i < iterations; i++) await yieldTask();
+    const yieldCost = Number(process.hrtime.bigint() - y0) / iterations / 1000;
+    const per = total - yieldCost;
+    const opsPerSec = (1e6 / per).toFixed(0);
+    console.log(
+      `  ${name.padEnd(26)} ${String(opsPerSec).padStart(10)} ops/s   ${per.toFixed(1).padStart(8)} µs/op  (yield ${yieldCost.toFixed(1)} µs subtracted)`,
+    );
+  }
+
+  const mid = N >> 1;
+  // Successor values offset by 1e6: the pool is process-global, so reusing the
+  // sync arena's values would transition-memo/pool-hit instead of producing.
+  const valsemBase = intern({ arr: makeItems(N) });
+  await benchTask('valsem produce', (i) =>
+    valsemProduce(valsemBase, (d) => {
+      d.arr[mid].value = i + 1_000_000;
+    }),
+  );
+
+  setAutoFreeze(false);
+  const immerBase = immerProduce({ arr: makeItems(N) }, () => {});
+  await benchTask('immer (no freeze)', (i) =>
+    immerProduce(immerBase, (d) => {
+      d.arr[mid].value = i + 1_000_000;
+    }),
+  );
+  setAutoFreeze(true);
+
+  const mutativeBase = { arr: makeItems(N) };
+  await benchTask('mutative', (i) =>
+    mutativeCreate(mutativeBase, (d) => {
+      d.arr[mid].value = i + 1_000_000;
+    }),
+  );
 }
 
 // --- wide-record -----------------------------------------------------------
