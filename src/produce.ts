@@ -388,19 +388,28 @@ function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): Ob
  * evictable), and is private to copyArr, never mutated, only sliced.
  */
 const shadows = new WeakMap<object, unknown[]>();
+const copiedOnce = new WeakSet<object>();
 const SHADOW_MIN = 64;
 
 /**
  * Copy an array that may be frozen. V8's `slice` fast path does not cover
  * frozen-elements arrays (measured 65× slower); spread does — and for large
- * bases the unfrozen shadow beats even the spread.
+ * bases copied REPEATEDLY (fan-out from one state) an unfrozen shadow beats
+ * even the spread. The shadow is built only on the second copy of the same
+ * base, so one-shot bases (reducer chains) never pay for it.
  */
 function copyArr<T>(a: readonly T[]): T[] {
   if (!Object.isFrozen(a)) return (a as T[]).slice();
   if (a.length < SHADOW_MIN) return [...a];
-  let s = shadows.get(a as object) as T[] | undefined;
-  if (s === undefined) shadows.set(a as object, (s = [...a]));
-  return s.slice();
+  const s = shadows.get(a as object) as T[] | undefined;
+  if (s !== undefined) return s.slice();
+  if (copiedOnce.has(a as object)) {
+    const built = [...a];
+    shadows.set(a as object, built);
+    return built.slice();
+  }
+  copiedOnce.add(a as object);
+  return [...a];
 }
 
 function arrLen(state: ArrayState): number {

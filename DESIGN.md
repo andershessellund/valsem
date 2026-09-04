@@ -671,6 +671,19 @@ frozen-aware copies):
 | 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | **fastest — and the only `===` results.** Transition memoization: a successor is a pure function of (canonical base, exact delta), so a repeat produce is O(touched) with no copy, no hash walk, no compare |
 
+**Retention-pattern audit** (`scripts/retention-bench.mjs`, one scenario per
+process — heap cross-pollution otherwise corrupts every number): the
+discarded-result arena flatters the unfrozen libraries, whose results die in
+the scavenger nursery. Under realistic patterns — results held by
+subscribers/history, or the reducer chain `current = produce(current, …)` —
+their cost rises 1.5–2× (mutative 3.4 → 5–7 µs, immer 3 → 6–12 µs) while
+valsem's ~27 µs is retention-invariant (its bill was never the caller's
+retention; it is the pooling infrastructure per novel big flat array). Net:
+plain-array stays ~4–5× behind under real usage — and the reducer chain over
+`{ list: ValueList }`, the designed shape, runs at **5.5 µs — inside their
+band, with canonical `===` results**. Under realistic retention the
+migration story closes the gap entirely.
+
 The historical 18×→2–3× target is met and beaten where the design says hot
 data belongs (the collections); flat plain arrays keep an honest 8× novelty
 tax that buys `===` equality, O(1) hashing, and process-wide dedup.
@@ -787,6 +800,17 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
   ≤32-entry collection is already one root node); node-level set algebra.
+- **Retention-pattern audit** — prompted by the observation that real
+  applications HOLD the state they produce: benched discarded vs held vs
+  reducer-chain vs chain-with-history, each in a fresh process (in-process
+  section order corrupted results by whole multiples — a benchmark lesson
+  worth the entry alone). Findings: the discarded arena flatters the
+  unfrozen libraries ~1.5–2×; valsem's plain-array cost is
+  retention-invariant; the gap under realistic patterns is ~4–5×, closed
+  entirely by the ValueList chain at 5.5 µs. Also fixed en route: the
+  shadow-copy cache built a shadow on FIRST copy, double-copying one-shot
+  bases (reducer chains) — now engages only on the second copy of the same
+  base (chain scenario 47.8 → 25.9 µs).
 - **Big-array floor investigated; nursery-deferred WeakRefs tried and
   REVERTED (negative result, recorded)** — isolates showed
   `new WeakRef(freshBigArray)` costs ~24 µs (vs 0.04 µs on an old object,
