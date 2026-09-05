@@ -10,6 +10,7 @@
 | `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
 | `HashMap` | class | Mutable map with structural (interned) keys. |
 | `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
+| `ValueDate` | class | An immutable, canonical timestamp — the value a `Date` stands for. `ValueDate.of(x)` takes what `new Date(x)` takes; `toDate()` returns a fresh mutable `Date`; `valueOf()` is the epoch; `toJSON()` matches `Date`. |
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
 | `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |
 | `nothing` / `isDraft` | symbol / function | Recipe sentinel for "result is `undefined`"; draft detection. |

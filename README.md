@@ -44,8 +44,9 @@ npm install valsem
   frozen, canonical values. Equal states are `===`; unchanged subtrees are the
   same objects across *every* version, not just along one ancestry chain.
 - **`HashMap`** — a mutable map keyed by *content*: `{ id: 1, table: 'users' }`
-  and `{ table: 'users', id: 1 }` are the same key. Lookups with canonical
-  keys run within 2× of a native `Map`.
+  and `{ table: 'users', id: 1 }` are the same key. A lookup with an
+  already-canonical key is O(1) — no hashing, no walk — within 2× of a native
+  `Map`.
 - **`ValueMap`, `ValueSet`, `ValueList`** — immutable collections with
   structural sharing whose *instances* are canonical: equality is a pointer
   compare, hashing is a property read, iteration outpaces Immutable.js.
@@ -71,7 +72,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | --- | --- | --- |
 | Result | a frozen copy | a frozen **canonical** value — equal content ⟹ `===` |
 | `Map` / `Set` in state | `enableMapSet()` | `ValueMap` / `ValueSet` (drafted as `DraftMap` / `DraftSet`); native `Map`/`Set` are rejected with the replacement named |
-| `Date` in state | allowed | rejected — use `Temporal.Instant` via `valsem/temporal` |
+| `Date` in state | allowed | rejected — use `ValueDate.of(date)` (or Temporal via `valsem/temporal`) |
 | Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — one method or one registration, see [Extending](#extending) |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | not yet |
@@ -113,7 +114,7 @@ rather than guessing:
 intern({ at: new Date() });
 // TypeError: intern: Date cannot be interned — valsem gives value semantics to
 // immutable values only, and a Date can be re-timed with setTime(). Use
-// Temporal.Instant instead: … with import 'valsem/temporal'.
+// ValueDate.of(date) instead — an immutable, canonical timestamp …
 
 deepEqual(new Date(0), new Date(0)); // false — reference semantics for mutable objects
                                      // (a development-mode warning explains why, once)
@@ -134,9 +135,12 @@ cache.get({ id: 1, table: 'users' }); // row — key order irrelevant
 const rows = cache.getOrCreate({ table: 'users', id: 2 }, (key) => loadRow(key));
 ```
 
-Keys are interned on the way in, so a lookup costs a hash walk of the key the
-first time (~350 ns for a small record) and ~40 ns when the key you hold is
-already canonical.
+Keys are interned on the way in. If the key you pass is already canonical —
+anything that came out of `produce`, `intern`, or a collection — the lookup is
+**O(1)** regardless of the key's size: no hashing, no structural walk, ~40 ns
+(`getCanonical` skips even the check, at native-`Map` parity). A raw key is
+walked and hashed once on the way in (~350 ns for a small record); the
+canonical key it resolves to is what the map actually holds.
 
 ### `ValueMap`, `ValueSet`, `ValueList` — canonical immutable collections
 
@@ -182,6 +186,22 @@ next.users.get('marie'); // { role: 'admin' } — canonical, frozen
 Updates path-copy O(log n) nodes and share the rest — so a one-key change to a
 10,000-entry `ValueMap` is a few microseconds, where a drafted native `Map`
 copies the whole container.
+
+### `ValueDate` — the value a `Date` stands for
+
+A `Date` can be re-timed, so it is not a value. What it *means* is one number,
+and `ValueDate` holds exactly that — canonical, comparable, serialisable the
+way a `Date` is:
+
+```ts
+import { ValueDate } from 'valsem';
+
+const at = ValueDate.of('2026-09-05T10:00:00Z');  // accepts what new Date(x) accepts
+at === ValueDate.of(new Date(at.epochMs));         // true — one instant, one instance
+at < ValueDate.of(Date.now());                     // valueOf() is the epoch: comparisons work
+at.toDate().setHours(0);                           // a fresh mutable Date; `at` is unchanged
+JSON.stringify({ at });                            // {"at":"2026-09-05T10:00:00.000Z"} — as with a Date
+```
 
 ## Benchmarks
 
@@ -326,6 +346,7 @@ bindings (`valsem/binding`).
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `HashMap` | mutable map keyed by content |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
+| `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
 | `configureHasher`, `configureLimits` | hardening knobs |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |

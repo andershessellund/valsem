@@ -139,8 +139,9 @@ const immutableTypes = new Set<Function>();
  * throw and all share these strings.
  */
 const MUTABLE_BUILTINS = new Map<Function, string>([
-  [Date, 'a Date can be re-timed with setTime(). Use Temporal.Instant instead: ' +
-    "Temporal.Instant.fromEpochMilliseconds(date.getTime()), with import 'valsem/temporal'"],
+  [Date, 'a Date can be re-timed with setTime(). Use ValueDate.of(date) instead — an ' +
+    'immutable, canonical timestamp with toDate() for a mutable copy — or Temporal.Instant ' +
+    "via import 'valsem/temporal'"],
   [RegExp, 'a RegExp carries a mutable lastIndex cursor, and is behavior rather than ' +
     'data. Carry { source, flags } as a plain record instead'],
   [Map, 'a Map can be written to after construction. Use ValueMap.from(...), which ' +

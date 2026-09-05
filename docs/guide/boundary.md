@@ -10,7 +10,7 @@ immutable replacement:
 
 | Instead of | Use |
 | --- | --- |
-| `Date` | `Temporal.Instant` — `Temporal.Instant.fromEpochMilliseconds(d.getTime())`, with [`valsem/temporal`](/guide/extending#temporal-valsem-temporal) |
+| `Date` | `ValueDate.of(d)` — an immutable, canonical timestamp with `toDate()` for a mutable copy; or `Temporal.Instant` with [`valsem/temporal`](/guide/extending#temporal-valsem-temporal) |
 | `RegExp` | a plain `{ source, flags }` record — a regex is behavior, not data |
 | `Map` | [`ValueMap`](/guide/collections) |
 | `Set` | [`ValueSet`](/guide/collections) |
