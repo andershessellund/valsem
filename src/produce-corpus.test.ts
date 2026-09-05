@@ -1,7 +1,7 @@
 // Cases adapted from the immer test suite (base.js, updateScenarios.js,
 // regressions, null.js) — the behaviors a produce implementation earns the
 // hard way. Where valsem's semantics deliberately diverge (canonical results,
-// record undefined-dropping, symbol keys rejected), the divergence is
+// record undefined-dropping, symbol keys as part of the value), the divergence is
 // asserted, not skipped.
 import { describe, it, expect } from 'vitest';
 import { produce, produceWithPatches, applyPatches, nothing } from './produce.js';
@@ -339,12 +339,12 @@ describe('corpus — draft introspection', () => {
     });
   });
 
-  it('symbol keys on record drafts are rejected (records take string keys)', () => {
+  it('symbol keys on record drafts are part of the value (immer copies them too)', () => {
     const sym = Symbol('k');
-    expect(() =>
-      produce(intern({ a: 1 }), (d) => {
-        (d as Record<symbol, unknown>)[sym] = 1;
-      }),
-    ).toThrow(/string keys/);
+    const next = produce(intern({ a: 1 }), (d) => {
+      (d as Record<symbol, unknown>)[sym] = 1;
+    });
+    expect(next).toBe(intern({ a: 1, [sym]: 1 }));
+    expect((next as Record<symbol, unknown>)[sym]).toBe(1);
   });
 });

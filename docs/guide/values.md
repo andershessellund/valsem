@@ -26,8 +26,32 @@ boundary. Interning your data makes `deepEqual` fast retroactively.
 `deepHash` is its **companion**: whenever `deepEqual(a, b)` is `true`,
 `deepHash(a) === deepHash(b)` is guaranteed (the converse is not — hashes can
 collide). Arrays hash order-dependently. `deepHash` throws for values it
-cannot hash consistently — symbols, functions, class instances with no
-registered handler, and the [mutable built-ins](/guide/boundary).
+cannot hash consistently — functions, class instances with no registered
+handler, and the [mutable built-ins](/guide/boundary).
+
+### Symbols are values
+
+A registered symbol (`Symbol.for(name)`) *is* its name: one per name in the
+process, hashed by that name, so it agrees across realms and installs. A
+unique symbol (`Symbol(desc)`, and the well-known ones) is an identity with no
+content: it hashes by an id assigned on first sight, so two symbols with the
+same description are two values, and a unique symbol never leaves the process
+— exactly as with `===`. Symbols work wherever a value does: `HashMap` keys,
+`ValueSet` members, record fields, and **record keys**.
+
+```ts
+const kind = Symbol('kind');
+intern({ a: 1, [kind]: 'x' }) === intern({ [kind]: 'x', a: 1 }); // true — symbol keys are part of the value
+deepEqual({ [kind]: 1 }, { [kind]: 2 });                          // false
+deepEqual({ a: 1 }, { [Symbol.for('a')]: 1 });                    // false — a symbol key is not its name
+```
+
+Own **enumerable** string and symbol keys make up a record, in every walk
+alike; non-enumerable properties do not. valsem's own protocol symbols
+(`equals`, `hashCode`, `interned`, `toDraft`) are reserved keys — a draft
+rejects writing them. Symbol-keyed entries vanish in JSON, as they always
+have, so a binding round-trip loses them; symbols are process-local, keys
+and values alike.
 
 ## Interning: value identity via `===`
 
@@ -94,7 +118,7 @@ built on it agrees on one definition of what each kind of thing *is*:
 | Kind | Its value is |
 | --- | --- |
 | primitive | itself (`NaN` equals `NaN`; `+0` equals `-0`) |
-| plain object (record) | the **unordered** set of `key → value` pairs, where `undefined` is not a value |
+| plain object (record) | the **unordered** set of `key → value` pairs over own enumerable string and symbol keys, where `undefined` is not a value |
 | array / `ValueList` | the length and the **ordered** element sequence |
 | `ValueMap` | the **unordered** set of `(key, value)` entries (canonical values — interned on entry) |
 | `ValueSet` | the **unordered** set of elements (canonical values — interned on entry) |

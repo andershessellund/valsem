@@ -12,19 +12,20 @@
 //   6. Class without handler → throw
 // ---------------------------------------------------------------------------
 
-import { hashCode } from './deep-equal.js';
+import { hashCode, _recordKeys } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason } from './deep-equal.js';
 import { hashString, hashNumber } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 
-// Hook for interner: when set, deepHash checks this WeakMap before recursing.
-// This is set by the intern module to enable O(1) hash for internalized objects.
-export let _precomputedHashes: WeakMap<object, number> | null = null;
-
-/** @internal Set the precomputed hash cache used by deepHash. */
-export function _setPrecomputedHashes(map: WeakMap<object, number> | null): void {
-  _precomputedHashes = map;
-}
+/**
+ * @internal The one hash cache: canonical object → its precomputed hash (the
+ * interner fills it, so internalized children hash in O(1)), and unique
+ * symbol → the identity hash assigned on first sight. Lives here rather than
+ * in the interner because the hasher is the lower layer and needs it for
+ * symbols even when nothing is ever interned. deepEqual reads the same map
+ * as its canonicality probe.
+ */
+export const _hashCache = new WeakMap<WeakKey, number>();
 
 // Type tags — mixed into hash to distinguish types with similar content
 const TAG_NULL = 0x4e4c;
@@ -36,6 +37,8 @@ const TAG_STRING = 0x5354;
 const TAG_BIGINT = 0x4249;
 const TAG_ARRAY = 0x4152;
 const TAG_OBJECT = 0x4f42;
+const TAG_SYMBOL = 0x5359;
+const TAG_UNIQUE_SYMBOL = 0x5553;
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -84,9 +87,49 @@ export function _powP(n: number): number {
   return result | 0;
 }
 
+// ---------------------------------------------------------------------------
+// Symbols
+//
+// A registered symbol (`Symbol.for(name)`) IS its name — one per name in the
+// whole process, so the name's hash is its hash, stable across installs and
+// realms. A unique symbol (`Symbol(desc)`, and the well-known ones) is an
+// identity with no content: it gets a per-symbol hash on first sight, kept
+// in the shared hash cache (unique symbols are valid weak keys since ES2023;
+// registered ones are not, which is exactly why they take the other branch).
+// The counter is mixed through the seeded hasher like every other leaf.
+// ---------------------------------------------------------------------------
+
+let uniqueSymbolCount = 0;
+
+/** @internal The hash of a symbol value or key. */
+export function _symbolHash(s: symbol): number {
+  const key = Symbol.keyFor(s);
+  if (key !== undefined) return mix(TAG_SYMBOL, hashString(key));
+  let h = _hashCache.get(s);
+  if (h === undefined) {
+    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(++uniqueSymbolCount));
+    _hashCache.set(s, h);
+  }
+  return h;
+}
+
+/**
+ * @internal A total order on symbol keys for the canonical record layout:
+ * registered symbols first, by name; then unique symbols by their (distinct)
+ * hash. Only the frozen copy's property order depends on it — equality and
+ * the record hash are order-independent.
+ */
+export function _compareSymbols(a: symbol, b: symbol): number {
+  const ka = Symbol.keyFor(a);
+  const kb = Symbol.keyFor(b);
+  if (ka !== undefined) return kb !== undefined ? (ka < kb ? -1 : ka > kb ? 1 : 0) : -1;
+  if (kb !== undefined) return 1;
+  return _symbolHash(a) - _symbolHash(b);
+}
+
 /** @internal One record entry's accumulator term. */
-export function _entryTerm(key: string, valueHash: number): number {
-  return scramble(mix(hashString(key), valueHash));
+export function _entryTerm(key: string | symbol, valueHash: number): number {
+  return scramble(mix(typeof key === 'string' ? hashString(key) : _symbolHash(key), valueHash));
 }
 
 /** @internal One array element's accumulator term. */
@@ -153,7 +196,11 @@ function unhashableMessage(obj: object): string {
  * (key-order-independent), arrays, and any class implementing `[hashCode]` or
  * registered via `deepEqual.register()`.
  *
- * Throws for symbols, functions, and class instances without a hash handler —
+ * Symbols are values: a registered symbol hashes by its name, a unique one
+ * by an identity assigned on first sight. Symbol-keyed record entries count
+ * like string-keyed ones.
+ *
+ * Throws for functions and class instances without a hash handler —
  * including the mutable built-ins `Date`, `RegExp`, `Map`, `Set`, and the
  * TypedArrays, which valsem does not treat as values. Those errors name the
  * immutable replacement.
@@ -179,17 +226,16 @@ export function deepHash(value: unknown): number {
     case 'bigint':
       return mix(TAG_BIGINT, hashString(String(value)));
     case 'symbol':
+      return _symbolHash(value);
     case 'function':
-      throw new TypeError(`deepHash: ${typeof value} is not supported`);
+      throw new TypeError(`deepHash: function is not supported`);
   }
 
   const obj = value as object;
 
-  // Check precomputed hash cache (set by interner)
-  if (_precomputedHashes !== null) {
-    const cached = _precomputedHashes.get(obj);
-    if (cached !== undefined) return cached;
-  }
+  // Canonical objects carry their hash (the interner fills the cache).
+  const cached = _hashCache.get(obj);
+  if (cached !== undefined) return cached;
 
   // Decode-boundary depth cap: the recursive walk below is where hostile
   // (or cyclic) input would otherwise exhaust the stack. Cached canonical
@@ -243,8 +289,8 @@ function hashObjectValue(obj: object): number {
   // `for...in` here would also walk inherited enumerable keys, and under
   // prototype pollution the hash of an Object.prototype record would then
   // diverge from an equal null-prototype record's, breaking the invariant.
-  const rec = obj as Record<string, unknown>;
-  const keys = Object.keys(rec);
+  const rec = obj as Record<string | symbol, unknown>;
+  const keys = _recordKeys(rec);
   let acc = 0;
   let keyCount = 0;
   for (let i = 0; i < keys.length; i++) {
@@ -272,8 +318,8 @@ export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: numb
     }
     return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
   }
-  const rec = obj as Record<string, unknown>;
-  const keys = Object.keys(rec); // own keys only — see hashObjectValue
+  const rec = obj as Record<string | symbol, unknown>;
+  const keys = _recordKeys(rec); // own keys only — see hashObjectValue
   let acc = 0;
   let n = 0;
   for (let i = 0; i < keys.length; i++) {

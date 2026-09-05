@@ -144,6 +144,28 @@ anything that came out of `produce`, `intern`, or a collection — the lookup is
 walked and hashed once on the way in (~350 ns for a small record); the
 canonical key it resolves to is what the map actually holds.
 
+### `memoize` — a pure function, remembered by content
+
+```ts
+import { memoize } from 'valsem';
+
+const visible = memoize(
+  (todos: ValueList<Todo>, filter: { done: boolean }) =>
+    todos.toArray().filter((t) => t.done === filter.done).map((t) => t.text),
+  { maxSize: 8 },
+);
+
+visible(state.todos, { done: false }); // runs
+visible(state.todos, { done: false }); // ~40 ns, and the SAME array instance — a fresh literal is the same value
+```
+
+Arguments are matched by value, not by reference, so a config object built on
+every render still hits. Results are interned: equal calls return `===`
+results, and a function returning something valsem cannot canonicalise is
+rejected rather than shared. `maxSize` is an LRU bound (default 1, the
+"same call as last time" memo). The cost rule is `HashMap`'s: canonical
+arguments hit in O(1); raw ones are walked, so memoize state, not payloads.
+
 ### `ValueMap`, `ValueSet`, `ValueList` — canonical immutable collections
 
 Every operation returns the canonical instance for the resulting content. Build
@@ -377,6 +399,7 @@ bindings (`valsem/binding`).
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `HashMap` | mutable map keyed by content |
+| `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |

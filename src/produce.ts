@@ -40,7 +40,7 @@
 
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _powP } from './deep-hash.js';
-import { _defineRecordField } from './deep-equal.js';
+import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
 import {
   toDraft,
   DRAFT_STATE,
@@ -82,18 +82,21 @@ export const nothing: unique symbol = Symbol('valsem.nothing');
 // Scope and draft states
 // ---------------------------------------------------------------------------
 
-interface ObjectState extends DraftState<Record<string, unknown>> {
+/** A plain record: own enumerable string and symbol keys. */
+type Rec = Record<string | symbol, unknown>;
+
+interface ObjectState extends DraftState<Rec> {
   kind: 'object';
-  copy: Record<string, unknown> | null;
+  copy: Rec | null;
   /** true = set, false = deleted; absent key = only child-drafted. */
-  assigned: Map<string, boolean> | null;
+  assigned: Map<string | symbol, boolean> | null;
   /**
    * True once a deleted key was re-set: it re-enters the copy at the END,
    * breaking canonical key order — finalize must take the sorting slow path.
    */
   orderBroken: boolean;
   /** Keys whose base value was child-drafted on read. */
-  drafted: Set<string> | null;
+  drafted: Set<string | symbol> | null;
   draft: object;
   revoke: () => void;
 }
@@ -141,7 +144,7 @@ interface ArrayState extends DraftState<unknown[]> {
 const hasOwn = (o: object, k: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(o, k);
 
 /** `rec[key]` for an OWN key, `undefined` otherwise (never the prototype's). */
-function ownValue(rec: Record<string, unknown>, key: string): unknown {
+function ownValue(rec: Rec, key: string | symbol): unknown {
   return hasOwn(rec, key) ? rec[key] : undefined;
 }
 
@@ -149,7 +152,7 @@ function ownValue(rec: Record<string, unknown>, key: string): unknown {
 // Plain-object drafts (Proxy)
 // ---------------------------------------------------------------------------
 
-function latestObj(state: ObjectState): Record<string, unknown> {
+function latestObj(state: ObjectState): Rec {
   return state.copy ?? state.base;
 }
 
@@ -174,8 +177,9 @@ const objectTraps: ProxyHandler<object> = {
     if (prop === DRAFT_STATE) return state;
     assertUnrevoked(state);
     const source = latestObj(state);
-    if (typeof prop === 'symbol' || !Object.prototype.hasOwnProperty.call(source, prop)) {
-      // Prototype fallback — records still carry Object.prototype methods.
+    if (!Object.prototype.hasOwnProperty.call(source, prop)) {
+      // Prototype fallback — records still carry Object.prototype methods,
+      // and the well-known symbols inspectors probe for live here too.
       return Reflect.get(source, prop, state.draft);
     }
     const value = source[prop];
@@ -204,9 +208,7 @@ const objectTraps: ProxyHandler<object> = {
   set(target, prop, value) {
     const state = target as unknown as ObjectState;
     assertUnrevoked(state);
-    if (typeof prop === 'symbol') {
-      throw new TypeError('valsem: records take string keys only');
-    }
+    if (typeof prop === 'symbol') assertNotReserved(prop);
     const current = ownValue(latestObj(state), prop);
     const currentState = stateOf(current);
     if (currentState !== undefined && currentState.base === value) {
@@ -232,7 +234,6 @@ const objectTraps: ProxyHandler<object> = {
   deleteProperty(target, prop) {
     const state = target as unknown as ObjectState;
     assertUnrevoked(state);
-    if (typeof prop === 'symbol') return true;
     prepareObjCopy(state);
     if (hasOwn(state.base, prop)) {
       state.assigned!.set(prop, false);
@@ -252,7 +253,7 @@ const objectTraps: ProxyHandler<object> = {
       writable: true,
       configurable: true,
       enumerable: desc.enumerable,
-      value: owner[prop as string],
+      value: owner[prop],
     };
   },
   defineProperty() {
@@ -266,7 +267,25 @@ const objectTraps: ProxyHandler<object> = {
   },
 };
 
-function createObjectDraft(base: Record<string, unknown>, parent?: DraftState): ObjectState {
+/**
+ * The protocol symbols are reserved keys: a record carrying `[hashCode]` or
+ * `[interned]` would read as self-hashing or canonical to every walk, and
+ * `[equals]`/`[toDraft]` would turn a record into a kind. Writing them into
+ * a draft is a bug, not a value.
+ */
+function assertNotReserved(prop: symbol): void {
+  if (
+    prop === DRAFT_STATE ||
+    prop === equals ||
+    prop === hashCode ||
+    prop === interned ||
+    prop === toDraft
+  ) {
+    throw new TypeError(`valsem: ${String(prop)} is a reserved protocol key and cannot be set on a record`);
+  }
+}
+
+function createObjectDraft(base: Rec, parent?: DraftState): ObjectState {
   const state = createDraftState<ObjectState>({
     kind: 'object',
     parent,
@@ -645,7 +664,7 @@ function finalizeObject(
 
   // Touched slots: assignments/deletions plus child-drafted reads. Everything
   // else in the copy is the base's own (canonical when base is) material.
-  const touched = new Set<string>(state.assigned!.keys());
+  const touched = new Set<string | symbol>(state.assigned!.keys());
   if (state.drafted !== null) for (const k of state.drafted) touched.add(k);
 
   // Fast path: canonical base with a cached accumulator, and no ADDED keys
@@ -1073,10 +1092,10 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
     }
     switch (p.kind) {
       case 'record.set':
-        (target as Record<string, unknown>)[p.key] = p.value;
+        (target as Rec)[p.key] = p.value;
         break;
       case 'record.delete':
-        delete (target as Record<string, unknown>)[p.key];
+        delete (target as Rec)[p.key];
         break;
       case 'list.set':
         (target as unknown[])[p.index] = p.value;
@@ -1105,8 +1124,8 @@ export function _snapshotCore(state: DraftState): unknown {
   }
   const s = state as ObjectState;
   const src = latestObj(s);
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(src)) _defineRecordField(out, key, snapshotOf(src[key]));
+  const out: Rec = {};
+  for (const key of _recordKeys(src)) _defineRecordField(out, key, snapshotOf(src[key]));
   return out;
 }
 
@@ -1122,7 +1141,7 @@ function navigate(draft: unknown, path: PatchPath): unknown {
     cur =
       state !== undefined && state.childAt !== undefined
         ? state.childAt(state, seg)
-        : (cur as Record<string | number, unknown>)[seg as string | number];
+        : (cur as Record<PropertyKey, unknown>)[seg as PropertyKey];
   }
   return cur;
 }

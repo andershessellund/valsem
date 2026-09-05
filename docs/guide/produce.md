@@ -46,6 +46,10 @@ applyPatches(next2, inverse) === state;   // true
 A recipe whose edits net out to the base emits **no patches at all** — patch
 streams are as canonical as results.
 
+Record patches carry the key as written, so a symbol-keyed edit yields a
+patch with a symbol `key` (or a symbol in its `path`). Those apply and invert
+in-process like any other, and, like immer's, they are not serialisable.
+
 ## Recipe conventions
 
 Recipes follow the immer conventions: mutate the draft, or return a

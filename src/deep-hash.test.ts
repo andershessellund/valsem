@@ -160,8 +160,9 @@ describe('deepHash', () => {
 
   // --- Unsupported types ---
 
-  it('throws for symbols', () => {
-    expect(() => deepHash(Symbol())).toThrow('not supported');
+  it('hashes symbols (registered by name, unique by identity — see symbols.test.ts)', () => {
+    expect(deepHash(Symbol.for('x'))).toBe(deepHash(Symbol.for('x')));
+    expect(deepHash(Symbol('x'))).not.toBe(deepHash(Symbol('x')));
   });
 
   it('throws for functions', () => {

@@ -104,10 +104,10 @@ const hashCodeMethods = new Map<Function, (a: any) => number>();
 // membership means "canonical plain data" — a strictly stronger fact than a
 // cached hash value, since canonical + `!==` proves structural inequality
 // even when two hashes collide.
-let _canonicals: WeakMap<object, number> | null = null;
+let _canonicals: WeakMap<WeakKey, number> | null = null;
 
 /** @internal Wire the interner's hash cache in as the canonicality probe. */
-export function _setCanonicals(map: WeakMap<object, number>): void {
+export function _setCanonicals(map: WeakMap<WeakKey, number>): void {
   _canonicals = map;
 }
 
@@ -330,9 +330,9 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   const protoB = Object.getPrototypeOf(b);
   if (protoB !== Object.prototype && protoB !== null) return false;
 
-  const ra = a as Record<string, unknown>;
-  const rb = b as Record<string, unknown>;
-  const aKeys = Object.keys(ra); // own enumerable only — no per-key hasOwn on a
+  const ra = a as Record<string | symbol, unknown>;
+  const rb = b as Record<string | symbol, unknown>;
+  const aKeys = _recordKeys(ra); // own enumerable only — no per-key hasOwn on a
   let count = 0;
   for (let i = 0; i < aKeys.length; i++) {
     const k = aKeys[i]!;
@@ -349,7 +349,7 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // b's keys are only needed now — unequal pairs return above without the
   // allocation. If b has exactly `count` own keys, they are precisely the
   // matched (populated) ones: no extra populated keys exist.
-  const bKeys = Object.keys(rb);
+  const bKeys = _recordKeys(rb);
   if (bKeys.length === count) return true;
   // Undefined-valued keys present somewhere: count b's populated keys.
   let bCount = 0;
@@ -441,8 +441,8 @@ export function _hasValueSemantics(type: Function): boolean {
  * @internal — shared by intern and the codec layer.
  */
 export function _defineRecordField(
-  out: Record<string, unknown>,
-  key: string,
+  out: Record<string | symbol, unknown>,
+  key: string | symbol,
   value: unknown,
 ): void {
   if (key === '__proto__') {
@@ -450,6 +450,23 @@ export function _defineRecordField(
   } else {
     out[key] = value;
   }
+}
+
+/**
+ * @internal The keys that make up a record: own enumerable string keys, then
+ * own enumerable symbol keys. The one key enumeration every walk (equality,
+ * hash, intern, produce) shares, so they all see the same record. Symbol
+ * keys are part of the value like any other; non-enumerable properties
+ * (where the draft-state symbol lives on class drafts) are not.
+ */
+export function _recordKeys(obj: object): (string | symbol)[] {
+  const keys: (string | symbol)[] = Object.keys(obj);
+  const syms = Object.getOwnPropertySymbols(obj);
+  for (let i = 0; i < syms.length; i++) {
+    const s = syms[i]!;
+    if (Object.prototype.propertyIsEnumerable.call(obj, s)) keys.push(s);
+  }
+  return keys;
 }
 
 /** @internal — exposed for deepHash to read the shared registry. */

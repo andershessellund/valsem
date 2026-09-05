@@ -15,7 +15,7 @@ unless stated).
 | 10k plain array, one edit, event-driven | **13–19 µs** | ~6 µs | ~6 µs | the honest number, one produce per macrotask with results held |
 | 10k plain array, synchronous batch loop | **~27–32 µs** | ~7.5 µs | ~7.8 µs | see the WeakRef note below; batch into one recipe, or use `ValueList` |
 | 3-key record churn | **1.3 µs** | 0.8 µs | 0.6 µs | small-state floor: proxy + pool lookup + hash walk |
-| tiny-record `deepEqual` vs fast-deep-equal | ~1.2× behind | — | — | `Object.keys` allocation floor, ~300 ns absolute |
+| tiny-record `deepEqual` vs fast-deep-equal | ~1.3–1.4× behind | — | — | `Object.keys` + `getOwnPropertySymbols` floor, ~360 ns absolute; see the symbol note below |
 
 The plain-array gap decomposes as ~6 µs successor copy (a cost class every
 copy-on-write library pays), ~1.5 µs pool machinery, and ~5 µs draft
@@ -41,7 +41,7 @@ machinery. Two structural facts set the floor:
 | 1000-key record, one set | **19 µs** | 125 µs (2 µs isolated) | 220 µs | the copy site is megamorphic in any real app — see below; immer's 2 µs needs a monomorphic site |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | transition memoization — and the only `===` results |
 | `deepEqual`, raw arrays ≥ 100 elements | 2.5–2.9× faster than fast-deep-equal | | | |
-| `deepEqual`, raw records | parity on equal walks, 1.6–1.8× faster on unequal | | | |
+| `deepEqual`, raw records | 1.2–1.4× behind on equal walks, 1.4–1.5× faster on unequal at 100+ keys | | | the symbol-key tax, paid knowingly — see below |
 | `deepEqual`, canonical pairs | **20–33 ns flat**, any size | | | 9× to 1200×; this is the product |
 
 The recurrent row is the one that matters for applications: a successor is
@@ -85,6 +85,39 @@ The benchmark fixture matters for the same reason: `scripts/produce-bench`
 now builds its wide record with `fromEntries`, and immer's 125 µs in the
 table is its spread site after the earlier arenas — 2 µs in a fresh
 process, which is the number to compare a monomorphic call site against.
+
+## The symbol-key tax
+
+Symbol keys are part of a record's value, which means every raw-record walk
+(equality, hash, intern) enumerates them: `Object.getOwnPropertySymbols` is
+20 ns on a small object and ~70 ns at 30 keys, and there is no cheaper way to
+ask whether an object has any. On a raw 10-key equal walk that is 361 ns
+where it was ~300, and the raw-record rows above moved from parity to
+1.2–1.4× behind fast-deep-equal on equal walks. Canonical paths do not pay
+it — they short-circuit before any enumeration — and the alternative was the
+silent wrong answer (`deepEqual({ [s]: 1 }, { [s]: 2 })` used to be `true`).
+
+## memoize
+
+`pnpm bench:memoize`. A memo hit follows the same rule as everything else:
+O(1) on canonical arguments, a structural walk on raw ones. A selector over
+100 items (filter + map, 241 ns to recompute):
+
+| call | ns |
+| --- | --- |
+| hit, both arguments canonical | **41** |
+| hit, fresh filter literal + canonical list (the reselect case) | 232 |
+| hit, fresh filter literal + `ValueList` | 248 |
+| hit, both arguments raw (100 × 3-key records) | 31,500 |
+| hit, `maxSize` 8, working set of 8 | 52 |
+| miss + evict, `maxSize` 8, working set of 9 | 4,900 |
+
+Raw arguments cost ~100 ns per record node per hit (321 ns for a 3-key
+record, 22 µs for 200 keys; canonical: 32–36 ns at any width), so on raw
+data memoization only wins when the function is dearer than a walk of its
+arguments. The design follows: arguments must be values, results are
+interned, and the recommended shape is canonical state in, small fresh
+config object beside it.
 
 ## The value collections vs Immutable.js
 
@@ -292,7 +325,8 @@ are honoured); gzip at level 9.
 | --- | --- | --- | --- |
 | `produce` | 22.9 KB | **8.2 KB** | was 42.9 / 13.7 before the draft protocol — it dragged in every collection |
 | `produce`, `current`, `original` | 24.2 KB | 8.6 KB | the inspectors register the core snapshots themselves, so `produce` alone carries none of it |
-| `deepEqual` | 2.9 KB | 1.4 KB | |
+| `deepEqual` | 3.0 KB | 1.4 KB | +0.1 KB for symbol keys |
+| `memoize` | 12.2 KB | 4.9 KB | equality + hash + intern, no `produce` |
 | `intern` | 9.8 KB | 4.0 KB | |
 | `HashMap` | 10.4 KB | 4.2 KB | |
 | `ValueMap` | 20.9 KB | 7.6 KB | includes its own draft (+1.5 KB gz over the pre-protocol 6.1) — the deliberate side of the trade |
@@ -343,6 +377,7 @@ update-throughput number shows:
 | `node scripts/big-array-bench.mjs` | the arena of record: results held in a ring, one contender × scheduling mode per process |
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
+| `pnpm bench:memoize` | memo hit/miss cost by argument kind: canonical, fresh literal beside canonical, raw, by width |
 | `node --allow-natives-syntax scripts/record-copy-bench.mjs` | dictionary-mode threshold by construction method; spread vs `Object.assign` at a megamorphic copy site |
 | `npx bun@latest scripts/<any>.mjs` | any of the above on JavaScriptCore (`VALSEM_DIST=<dir>` points `collections-bench` at an alternative build) |
 

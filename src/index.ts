@@ -31,6 +31,8 @@ export type { Hasher } from './hasher.js';
 export { produce, produceWithPatches, applyPatches, nothing, isDraft, toDraft } from './produce.js';
 export type { Draft, Patch, PatchPath, PatchKinds } from './produce.js';
 export { current, original } from './current.js';
+export { memoize } from './memoize.js';
+export type { MemoizeOptions, Memoized } from './memoize.js';
 export type { Undraft } from './current.js';
 export { DraftMap } from './draft-map.js';
 export { DraftSet } from './draft-set.js';

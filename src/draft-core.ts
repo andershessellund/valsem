@@ -18,7 +18,7 @@
 
 import { intern, _hashCacheHas } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
-import { interned as internedMarker, _defineRecordField } from './deep-equal.js';
+import { interned as internedMarker, _defineRecordField, _recordKeys } from './deep-equal.js';
 
 /**
  * Symbol under which a draftable type exposes its draft factory.
@@ -61,8 +61,8 @@ export type PatchPath = readonly unknown[];
  */
 export interface PatchKinds {
   replace: { kind: 'replace'; path: PatchPath; value: unknown };
-  'record.set': { kind: 'record.set'; path: PatchPath; key: string; value: unknown };
-  'record.delete': { kind: 'record.delete'; path: PatchPath; key: string };
+  'record.set': { kind: 'record.set'; path: PatchPath; key: string | symbol; value: unknown };
+  'record.delete': { kind: 'record.delete'; path: PatchPath; key: string | symbol };
   'list.set': { kind: 'list.set'; path: PatchPath; index: number; value: unknown };
   'list.splice': {
     kind: 'list.splice';
@@ -223,7 +223,7 @@ let coreArray: CoreFactory<unknown[]> | null = null;
 
 /** @internal Called once by produce.ts. */
 export function _setCoreDraftFactories(
-  object: CoreFactory<Record<string, unknown>>,
+  object: CoreFactory<Record<string | symbol, unknown>>,
   array: CoreFactory<unknown[]>,
 ): void {
   coreObject = object;
@@ -349,9 +349,9 @@ function snapshotForeign(value: unknown): unknown {
     if (snapshotDepth > _maxDepth()) throw _depthError('current');
     if (isPlainObject(value)) {
       let changed = false;
-      const out: Record<string, unknown> = {};
-      for (const key of Object.keys(value)) {
-        const child = value[key];
+      const out: Record<string | symbol, unknown> = {};
+      for (const key of _recordKeys(value)) {
+        const child = (value as Record<string | symbol, unknown>)[key];
         const snap = snapshotOf(child);
         if (snap !== child) changed = true;
         _defineRecordField(out, key, snap);
@@ -400,9 +400,9 @@ export function adopt(value: unknown): unknown {
 function adoptUncached(value: object): unknown {
   if (isPlainObject(value)) {
     let changed = false;
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value)) {
-      const child = value[key];
+    const out: Record<string | symbol, unknown> = {};
+    for (const key of _recordKeys(value)) {
+      const child = (value as Record<string | symbol, unknown>)[key];
       const resolved = resolve(child, null, undefined);
       if (resolved !== child) changed = true;
       if (resolved !== undefined) _defineRecordField(out, key, resolved);

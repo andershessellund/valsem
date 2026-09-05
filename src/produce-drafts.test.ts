@@ -242,13 +242,13 @@ describe('record and array proxy traps', () => {
     expect(next.length).toBe(3);
   });
 
-  it('symbol-keyed writes are rejected on records and arrays', () => {
+  it('symbol-keyed writes land on records and are rejected on arrays', () => {
     const sym = Symbol('s');
-    expect(() =>
+    expect(
       produce(intern({ a: 1 }), (d) => {
         (d as Record<symbol, unknown>)[sym] = 1;
       }),
-    ).toThrow(/string keys only/);
+    ).toBe(intern({ a: 1, [sym]: 1 }));
     expect(() =>
       produce(intern([1]), (d) => {
         (d as unknown as Record<symbol, unknown>)[sym] = 1;
