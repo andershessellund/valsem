@@ -116,6 +116,11 @@ interface ObjectState extends BaseState {
   copy: Record<string, unknown> | null;
   /** true = set, false = deleted; absent key = only child-drafted. */
   assigned: Map<string, boolean> | null;
+  /**
+   * True once a deleted key was re-set: it re-enters the copy at the END,
+   * breaking canonical key order — finalize must take the sorting slow path.
+   */
+  orderBroken: boolean;
   /** Keys whose base value was child-drafted on read. */
   drafted: Set<string> | null;
   draft: object;
@@ -135,6 +140,13 @@ interface ArrayState extends BaseState {
   copy: unknown[] | null;
   /** Recorded ops (intent); null once an uncapturable mutation occurred. */
   ops: SeqOp[] | null;
+  /**
+   * True once a relocating method (sort/reverse/fill/copyWithin) ran: base
+   * elements may sit at foreign indices, so the base-position check cannot
+   * identify them and ANY draftable read must be drafted (immer's
+   * relocated-base-refs problem; over-drafting assigned values is safe).
+   */
+  opaqued: boolean;
   /** Indices whose base value was child-drafted on read. */
   drafted: Set<number> | null;
   draft: unknown[];
@@ -312,6 +324,7 @@ const objectTraps: ProxyHandler<object> = {
     assertAssignable(value, state);
     prepareObjCopy(state);
     markChanged(state);
+    if (state.assigned!.get(prop) === false) state.orderBroken = true; // deleted, now re-set
     state.copy![prop] = value;
     state.assigned!.set(prop, true);
     return true;
@@ -366,6 +379,7 @@ function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): Ob
     base,
     copy: null,
     assigned: null,
+    orderBroken: false,
     drafted: null,
     draft: null as unknown as object,
     revoke: null as unknown as () => void,
@@ -516,6 +530,7 @@ const arrayTraps: ProxyHandler<object> = {
           const copy = materializeArr(state);
           markChanged(state);
           state.ops = null; // intent lost — net diff at finalize
+          state.opaqued = true; // base refs may be relocated — see ArrayState
           return fn.apply(copy, args);
         };
       }
@@ -530,7 +545,14 @@ const arrayTraps: ProxyHandler<object> = {
     const index = Number(prop);
     const value = arrRead(state, index);
     if (state.finalized || !isDraftable(value)) return value;
-    if (value === state.base[index]) {
+    // Draft base-positioned values; after a relocating method (sort/…) base
+    // refs may sit anywhere, so draft ANY non-draft draftable to keep base
+    // mutations impossible (over-drafting assigned values is safe — their
+    // mutations resolve identically at finalize).
+    if (
+      value === state.base[index] ||
+      (state.opaqued && stateOf(value) === undefined)
+    ) {
       (state.drafted ??= new Set()).add(index);
       const child = createChildDraft(value, state);
       if (state.copy !== null) state.copy[index] = child;
@@ -633,6 +655,7 @@ function createArrayDraft(base: unknown[], parent?: AnyState): ArrayState {
     vTail: [],
     copy: null,
     ops: [],
+    opaqued: false,
     drafted: null,
     draft: null as unknown as unknown[],
     revoke: null as unknown as () => void,
@@ -1238,14 +1261,19 @@ function emitSeqDiff(
 }
 
 /**
- * If every op is a positional set or a tail splice, positions are stable:
- * return the assigned indices and final length. Mid-sequence splices → null.
+ * If every op is a positional set or a tail splice, positions BELOW the
+ * low-water mark are stable: return the assigned indices, the final length,
+ * and `low` — the minimum length reached. Everything at index ≥ low was
+ * rewritten by the tail-splice sequence (pop-then-push changes content at
+ * indices below the base length without changing the length!) and must be
+ * taken from the final items, not delta'd. Mid-sequence splices → null.
  */
 function seqTailProfile(
   ops: SeqOp[],
   baseLen: number,
-): { setIdx: Set<number>; finalLen: number } | null {
+): { setIdx: Set<number>; finalLen: number; low: number } | null {
   let len = baseLen;
+  let low = baseLen;
   const setIdx = new Set<number>();
   for (const op of ops) {
     if (op.t === 'set') {
@@ -1253,9 +1281,10 @@ function seqTailProfile(
     } else {
       if (op.i + op.rc !== len) return null;
       len = op.i + op.inserted.length;
+      if (op.i < low) low = op.i;
     }
   }
-  return { setIdx, finalLen: len };
+  return { setIdx, finalLen: len, low };
 }
 
 function finalizeObject(
@@ -1276,7 +1305,7 @@ function finalizeObject(
   // (an addition lands unsorted at the end of the copy, breaking the
   // canonical key order — those take the sorting slow path).
   const accInfo = _accOf(base);
-  let fast = accInfo !== undefined;
+  let fast = accInfo !== undefined && !state.orderBroken;
   let acc = accInfo !== undefined ? accInfo.a : 0;
   let n = accInfo !== undefined ? accInfo.n : 0;
 
@@ -1452,11 +1481,11 @@ function finalizeArray(
   const L2 = arrLen(state);
 
   if (accInfo !== undefined && profile !== null && profile.finalLen === L2) {
-    // Fast path — stable positions. Assemble the exact delta (touched
-    // indices with resolved values, plus the appended region), delta-update
-    // the accumulator, and try the transition cache before building
-    // anything O(n).
-    const minL = Math.min(L, L2);
+    // Fast path — stable positions below the low-water mark. Assemble the
+    // exact delta (touched indices below `low`, plus the rewritten region
+    // [low, L2)), delta-update the accumulator, and try the transition
+    // cache before building anything O(n).
+    const low = profile.low; // indices ≥ low were rewritten by tail splices
     const assignedIdx = profile.setIdx;
     let acc = accInfo.a | 0;
 
@@ -1465,7 +1494,7 @@ function finalizeArray(
     const keys: number[] = [];
     const vals: unknown[] = [];
     for (const i of [...touched].sort((a, b) => a - b)) {
-      if (i >= minL) continue; // dropped tail / appended region (below)
+      if (i >= low) continue; // rewritten region — taken from final items below
       const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
       const resolved = resolve(arrRead(state, i), childPath, recorder);
       if (same(resolved, base[i])) continue; // netted out
@@ -1473,14 +1502,17 @@ function finalizeArray(
       vals.push(resolved);
       acc = (acc + Math.imul(internHash(resolved) - internHash(base[i]), _powP(i))) | 0;
     }
+    // Rewritten region: subtract the base's [low, L), add the final [low, L2).
+    // (`low` is derivable as L2 − app.length, so the transition signature
+    // stays unambiguous.)
     const app: unknown[] = [];
-    for (let i = L; i < L2; i++) {
+    for (let i = low; i < L; i++) {
+      acc = (acc - Math.imul(internHash(base[i]), _powP(i))) | 0;
+    }
+    for (let i = low; i < L2; i++) {
       const resolved = resolve(arrRead(state, i), null, recorder);
       app.push(resolved);
       acc = (acc + Math.imul(internHash(resolved), _powP(i))) | 0;
-    }
-    for (let i = L2; i < L; i++) {
-      acc = (acc - Math.imul(internHash(base[i]), _powP(i))) | 0;
     }
     acc = acc >>> 0;
 
@@ -1500,7 +1532,7 @@ function finalizeArray(
     // Build the successor — the only O(n) step, skipped entirely on a hit.
     const out = virtual ? copyArr(base) : state.copy!;
     for (let k = 0; k < keys.length; k++) out[keys[k]!] = vals[k];
-    for (let k = 0; k < app.length; k++) out[L + k] = app[k];
+    for (let k = 0; k < app.length; k++) out[low + k] = app[k];
     out.length = L2;
     state.result = _internPrehashed(out, h, acc, L2);
     storeTransition(base, h, L2, keys, vals, app, state.result as object);
@@ -1559,20 +1591,21 @@ function finalizeList(
   const items = state.items;
   const profile = seqTailProfile(state.ops, state.base.length);
   if (profile !== null && profile.finalLen === items.length) {
-    // Materialized but positions stable: replay persistently all the same.
+    // Materialized but positions stable below the low-water mark: replay
+    // persistently — sets below `low`, then rebuild the rewritten tail.
     const L = state.base.length;
     const L2 = items.length;
-    const minL = Math.min(L, L2);
+    const low = profile.low;
     let result = state.base;
     const touched = new Set(assignedIdx);
     for (const i of state.drafted) touched.add(i);
     for (const i of touched) {
-      if (i >= minL) continue;
+      if (i >= low) continue;
       const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
       result = result.set(i, resolve(items[i], childPath, recorder));
     }
-    for (let k = L2; k < L; k++) result = result.pop();
-    for (let i = L; i < L2; i++) result = result.push(resolve(items[i], null, recorder));
+    for (let k = low; k < L; k++) result = result.pop();
+    for (let i = low; i < L2; i++) result = result.push(resolve(items[i], null, recorder));
     state.result = result;
     return result;
   }
@@ -1752,14 +1785,18 @@ function runProduce<T>(
  * The curried form `produce(recipe)` returns `base => produce(base, recipe)`.
  */
 export function produce<T>(base: T, recipe: (draft: Draft<T>) => unknown): T;
-export function produce<T>(recipe: (draft: Draft<T>) => unknown): (base: T) => T;
 export function produce<T>(
-  baseOrRecipe: T | ((draft: Draft<T>) => unknown),
+  recipe: (draft: Draft<T>, ...args: never[]) => unknown,
+): (base: T, ...args: unknown[]) => T;
+export function produce<T>(
+  baseOrRecipe: T | ((draft: Draft<T>, ...args: unknown[]) => unknown),
   recipe?: (draft: Draft<T>) => unknown,
-): T | ((base: T) => T) {
+): T | ((base: T, ...args: unknown[]) => T) {
   if (recipe === undefined) {
-    const r = baseOrRecipe as (draft: Draft<T>) => unknown;
-    return (base: T) => runProduce(base, r, undefined);
+    const r = baseOrRecipe as (draft: Draft<T>, ...args: unknown[]) => unknown;
+    // Curried form: extra call arguments flow into the recipe (immer's
+    // convention — `setState(produce(toggle, id))` style).
+    return (base: T, ...args: unknown[]) => runProduce(base, (d) => r(d, ...args), undefined);
   }
   return runProduce(baseOrRecipe as T, recipe, undefined);
 }
