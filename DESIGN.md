@@ -776,7 +776,7 @@ ops, clearly labeled).
 
 | Phase | Content | Gate |
 | --- | --- | --- |
-| 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
+| 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); ~~docs site with the frontend-first pitch~~ done (VitePress under `docs/`, GitHub Pages via `.github/workflows/docs.yml`; hero landing, seven guide pages, BENCHMARKS.md included by reference, and the undo-tree demo as the flagship — canonical history with an identity-`Map` structural index, revisit collapse, `===` dirty checks) | name reserved; the wire binding green against `valsem/binding` |
 | 1 | ~~**`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission~~ done; ~~Mutative-derived test corpus~~ done (collection-draft transients remain) | all existing suites green; patch-emission property tests ✓ |
 | 2 | ~~Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work~~ done (records + stable-position arrays; §9.2 table). Remaining perf backlog: mid-splice array deltas, trie transients for bulk collection drafts, withPatches overhead, small-state floor | Mutative-shape benchmark hits target ✓ |
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
