@@ -587,6 +587,11 @@ position or intent makes it meaningful there:
   authentication. For untrusted‑input deployments that also worry about seed
   recovery via timing, swap in a keyed PRF with `configureHasher(...)` (e.g.
   SipHash over `getHashSeed()`) — called once at startup, before any hashing.
+- **Depth‑capped admission.** `intern`, `deepHash`, and `produce`'s adoption
+  walk recursively, so hostile (or cyclic) input would otherwise exhaust the
+  stack. Nesting deeper than 512 levels is rejected with a teaching error;
+  raise the cap with `configureLimits({ maxDepth })` if your data is honestly
+  that deep. (`deepEqual` is a passive, total query and stays uncapped.)
 
 ---
 
@@ -609,6 +614,7 @@ position or intent makes it meaningful there:
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt‑in value‑semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
+| `configureLimits` | function | Decode‑boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk — deeply nested or cyclic input gets a teaching error instead of a stack overflow. `deepEqual` stays total and uncapped. |
 | `InternPool` / `Hasher` / `RegisterOptions` | type | Pool interface; pluggable leaf‑hash interface; `register` options (`immutable`). |
 
 ### `valsem/temporal`

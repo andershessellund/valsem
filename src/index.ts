@@ -25,6 +25,7 @@ export { InternedString } from './interned-string.js';
 export { createInternPool } from './intern-pool.js';
 export type { InternPool } from './intern-pool.js';
 export { configureHasher, createMarvin32Hasher, getHashSeed } from './hasher.js';
+export { configureLimits } from './limits.js';
 export type { Hasher } from './hasher.js';
 export {
   produce,

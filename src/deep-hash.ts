@@ -16,6 +16,7 @@
 import { hashCode } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason } from './deep-equal.js';
 import { hashString, hashNumber } from './hasher.js';
+import { _depthError, _maxDepth } from './limits.js';
 
 // Hook for interner: when set, deepHash checks this WeakMap before recursing.
 // This is set by the intern module to enable O(1) hash for internalized objects.
@@ -191,6 +192,21 @@ export function deepHash(value: unknown): number {
     if (cached !== undefined) return cached;
   }
 
+  // Decode-boundary depth cap: the recursive walk below is where hostile
+  // (or cyclic) input would otherwise exhaust the stack. Cached canonical
+  // material never reaches this counter.
+  // (No manual reset on throw: the finally chain unwinds the counter.)
+  if (++depth > _maxDepth()) throw _depthError('deepHash');
+  try {
+    return hashObjectValue(obj);
+  } finally {
+    depth--;
+  }
+}
+
+let depth = 0;
+
+function hashObjectValue(obj: object): number {
   // Array — order-dependent positional accumulator (see the accumulator
   // contract above: this form is what makes array hashes delta-updatable).
   if (Array.isArray(obj)) {

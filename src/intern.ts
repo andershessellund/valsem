@@ -31,6 +31,7 @@ import {
   _setCanonicals,
 } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
+import { _depthError, _maxDepth } from './limits.js';
 
 // ---------------------------------------------------------------------------
 // Shared precomputed hash cache
@@ -106,6 +107,8 @@ export function internHash(value: unknown): number {
  *   because pooling a mutable instance would let one mutation corrupt every
  *   holder and invalidate its cached hash.
  */
+let depth = 0;
+
 export function intern<T>(value: T): T {
   if (value === null || value === undefined || typeof value !== 'object') {
     return value;
@@ -119,10 +122,17 @@ export function intern<T>(value: T): T {
   // Already interned via the legacy WeakMap path — fast path.
   if (hashCache.has(obj)) return value;
 
-  // Array — internalize elements first.
+  // Array — internalize elements first. (Depth-capped: this recursion is
+  // the decode boundary where hostile or cyclic input would otherwise
+  // exhaust the stack.)
   if (Array.isArray(obj)) {
-    const internalized = obj.map(intern);
-    return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
+    if (++depth > _maxDepth()) throw _depthError('intern');
+    try {
+      const internalized = obj.map(intern);
+      return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
+    } finally {
+      depth--;
+    }
   }
 
   // Plain object — internalize values, sorted keys for canonical layout.
@@ -130,15 +140,20 @@ export function intern<T>(value: T): T {
   // absent key in record semantics, and the canonical form makes that literal.
   const proto = Object.getPrototypeOf(obj);
   if (proto === Object.prototype || proto === null) {
-    const rec = obj as Record<string, unknown>;
-    const keys = Object.keys(rec).sort();
-    const internalized: Record<string, unknown> = {};
-    for (const k of keys) {
-      const v = rec[k];
-      if (v === undefined) continue;
-      _defineRecordField(internalized, k, intern(v));
+    if (++depth > _maxDepth()) throw _depthError('intern');
+    try {
+      const rec = obj as Record<string, unknown>;
+      const keys = Object.keys(rec).sort();
+      const internalized: Record<string, unknown> = {};
+      for (const k of keys) {
+        const v = rec[k];
+        if (v === undefined) continue;
+        _defineRecordField(internalized, k, intern(v));
+      }
+      return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
+    } finally {
+      depth--;
     }
-    return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
   }
 
   // Types registered as immutable are pooled by their own equality handler.

@@ -13,6 +13,15 @@
     "immutable",
     "persistent data structures"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andershessellund/valsem.git"
+  },
+  "bugs": "https://github.com/andershessellund/valsem/issues",
+  "homepage": "https://github.com/andershessellund/valsem#readme",
+  "sideEffects": [
+    "./dist/temporal.js"
+  ],
   "type": "module",
   "exports": {
     ".": {

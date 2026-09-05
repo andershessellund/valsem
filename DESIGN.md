@@ -782,7 +782,7 @@ ops, clearly labeled).
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
 | 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
 | 5 | ~~Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array`~~ done | contract table holds empirically |
-| 6 | Hardening backlog: ~~lazy hash seeding~~ closed (Web Crypto declared a platform requirement — see §3.3); decode-boundary depth/size limits; ~~property-based testing (fast-check) for the companion invariant, intern idempotence, and applyPatches convergence~~ done (see the decision log: five produce bugs found and fixed) | — |
+| 6 | ~~Hardening backlog~~ complete: ~~lazy hash seeding~~ closed (Web Crypto declared a platform requirement — see §3.3); ~~decode-boundary depth limits~~ done (`configureLimits({ maxDepth })`, default 512, guarding intern/deepHash/adopt — deepEqual stays total and uncapped; size limits judged the transport layer's job); ~~property-based testing (fast-check) for the companion invariant, intern idempotence, and applyPatches convergence~~ done (see the decision log: five produce bugs found and fixed) | — |
 
 Non-goals, permanently: mutable built-ins as values; cycle support; wire
 formats (a separate layer's job); schemas (higher layers); framework adapters
@@ -1101,3 +1101,26 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   the two passes can build cyclic values — the value domain excludes
   cycles, and the hang looked like a library bug until traced), and
   `structuredClone` flattens `InternedString` leaves.
+- **Decode-boundary depth cap shipped; size limits declined** — `intern`,
+  `deepHash`, and produce's `adopt` walk foreign input recursively, so
+  hostile or cyclic input had a stack-exhaustion lever the seeded hasher
+  does not close. A depth counter (default cap 512 — far beyond honest
+  data, far below engine stack limits) turns that into a teaching error at
+  the admission boundary; cyclic input now teaches instead of throwing a
+  bare RangeError. Reconfigurable at any time via
+  `configureLimits({ maxDepth })` — unlike the hasher, the cap is not baked
+  into values. `deepEqual` is deliberately uncapped: it is total, and a cap
+  would change verdicts on honestly deep equal structures. Size/node-count
+  limits were considered and declined: admission is O(n) with no
+  amplification, any default would misclassify honest large arrays, and
+  byte-budget enforcement belongs to the transport layer (a JSON body
+  limit). Implementation note for the guard pattern: never zero the
+  counter at the throw site — the try/finally chain unwinds it, and doing
+  both drove the counter negative, silently disabling the guard (caught by
+  the suite's guard-reset test).
+- **Publication surface assembled** — BENCHMARKS.md distilled from §9.2
+  under the positioning doctrine (losses first, arena-of-record numbers,
+  the counter-arena, reproduction commands, methodology rules);
+  package.json gained `repository`/`bugs`/`homepage` and a `sideEffects`
+  list naming `dist/temporal.js` (its import registers handlers — a
+  tree-shaken bare import would silently drop Temporal support).

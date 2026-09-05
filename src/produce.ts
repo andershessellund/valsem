@@ -39,6 +39,7 @@
 // ---------------------------------------------------------------------------
 
 import { intern, internHash, _hashCacheHas, _accOf, _internPrehashed } from './intern.js';
+import { _depthError, _maxDepth } from './limits.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _powP } from './deep-hash.js';
 import { interned as internedMarker } from './deep-equal.js';
 import { ValueMap } from './value-map.js';
@@ -1161,6 +1162,8 @@ function restoreValue(value: unknown): unknown {
   return intern(value);
 }
 
+let adoptDepth = 0;
+
 /** Intern foreign material, finalizing any drafts embedded in it. */
 function adopt(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
@@ -1170,6 +1173,17 @@ function adopt(value: unknown): unknown {
   if ((value as Record<symbol, unknown>)[internedMarker] === true || _hashCacheHas(value)) {
     return value;
   }
+  // Same decode-boundary depth cap as intern: adopt recurses over foreign
+  // material a recipe grafted in, which can be hostile or cyclic.
+  if (++adoptDepth > _maxDepth()) throw _depthError('produce');
+  try {
+    return adoptUncached(value);
+  } finally {
+    adoptDepth--;
+  }
+}
+
+function adoptUncached(value: object): unknown {
   if (isPlainObject(value)) {
     let changed = false;
     const out: Record<string, unknown> = {};
