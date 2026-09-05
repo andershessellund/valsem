@@ -59,7 +59,7 @@
     "docs:preview": "vitepress preview docs",
     "prepack": "pnpm build"
   },
-  "packageManager": "pnpm@10.32.0",
+  "packageManager": "pnpm@12.3.4",
   "devDependencies": {
     "@types/node": "^22.0.0",
     "eslint": "^9.0.0",
