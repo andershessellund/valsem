@@ -229,7 +229,18 @@ const row = cache.getOrCreate({ table: 'users', id: '2' }, loadRow);
 ```
 
 `HashMap` is a mutable container (like `Map`); only its **keys** get value
-semantics. Values are stored as‑is.
+semantics. Values are stored as‑is — and that asymmetry is the point.
+`HashMap` is the *boundary type* where the value world meets the mutable
+world: the persistent `Value*` collections intern everything they hold, so
+they can only contain values, while `HashMap` stores its values uninterned
+and can therefore index **live** objects — DOM nodes, subscriptions, open
+connections — by structural key.
+
+There is deliberately no `HashSet`: a set's elements are its keys, all
+interned, so it would hold nothing a native `Set` fed interned elements
+doesn't already. For a mutable visited‑set, write `seen.add(intern(pos))` —
+canonical values have reference identity, so native `Set` semantics are
+already correct.
 
 ### Persistent collections — canonical *instances*
 

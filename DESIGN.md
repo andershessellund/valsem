@@ -1048,3 +1048,21 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   `InternString`; renamed `InternedString` shortly after — the adjective is
   the grammatical form, "an interned string".) `HashMap` stays: a mutable
   lookup structure named by mechanism is the established convention.
+- **`HashMap` kept; `HashSet` and a `MutableMap` rename both rejected — the
+  boundary criterion** — revisited during the standalone review. A mutable
+  companion type earns its place only if it has an **un-internable side** —
+  a slot no `Value*` type can serve. `HashMap` has one: its values are
+  stored as-is, so it can index *live, mutable* objects by structural key
+  (`HashMap<Coord, HTMLElement>`, `HashMap<QueryKey, Subscription>`) — the
+  boundary where value keys meet the mutable world. A `HashSet` has no such
+  side: a set's elements are its keys, all interned, so it would hold
+  nothing but values — mere sugar over a native `Set` fed `intern()`ed
+  elements (canonical identity already makes native `Set` semantics
+  correct: `seen.add(intern(pos))` is the visited-set idiom) or `ValueSet`
+  behind a rebinding variable. The rename was rejected because
+  `MutableMap` names the wrong axis: native `Map` is equally mutable —
+  structural keys are why the class exists, and `HashMap` says exactly
+  that to anyone arriving from Java/Rust, with interning playing the role
+  of overridden equals/hashCode. Guard for the future: "mutable twin of a
+  `Value*` type for ergonomics" is a slope that ends at `MutableList`;
+  capability, not convenience, is the bar for new mutable surface.
