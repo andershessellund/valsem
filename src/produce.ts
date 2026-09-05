@@ -141,10 +141,13 @@ interface ArrayState extends BaseState {
   /** Recorded ops (intent); null once an uncapturable mutation occurred. */
   ops: SeqOp[] | null;
   /**
-   * True once a relocating method (sort/reverse/fill/copyWithin) ran: base
-   * elements may sit at foreign indices, so the base-position check cannot
-   * identify them and ANY draftable read must be drafted (immer's
-   * relocated-base-refs problem; over-drafting assigned values is safe).
+   * True once a relocating mutation ran — sort/reverse/fill/copyWithin, or
+   * any captured splice that shifts surviving positions (shift, unshift,
+   * mid-array splice with unequal remove/insert counts): base elements may
+   * sit at foreign indices, so the base-position check cannot identify them
+   * and ANY draftable read must be drafted (immer's relocated-base-refs
+   * problem; over-drafting assigned values is safe — `resolve` routes a raw
+   * insert to its child draft via `stateOf`).
    */
   opaqued: boolean;
   /** Indices whose base value was child-drafted on read. */
@@ -474,11 +477,13 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
     const copy = materializeArr(state);
     if (copy.length === 0) return undefined;
     const removed = copy.shift();
+    if (copy.length > 0) state.opaqued = true; // survivors relocated
     state.ops?.push({ t: 'splice', i: 0, rc: 1, inserted: [], removed: [removed] });
     return removed;
   },
   unshift(state, args) {
     const copy = materializeArr(state);
+    if (args.length > 0 && copy.length > 0) state.opaqued = true; // survivors relocated
     copy.unshift(...args);
     state.ops?.push({ t: 'splice', i: 0, rc: 0, inserted: args.slice(), removed: [] });
     return copy.length;
@@ -493,6 +498,7 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
         ? len - start
         : Math.min(Math.max(Math.trunc(args[1] as number), 0), len - start);
     const items = args.slice(2);
+    if (items.length !== rc && start + rc < len) state.opaqued = true; // survivors relocated
     const removed = copy.splice(start, rc, ...items);
     state.ops?.push({
       t: 'splice',
@@ -1213,6 +1219,24 @@ function emitSeqOps(ops: SeqOp[], path: PatchPath, recorder: PatchRecorder): voi
   }
 }
 
+/**
+ * Retract a sequence node's own op patches after finalize concluded the
+ * successor IS the base. Op patches must be emitted BEFORE children resolve
+ * (children patch against post-splice indices), so a netted-out sequence
+ * leaves its ops in the recorder; on the `=== base` outcome no child can
+ * have emitted (a changed child forces a different result), so the marked
+ * regions hold exactly this node's entries: `patchMark..` in `patches`,
+ * the first `inverseCount` in `inverse` (one unshift per op).
+ */
+function retractSeqPatches(
+  recorder: PatchRecorder,
+  patchMark: number,
+  inverseCount: number,
+): void {
+  recorder.patches.length = patchMark;
+  recorder.inverse.splice(0, inverseCount);
+}
+
 /** Net index diff plus one tail splice — the intent-lost patch fallback. */
 function emitSeqDiff(
   base: unknown[],
@@ -1471,6 +1495,8 @@ function finalizeArray(
   const emitting = recorder !== undefined && path !== null;
   const opsMode = state.ops !== null;
 
+  const patchMark = emitting ? recorder!.patches.length : 0;
+  const opCount = opsMode ? state.ops!.length : 0;
   if (emitting && opsMode) emitSeqOps(state.ops!, path!, recorder);
 
   const base = state.base;
@@ -1497,7 +1523,13 @@ function finalizeArray(
       if (i >= low) continue; // rewritten region — taken from final items below
       const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
       const resolved = resolve(arrRead(state, i), childPath, recorder);
-      if (same(resolved, base[i])) continue; // netted out
+      if (same(resolved, base[i])) {
+        // Netted out — but a materialized copy holds the child DRAFT at this
+        // index (written by the read trap); restore the base value so the
+        // built successor cannot embed a revoked proxy.
+        if (!virtual) state.copy![i] = base[i];
+        continue;
+      }
       keys.push(i);
       vals.push(resolved);
       acc = (acc + Math.imul(internHash(resolved) - internHash(base[i]), _powP(i))) | 0;
@@ -1518,6 +1550,7 @@ function finalizeArray(
 
     if (keys.length === 0 && app.length === 0 && L2 === L) {
       // Everything netted out: the successor IS the (canonical) base.
+      if (emitting) retractSeqPatches(recorder!, patchMark, opCount);
       state.result = base;
       return base;
     }
@@ -1525,6 +1558,7 @@ function finalizeArray(
     const h = _arrayHashOf(L2, acc);
     const hit = lookupTransition(base, h, L2, keys, vals, app);
     if (hit !== undefined) {
+      if (emitting && hit === base) retractSeqPatches(recorder!, patchMark, opCount);
       state.result = hit;
       return hit;
     }
@@ -1535,6 +1569,9 @@ function finalizeArray(
     for (let k = 0; k < app.length; k++) out[low + k] = app[k];
     out.length = L2;
     state.result = _internPrehashed(out, h, acc, L2);
+    // Content-equal-to-base is still possible here (e.g. pop then push of
+    // the same value): the pool hands back the base itself.
+    if (emitting && state.result === base) retractSeqPatches(recorder!, patchMark, opCount);
     storeTransition(base, h, L2, keys, vals, app, state.result as object);
     return state.result;
   }
@@ -1550,6 +1587,9 @@ function finalizeArray(
     resolved[i] = resolve(copy[i], childPath, recorder);
   }
   state.result = intern(resolved);
+  if (emitting && opsMode && state.result === base) {
+    retractSeqPatches(recorder!, patchMark, opCount);
+  }
   if (emitting && !opsMode) {
     // Array.from (not .map): the base may be frozen — see copyArr.
     emitSeqDiff(
@@ -1568,6 +1608,8 @@ function finalizeList(
   recorder: PatchRecorder | undefined,
 ): unknown {
   const emitting = recorder !== undefined && path !== null;
+  const patchMark = emitting ? recorder!.patches.length : 0;
+  const opCount = state.ops.length;
   if (emitting) emitSeqOps(state.ops, path!, recorder);
 
   const assignedIdx = new Set<number>();
@@ -1584,6 +1626,7 @@ function finalizeList(
     for (const v of state.vTail) {
       result = result.push(resolve(v, null, recorder));
     }
+    if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
     state.result = result;
     return result;
   }
@@ -1606,6 +1649,7 @@ function finalizeList(
     }
     for (let k = low; k < L; k++) result = result.pop();
     for (let i = low; i < L2; i++) result = result.push(resolve(items[i], null, recorder));
+    if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
     state.result = result;
     return result;
   }
@@ -1619,6 +1663,7 @@ function finalizeList(
     resolved[i] = resolve(items[i], childPath, recorder);
   }
   state.result = ValueList.from(resolved);
+  if (emitting && state.result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
   return state.result;
 }
 
