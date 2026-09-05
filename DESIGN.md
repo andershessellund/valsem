@@ -777,12 +777,12 @@ ops, clearly labeled).
 | Phase | Content | Gate |
 | --- | --- | --- |
 | 0 | Reserve `valsem` on npm; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); docs site with the frontend-first pitch | name reserved; the wire binding green against `valsem/binding` |
-| 1 | ~~**`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission~~ done (collection-draft transients and a Mutative-derived test corpus remain) | all existing suites green; patch-emission property tests |
+| 1 | ~~**`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission~~ done; ~~Mutative-derived test corpus~~ done (collection-draft transients remain) | all existing suites green; patch-emission property tests ✓ |
 | 2 | ~~Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work~~ done (records + stable-position arrays; §9.2 table). Remaining perf backlog: mid-splice array deltas, trie transients for bulk collection drafts, withPatches overhead, small-state floor | Mutative-shape benchmark hits target ✓ |
 | 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
 | 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
 | 5 | ~~Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array`~~ done | contract table holds empirically |
-| 6 | Hardening backlog: ~~lazy hash seeding~~ closed (Web Crypto declared a platform requirement — see §3.3); decode-boundary depth/size limits; property-based testing (fast-check) for the companion invariant, intern idempotence, and applyPatches convergence | — |
+| 6 | Hardening backlog: ~~lazy hash seeding~~ closed (Web Crypto declared a platform requirement — see §3.3); decode-boundary depth/size limits; ~~property-based testing (fast-check) for the companion invariant, intern idempotence, and applyPatches convergence~~ done (see the decision log: five produce bugs found and fixed) | — |
 
 Non-goals, permanently: mutable built-ins as values; cycle support; wire
 formats (a separate layer's job); schemas (higher layers); framework adapters
@@ -1066,3 +1066,38 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   of overridden equals/hashCode. Guard for the future: "mutable twin of a
   `Value*` type for ergonomics" is a slope that ends at `MutableList`;
   capability, not convenience, is the bar for new mutable surface.
+- **fast-check property suites shipped (roadmap phase 6) and the second
+  corpus pass (mutative) mined — five produce bugs found and fixed, one
+  semantics doctrine settled** — The suites: companion invariant and intern
+  canonicality over `shuffledClone` derived equals (shuffled key insertion,
+  shuffled collection entries, random construction paths, add-then-delete
+  detours); collection build-order/history independence; and produce
+  convergence — one op interpreter run against BOTH a draft and a
+  frozenness-preserving mirror of the canonical base, with every oracle
+  `===` (canonicality upgrades property oracles from "equal" to pointer
+  checks). The finds: (1) relocated base refs, tracked-splice edition —
+  shift/unshift/mid-splice relocate surviving positions like sort/reverse
+  but did not mark `opaqued`; (2) netted-out sequences leaked their op
+  patches (emission precedes result knowledge because children patch
+  against post-splice indices; finalize now retracts this node's entries on
+  every `=== base` outcome); (3) a read-but-unchanged child draft leaked
+  into the interned successor via the materialized copy (netted-out branch
+  now restores `base[i]`); from the mutative corpus: (4) the #18 family —
+  an assigned canonical is frozen, so mutating through a read threw a raw
+  TypeError; all read paths (object/array traps, DraftMap.get,
+  DraftList.get) now copy-on-write frozen stateless values; (5) an `async`
+  recipe leaked its raw Promise out as the "result" (root intern passes
+  unregistered class instances through); thenable replacements now throw a
+  teaching error. The doctrine, forced by copyWithin duplicating a frozen
+  canonical into two slots: **identity exists only where mutability does**
+  — canonical occupants copy-on-write PER SLOT (canonicalization collapses
+  equal objects, so reference aliasing of canonicals is unrepresentable),
+  while the caller's own unfrozen objects keep plain-JS aliasing (fill
+  writes ONE object into many slots; mutating it shows everywhere). The
+  mirror encodes exactly this — frozen nodes thaw per-slot on write — and
+  is thereby the executable specification of produce: `produce(base, ops)
+  === intern(mirror-apply(ops))`. Harness lessons recorded in the suites:
+  op payloads clone per insertion site (a shared instance mutated across
+  the two passes can build cyclic values — the value domain excludes
+  cycles, and the hang looked like a library bug until traced), and
+  `structuredClone` flattens `InternedString` leaves.

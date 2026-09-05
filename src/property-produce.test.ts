@@ -2,8 +2,12 @@
 // Property suite: produce convergence.
 //
 // One op interpreter, two executions. Each generated op sequence is applied
-// BOTH to a produce draft and to a plain mutable deep copy of the canonical
-// base. The oracles, all `===` thanks to canonicality:
+// BOTH to a produce draft and to a frozenness-preserving deep copy of the
+// canonical base, where the interpreter copy-on-writes frozen nodes per
+// slot — the mirror is a reference implementation of CoW-over-canonical
+// (canonicalization collapses equal objects, so reference aliasing exists
+// only for the caller's own unfrozen objects). The oracles, all `===`
+// thanks to canonicality:
 //
 //   1. produce(base, ops)            === intern(mutate(clone(base), ops))
 //   2. applyPatches(base, patches)   === result
@@ -19,7 +23,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { intern } from './intern.js';
-import { applyPatches, produceWithPatches } from './produce.js';
+import { applyPatches, isDraft, produceWithPatches } from './produce.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
@@ -46,6 +50,8 @@ type Action =
   | { t: 'setIdx'; i: number; v: unknown }
   | { t: 'splice'; i: number; d: number; vs: unknown[] }
   | { t: 'reverse' }
+  | { t: 'fill'; v: unknown; i: number }
+  | { t: 'copyWithin'; target: number; start: number }
   | { t: 'setLen'; n: number };
 
 interface Op {
@@ -68,6 +74,12 @@ const actionArb: fc.Arbitrary<Action> = fc.oneof(
     vs: fc.array(payload, { maxLength: 3 }),
   }),
   fc.record({ t: fc.constant('reverse' as const) }),
+  fc.record({ t: fc.constant('fill' as const), v: payload, i: fc.integer({ min: 0, max: 4 }) }),
+  fc.record({
+    t: fc.constant('copyWithin' as const),
+    target: fc.integer({ min: 0, max: 4 }),
+    start: fc.integer({ min: 0, max: 4 }),
+  }),
   fc.record({ t: fc.constant('setLen' as const), n: fc.integer({ min: 0, max: 6 }) }),
 );
 
@@ -88,28 +100,43 @@ function isContainer(v: unknown): boolean {
   return proto === Object.prototype || proto === null;
 }
 
-function locate(root: unknown, path: number[]): unknown {
-  let node = root;
-  for (const p of path) {
+/** Shallow unfrozen copy — the mirror's per-node copy-on-write step. */
+function thaw(v: unknown): unknown {
+  return Array.isArray(v) ? v.slice() : { ...(v as Record<string, unknown>) };
+}
+
+/**
+ * Apply one op, copy-on-writing FROZEN nodes along the descent and returning
+ * the (possibly replaced) root. Frozen mirror nodes model canonicals, whose
+ * occupants CoW per slot — reference aliasing is only for the caller's own
+ * unfrozen objects. Draft nodes CoW themselves, so they are left alone.
+ */
+function applyOp(root: unknown, op: Op): unknown {
+  if (!isContainer(root)) return root;
+  let node: unknown = root;
+  if (!isDraft(node) && Object.isFrozen(node)) node = thaw(node);
+  const newRoot = node;
+  for (const p of op.path) {
+    let key: string | number;
     let next: unknown;
     if (Array.isArray(node)) {
       if (node.length === 0) break;
-      next = node[p % node.length];
+      key = p % node.length;
+      next = (node as unknown[])[key];
     } else {
       const rec = node as Record<string, unknown>;
       const keys = Object.keys(rec).sort();
       if (keys.length === 0) break;
-      next = rec[keys[p % keys.length]!];
+      key = keys[p % keys.length]!;
+      next = rec[key];
     }
     if (!isContainer(next)) break;
+    if (!isDraft(next) && Object.isFrozen(next)) {
+      next = thaw(next);
+      (node as Record<string | number, unknown>)[key] = next;
+    }
     node = next;
   }
-  return node;
-}
-
-function applyOp(root: unknown, op: Op): void {
-  if (!isContainer(root)) return;
-  const node = locate(root, op.path);
   const a = op.action;
   // Inserted payloads are cloned at the insertion site: the same op object is
   // applied to BOTH the mirror and the draft, and a shared instance mutated
@@ -138,6 +165,14 @@ function applyOp(root: unknown, op: Op): void {
       case 'reverse':
         node.reverse();
         break;
+      case 'fill':
+        // One clone per application: fill aliases the SAME object into every
+        // slot, in the mirror and the draft alike.
+        node.fill(mutableClone(a.v), Math.min(a.i, node.length));
+        break;
+      case 'copyWithin':
+        node.copyWithin(Math.min(a.target, node.length), Math.min(a.start, node.length));
+        break;
       case 'setLen':
         node.length = a.n;
         break;
@@ -157,6 +192,7 @@ function applyOp(root: unknown, op: Op): void {
         break; // array actions are no-ops on records
     }
   }
+  return newRoot;
 }
 
 describe('property — produce convergence (plain data)', () => {
@@ -164,8 +200,8 @@ describe('property — produce convergence (plain data)', () => {
     fc.assert(
       fc.property(plainTree, fc.array(opArb, { maxLength: 12 }), (raw, ops) => {
         const base = intern(raw);
-        const mirror = mutableClone(base);
-        for (const op of ops) applyOp(mirror, op);
+        let mirror = mutableClone(base);
+        for (const op of ops) mirror = applyOp(mirror, op);
         const expected = intern(mirror);
 
         const [actual, patches, inverse] = produceWithPatches(base, (d) => {

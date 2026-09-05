@@ -103,17 +103,26 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Deep-copy a plain-data tree into fresh mutable records/arrays.
+ * Deep-copy a plain-data tree, PRESERVING per-node frozenness.
  * `InternedString` leaves are kept by reference (canonical and immutable —
  * `structuredClone` would flatten them into plain records).
+ *
+ * Frozenness carries valsem's identity doctrine into the mirror: a frozen
+ * node models a canonical, and mutations must copy-on-write it per slot
+ * (canonicalization collapses equal objects, so "reference aliasing" of
+ * canonicals is not representable — identity exists only where mutability
+ * does). Unfrozen nodes are the caller's own objects and alias normally.
  */
 export function mutableClone(v: unknown): unknown {
   if (v instanceof InternedString) return v;
-  if (Array.isArray(v)) return v.map(mutableClone);
+  if (Array.isArray(v)) {
+    const out = v.map(mutableClone);
+    return Object.isFrozen(v) ? Object.freeze(out) : out;
+  }
   if (isPlainRecord(v)) {
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(v)) out[k] = mutableClone(v[k]);
-    return out;
+    return Object.isFrozen(v) ? Object.freeze(out) : out;
   }
   return v;
 }

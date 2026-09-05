@@ -150,6 +150,8 @@ interface ArrayState extends BaseState {
    * insert to its child draft via `stateOf`).
    */
   opaqued: boolean;
+  /** Lazily built set of the base's object elements (opaqued reads only). */
+  baseMembers: Set<unknown> | null;
   /** Indices whose base value was child-drafted on read. */
   drafted: Set<number> | null;
   draft: unknown[];
@@ -291,9 +293,15 @@ const objectTraps: ProxyHandler<object> = {
     }
     const value = source[prop];
     if (state.finalized || !isDraftable(value)) return value;
-    // Draft only slots still holding the base value; assigned values and
-    // already-created child drafts come back as-is.
-    if (value === state.base[prop]) {
+    // Draft slots still holding the base value. Assigned values come back
+    // raw (the caller's own material, the immer rule) — EXCEPT frozen ones:
+    // an assigned canonical (e.g. `d.c = base.b`) is immutable, so mutating
+    // through the read must copy-on-write, not throw on the frozen object
+    // (mutative's #18 family).
+    if (
+      value === state.base[prop] ||
+      (stateOf(value) === undefined && Object.isFrozen(value))
+    ) {
       prepareObjCopy(state);
       (state.drafted ??= new Set()).add(prop);
       return (state.copy![prop] = createChildDraft(value, state));
@@ -441,6 +449,18 @@ function arrRead(state: ArrayState, i: number): unknown {
   return state.vTail[i - state.base.length];
 }
 
+/** Is `value` one of the base array's object elements? (Lazily built.) */
+function isBaseMember(state: ArrayState, value: unknown): boolean {
+  let members = state.baseMembers;
+  if (members === null) {
+    members = state.baseMembers = new Set();
+    for (const el of state.base) {
+      if (el !== null && typeof el === 'object') members.add(el);
+    }
+  }
+  return members.has(value);
+}
+
 /** Fold the virtual edits/tail into a materialized working copy. */
 function materializeArr(state: ArrayState): unknown[] {
   if (state.copy === null) {
@@ -551,13 +571,16 @@ const arrayTraps: ProxyHandler<object> = {
     const index = Number(prop);
     const value = arrRead(state, index);
     if (state.finalized || !isDraftable(value)) return value;
-    // Draft base-positioned values; after a relocating method (sort/…) base
-    // refs may sit anywhere, so draft ANY non-draft draftable to keep base
-    // mutations impossible (over-drafting assigned values is safe — their
-    // mutations resolve identically at finalize).
+    // Draft base-positioned values. Frozen values (canonicals — assigned or
+    // relocated) always copy-on-write rather than throw (mutative's #18
+    // family). After a relocating method, unfrozen base members may also sit
+    // at foreign indices — the membership set identifies them; unfrozen
+    // FRESH inserts stay raw so their plain-JS aliasing survives (fill/
+    // copyWithin write one object into several slots).
     if (
       value === state.base[index] ||
-      (state.opaqued && stateOf(value) === undefined)
+      (stateOf(value) === undefined &&
+        (Object.isFrozen(value) || (state.opaqued && isBaseMember(state, value))))
     ) {
       (state.drafted ??= new Set()).add(index);
       const child = createChildDraft(value, state);
@@ -662,6 +685,7 @@ function createArrayDraft(base: unknown[], parent?: AnyState): ArrayState {
     copy: null,
     ops: [],
     opaqued: false,
+    baseMembers: null,
     drafted: null,
     draft: null as unknown as unknown[],
     revoke: null as unknown as () => void,
@@ -716,7 +740,22 @@ export class DraftMap<K, V> {
   get(key: K): V | undefined {
     const s = this.#state;
     const k = intern(key);
-    if (s.edits.has(k)) return s.edits.get(k) as V;
+    if (s.edits.has(k)) {
+      const edited = s.edits.get(k);
+      // A frozen assigned value (a canonical placed into the draft) must
+      // copy-on-write when read for mutation — same rule as the traps.
+      if (
+        !s.finalized &&
+        isDraftable(edited) &&
+        stateOf(edited) === undefined &&
+        Object.isFrozen(edited)
+      ) {
+        const child = createChildDraft(edited, s);
+        s.edits.set(k, child); // stays assigned — resolves at finalize
+        return child as V;
+      }
+      return edited as V;
+    }
     if (s.assigned.get(k) === false || s.cleared) return undefined;
     const value = s.base.get(k);
     if (value !== undefined && isDraftable(value) && !s.finalized) {
@@ -925,13 +964,15 @@ export class DraftList<T> {
     const s = this.#state;
     if (!Number.isInteger(index) || index < 0 || index >= this.length) return undefined;
     const value = this.#read(index);
-    // Draft only values still at their base position (assigned/inserted
-    // material is the caller's own and comes back raw — the immer rule).
+    // Draft values still at their base position (assigned/inserted material
+    // is the caller's own and comes back raw — the immer rule), and frozen
+    // assigned values (canonicals must copy-on-write, not throw — mutative's
+    // #18 family).
     if (
       isDraftable(value) &&
       !s.finalized &&
       stateOf(value) === undefined &&
-      value === s.base.get(index)
+      (value === s.base.get(index) || Object.isFrozen(value))
     ) {
       const child = createChildDraft(value, s);
       s.drafted.add(index);
@@ -1791,6 +1832,15 @@ function runProduce<T>(
 
     let result: unknown;
     if (returned !== undefined && returned !== draft) {
+      // A thenable replacement is almost certainly an `async` recipe — which
+      // would otherwise leak the raw Promise out as the "result" (intern
+      // passes unregistered class instances through). Reject it loudly.
+      if (typeof (returned as { then?: unknown } | null)?.then === 'function') {
+        throw new Error(
+          'valsem: recipes must be synchronous — an async recipe returns a Promise, ' +
+            'which is not a value. Await your data first, then produce.',
+        );
+      }
       if (rootState?.modified) {
         throw new Error(
           'valsem: a recipe may either mutate the draft or return a replacement value — not both.',
