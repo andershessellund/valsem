@@ -17,6 +17,7 @@ import {
   assertAssignable,
   createChildDraft,
   resolve,
+  snapshotOf,
   emitSeqOps,
   retractSeqPatches,
   seqTailProfile,
@@ -51,7 +52,7 @@ export interface ListState<T = unknown> extends DraftState<ValueList<T>> {
 }
 
 export class DraftList<T> {
-  declare readonly [DRAFT_STATE]: ListState;
+  declare readonly [DRAFT_STATE]: ListState<T>;
 
   constructor(token: symbol, state: ListState) {
     if (token !== INTERNAL) {
@@ -223,6 +224,7 @@ export function createListDraft<T>(
     drafted: new Set(),
     draft: null as unknown as DraftList<unknown>,
     finalize: finalizeList,
+    snapshot: snapshotList,
     applyPatch: applyListPatch,
     childAt: (state, segment) => (state as ListState).draft.get(segment as number),
   });
@@ -234,6 +236,18 @@ function applyListPatch(state: ListState, p: Patch): void {
   if (p.kind === 'list.set') state.draft.set(p.index, p.value);
   else if (p.kind === 'list.splice') state.draft.splice(p.index, p.remove, ...(p.insert as unknown[]));
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a list draft`);
+}
+
+/** current()'s view: virtual edits replayed persistently, or the materialized items rebuilt. */
+function snapshotList(state: DraftState<ValueList<unknown>>): unknown {
+  const s = state as ListState;
+  if (s.items === null) {
+    let result = s.base;
+    for (const [i, v] of s.vEdits) result = result.set(i, snapshotOf(v));
+    for (const v of s.vTail) result = result.push(snapshotOf(v));
+    return result;
+  }
+  return s.from(s.items.map(snapshotOf));
 }
 
 function finalizeList(

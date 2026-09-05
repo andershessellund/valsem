@@ -35,6 +35,7 @@ export {
   assertAssignable,
   createChildDraft,
   resolve,
+  snapshotOf,
   restoreValue,
   same,
   emitSeqOps,

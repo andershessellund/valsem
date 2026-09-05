@@ -14,6 +14,7 @@
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
 | `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |
 | `nothing` / `isDraft` | symbol / function | Recipe sentinel for "result is `undefined`"; draft detection. |
+| `current(draft)` / `original(draft)` | function | Inside a recipe: the canonical value of what the draft holds right now (the draft stays live), and the base it was made from. `Undraft<D>` is their return type — the inverse of `Draft<T>`. Tree-shake with `produce`: a bundle that never calls them carries neither. |
 | `DraftMap` / `DraftSet` / `DraftList` | class | Mutable draft twins of the collections, handed out inside `produce`; `get()` returns drafts (`Draft<V>`). |
 | `toDraft` | symbol | The draft protocol: implement `[toDraft](parent)` to make a type draftable; `Draft<T>` infers a type's draft from it. Toolkit in `valsem/draft`. |
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
@@ -50,13 +51,14 @@ collections take. Covered by semver like `valsem/binding`.
 | export | description |
 | --- | --- |
 | `toDraft` | The protocol symbol: implement `[toDraft](parent)` on a class, returning a `DraftState`. Also exported from `valsem`. |
-| `createDraftState(fields)` | Build and register a draft state for the running `produce()`; supply your fields, `draft`, `finalize`, and optionally `applyPatch`/`childAt`/`revoke`. |
+| `createDraftState(fields)` | Build and register a draft state for the running `produce()`; supply your fields, `draft`, `finalize`, and optionally `applyPatch`/`childAt`/`snapshot`/`revoke`. |
 | `markChanged(state)` | Record a mutation (bubbles to the root). |
 | `assertUnrevoked(state)` | Throw the teaching error once the recipe has ended. |
 | `assertAssignable(value, state)` | Reject drafts from another `produce()` call. |
 | `createChildDraft(value, state)` | Draft a nested draftable value lazily. |
 | `resolve(value, path, recorder)` | Finalize a child (draft or foreign material) to its canonical form, emitting its patches under `path`. |
 | `restoreValue(value)` | The inverse-patch value for a child (a draft restores its base). |
+| `snapshotOf(value)` | The value as it stands now, nested drafts included, nothing finalized — what your kind's `snapshot` calls on its children so `current()` works through your type. |
 | `isDraftable(value)` / `isDraft(value)` / `stateOf(draft)` | Introspection. |
 | `emitSeqOps`, `retractSeqPatches`, `seqTailProfile` | The sequence-patch helpers arrays and `ValueList` share, for list-like kinds. |
 | `DraftState`, `Patch`, `PatchKinds`, `PatchPath`, `PatchRecorder`, `SeqOp` | Types. Extend `PatchKinds` by declaration merging to add your own patch kinds with exact narrowing. |

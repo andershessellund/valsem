@@ -30,6 +30,8 @@ export { configureLimits } from './limits.js';
 export type { Hasher } from './hasher.js';
 export { produce, produceWithPatches, applyPatches, nothing, isDraft, toDraft } from './produce.js';
 export type { Draft, Patch, PatchPath, PatchKinds } from './produce.js';
+export { current, original } from './current.js';
+export type { Undraft } from './current.js';
 export { DraftMap } from './draft-map.js';
 export { DraftSet } from './draft-set.js';
 export { DraftList } from './draft-list.js';

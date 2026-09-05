@@ -145,6 +145,14 @@ export interface DraftState<B = unknown> {
   applyPatch?(state: DraftState<B>, patch: Patch): void;
   /** The child under `segment` of the live draft — how {@link applyPatches} navigates through it. */
   childAt?(state: DraftState<B>, segment: unknown): unknown;
+  /**
+   * The value as it stands right now — how `current()` reads a draft. Only
+   * called when `modified`. Build it from your bookkeeping WITHOUT touching
+   * the state (the recipe goes on afterwards), replacing nested values with
+   * {@link snapshotOf} of them. It need not be canonical: `current()` interns
+   * what you return. Kinds that omit it do not support `current()`.
+   */
+  snapshot?(state: DraftState<B>): unknown;
 }
 
 type DraftStateInit<S extends DraftState> = Omit<S, 'scope' | 'modified' | 'result' | 'finalized' | 'revoked'>;
@@ -294,6 +302,76 @@ export function restoreValue(value: unknown): unknown {
   const state = stateOf(value);
   if (state !== undefined) return intern(state.base);
   return intern(value);
+}
+
+// ---------------------------------------------------------------------------
+// Snapshots — current()'s non-finalizing read of a draft
+// ---------------------------------------------------------------------------
+
+let coreSnapshot: ((state: DraftState) => unknown) | undefined;
+
+/** @internal `current()` registers the plain object/array snapshots here, so `produce` bundles without them. */
+export function _setCoreSnapshot(fn: (state: DraftState) => unknown): void {
+  coreSnapshot = fn;
+}
+
+/**
+ * The value `value` stands for right now: a draft becomes its current
+ * contents (its base when unmodified, otherwise the kind's {@link DraftState.snapshot}),
+ * foreign plain data is walked for embedded drafts, and everything else is
+ * returned as-is. Nothing is finalized or interned — the draft stays live.
+ * Kinds call this on their children when implementing `snapshot`.
+ */
+export function snapshotOf(value: unknown): unknown {
+  const state = stateOf(value);
+  if (state === undefined) return snapshotForeign(value);
+  assertUnrevoked(state);
+  if (!state.modified) return state.base;
+  if (state.snapshot !== undefined) return state.snapshot(state);
+  if (coreSnapshot !== undefined && (state.kind === 'object' || state.kind === 'array')) {
+    return coreSnapshot(state);
+  }
+  throw new Error(
+    `valsem: current() is not supported for a '${state.kind}' draft — its draft state has no snapshot()`,
+  );
+}
+
+let snapshotDepth = 0;
+
+/** Foreign material assigned into a draft may embed drafts: rebuild it with those snapshotted. */
+function snapshotForeign(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if ((value as Record<symbol, unknown>)[internedMarker] === true || _hashCacheHas(value)) {
+    return value; // canonical: cannot contain a draft
+  }
+  snapshotDepth++;
+  try {
+    if (snapshotDepth > _maxDepth()) throw _depthError('current');
+    if (isPlainObject(value)) {
+      let changed = false;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(value)) {
+        const child = value[key];
+        const snap = snapshotOf(child);
+        if (snap !== child) changed = true;
+        _defineRecordField(out, key, snap);
+      }
+      return changed ? out : value;
+    }
+    if (Array.isArray(value)) {
+      let changed = false;
+      const out = new Array<unknown>(value.length);
+      for (let i = 0; i < value.length; i++) {
+        const snap = snapshotOf(value[i]);
+        if (snap !== value[i]) changed = true;
+        out[i] = snap;
+      }
+      return changed ? out : value;
+    }
+    return value;
+  } finally {
+    snapshotDepth--;
+  }
 }
 
 let adoptDepth = 0;

@@ -32,7 +32,7 @@ export interface SetState<T = unknown> extends DraftState<ValueSet<T>> {
 }
 
 export class DraftSet<T> {
-  declare readonly [DRAFT_STATE]: SetState;
+  declare readonly [DRAFT_STATE]: SetState<T>;
 
   constructor(token: symbol, state: SetState) {
     if (token !== INTERNAL) {
@@ -132,6 +132,7 @@ export function createSetDraft<T>(
     cleared: false,
     draft: null as unknown as DraftSet<unknown>,
     finalize: finalizeSet,
+    snapshot: currentSet,
     applyPatch: applySetPatch,
   });
   state.draft = new DraftSet(INTERNAL, state);
@@ -144,14 +145,21 @@ function applySetPatch(state: SetState, p: Patch): void {
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a set draft`);
 }
 
+/** The set as it stands: base (or empty, if cleared) minus removals plus additions. Also current()'s view. */
+function currentSet(state: DraftState<ValueSet<unknown>>): ValueSet<unknown> {
+  const s = state as SetState;
+  let result = s.cleared ? s.empty() : s.base;
+  for (const v of s.removed) result = result.delete(v);
+  for (const v of s.added) result = result.add(v);
+  return result;
+}
+
 function finalizeSet(
   state: SetState,
   path: PatchPath | null,
   recorder: PatchRecorder | undefined,
 ): unknown {
-  let result = state.cleared ? state.empty() : state.base;
-  for (const v of state.removed) result = result.delete(v);
-  for (const v of state.added) result = result.add(v);
+  const result = currentSet(state);
   state.result = result;
 
   if (recorder !== undefined && path !== null) {

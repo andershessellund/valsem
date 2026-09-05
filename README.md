@@ -77,7 +77,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | `Date` in state | allowed | rejected — use `ValueDate.of(date)` (or Temporal via `valsem/temporal`) |
 | Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — one method or one registration, see [Extending](#extending) |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
-| `current()` / `original()` | yes | not yet |
+| `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
 | Async recipes | silently wrong | rejected with an error |
 
 ```ts
@@ -374,7 +374,7 @@ bindings (`valsem/binding`).
 
 | | |
 | --- | --- |
-| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft` | the immer-shaped API; results are canonical |
+| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `HashMap` | mutable map keyed by content |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |

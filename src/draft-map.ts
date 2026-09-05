@@ -18,6 +18,7 @@ import {
   assertAssignable,
   createChildDraft,
   resolve,
+  snapshotOf,
   type DraftState,
   type Patch,
   type PatchPath,
@@ -41,7 +42,7 @@ export interface MapState<K = unknown, V = unknown> extends DraftState<ValueMap<
 }
 
 export class DraftMap<K, V> {
-  declare readonly [DRAFT_STATE]: MapState;
+  declare readonly [DRAFT_STATE]: MapState<K, V>;
 
   constructor(token: symbol, state: MapState) {
     if (token !== INTERNAL) {
@@ -186,6 +187,7 @@ export function createMapDraft<K, V>(
     cleared: false,
     draft: null as unknown as DraftMap<unknown, unknown>,
     finalize: finalizeMap,
+    snapshot: snapshotMap,
     applyPatch: applyMapPatch,
     childAt: (state, segment) => (state as MapState).draft.get(segment),
   });
@@ -197,6 +199,15 @@ function applyMapPatch(state: MapState, p: Patch): void {
   if (p.kind === 'map.set') state.draft.set(p.key, p.value);
   else if (p.kind === 'map.delete') state.draft.delete(p.key);
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a map draft`);
+}
+
+/** current()'s view: the base (or empty, if cleared) with the edits replayed persistently. */
+function snapshotMap(state: DraftState<ValueMap<unknown, unknown>>): unknown {
+  const s = state as MapState;
+  let result = s.cleared ? s.empty() : s.base;
+  for (const [key, wasSet] of s.assigned) if (wasSet === false) result = result.delete(key);
+  for (const [key, v] of s.edits) result = result.set(key, snapshotOf(v));
+  return result;
 }
 
 function finalizeMap(

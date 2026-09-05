@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import { produce, produceWithPatches, applyPatches, type Draft } from './produce.js';
+import { current, original } from './current.js';
 import {
   toDraft,
   DRAFT_STATE,
@@ -14,6 +15,7 @@ import {
   assertUnrevoked,
   createChildDraft,
   resolve,
+  snapshotOf,
   isDraftable,
   isDraft,
   type DraftState,
@@ -69,6 +71,10 @@ class Interval {
       draft: null as unknown as IntervalDraft,
       finalize: finalizeInterval,
       applyPatch: applyIntervalPatch,
+      snapshot: (s) => {
+        const iv = s as IntervalState;
+        return Interval.of(iv.lo, iv.hi, snapshotOf(iv.meta) as { label: string }); // current()'s view
+      },
       childAt: (state, segment) => (segment === 'meta' ? (state as IntervalState).draft.meta : undefined),
     });
     state.draft = new IntervalDraft(state);
@@ -192,6 +198,49 @@ describe('a third-party draftable', () => {
     ]);
     expect(applyPatches(base, patches)).toBe(next);
     expect(applyPatches(next, inverse)).toBe(base);
+  });
+
+  it('supports current() and original() through `snapshot`', () => {
+    const iv = Interval.of(0, 10, { label: 'a' });
+    produce(intern({ range: iv }), (d) => {
+      expect(original(d.range)).toBe(iv);
+      expect(current(d.range)).toBe(iv);
+      d.range.hi = 5;
+      d.range.meta.label = 'b';
+      expect(current(d.range)).toBe(Interval.of(0, 5, { label: 'b' }));
+      expect(current(d)).toBe(intern({ range: Interval.of(0, 5, { label: 'b' }) }));
+      expect(original(d.range)).toBe(iv);
+      d.range.lo = 1; // still live
+    });
+  });
+
+  it('a kind without `snapshot` says so from current()', () => {
+    class Opaque {
+      declare readonly [hashCode]: number;
+      declare readonly [interned]: true;
+      [equals](o: unknown): boolean {
+        return o === this;
+      }
+      [toDraft](parent?: DraftState): DraftState<Opaque> & { draft: { [DRAFT_STATE]: DraftState<Opaque>; poke(): void } } {
+        const state = createDraftState<DraftState<Opaque> & { draft: { [DRAFT_STATE]: DraftState<Opaque>; poke(): void } }>({
+          kind: 'opaque',
+          parent,
+          base: this,
+          draft: null as never,
+          finalize: (s) => s.base,
+        });
+        state.draft = { [DRAFT_STATE]: state, poke: () => markChanged(state) };
+        return state;
+      }
+    }
+    const o = new Opaque();
+    (o as unknown as Record<symbol, unknown>)[hashCode] = 1;
+    (o as unknown as Record<symbol, unknown>)[interned] = true;
+    produce(o, (d) => {
+      expect(current(d)).toBe(o); // unmodified: no snapshot needed
+      d.poke();
+      expect(() => current(d)).toThrow(/current\(\) is not supported for a 'opaque' draft/);
+    });
   });
 
   it('escaped drafts throw the teaching error', () => {

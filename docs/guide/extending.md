@@ -166,6 +166,10 @@ A draft state has:
   into `patches`, inverse `unshift`ed into `inverse`).
 - optionally `applyPatch(state, patch)` and `childAt(state, segment)`, so
   `applyPatches` can route patches to your draft and navigate through it.
+- optionally `snapshot(state)` — the value as it stands right now, built
+  from your bookkeeping without touching the state, children passed through
+  `snapshotOf()`. This is what `current()` reads; it interns what you return.
+  A kind without it rejects `current()` with an error naming the kind.
 
 Your draft calls `assertUnrevoked(state)` before every operation (drafts do
 not survive the recipe) and `markChanged(state)` after every mutation (it
@@ -181,7 +185,7 @@ in the repository; the essential shape is:
 ```ts
 import {
   toDraft, DRAFT_STATE, createDraftState, markChanged, assertUnrevoked,
-  createChildDraft, resolve, isDraft, isDraftable,
+  createChildDraft, resolve, snapshotOf, isDraft, isDraftable,
   type DraftState, type PatchPath, type PatchRecorder, type Patch,
 } from 'valsem/draft';
 
@@ -209,6 +213,7 @@ class Interval {
       draft: null as unknown as IntervalDraft,
       finalize: finalizeInterval,
       applyPatch: applyIntervalPatch,
+      snapshot: (s) => Interval.of((s as IntervalState).lo, (s as IntervalState).hi, snapshotOf((s as IntervalState).meta) as { label: string }),
       childAt: (s, segment) => (segment === 'meta' ? (s as IntervalState).draft.meta : undefined),
     });
     state.draft = new IntervalDraft(state);
@@ -252,7 +257,8 @@ function applyIntervalPatch(state: DraftState<Interval>, p: Patch) {
 ```
 
 With that in place, an `Interval` drafts anywhere a value can sit — at the
-root, inside a record, inside a `ValueList` — with patches that round-trip:
+root, inside a record, inside a `ValueList` — with patches that round-trip
+and `current()`/`original()` that see through it:
 
 ```ts
 const next = produce(intern({ range: Interval.of(0, 10) }), (d) => {

@@ -57,6 +57,31 @@ Recipes must be **synchronous** — an `async` recipe returns a Promise, which
 is not a value, and is rejected with a teaching error. Await your data first,
 then produce.
 
+## Looking at a draft: `current()` and `original()`
+
+immer's two inspectors, with valsem's guarantee attached. `original(draft)`
+is the value the draft was made from; `current(draft)` is the **canonical**
+value of what the draft holds right now — exactly what `produce` would
+return if the recipe ended here — and the draft stays live afterwards.
+Both work on any draft: plain objects and arrays, `DraftMap`/`DraftSet`/
+`DraftList`, and your own draftables.
+
+```ts
+import { produce, current, original } from 'valsem';
+
+const next = produce(doc, (d) => {
+  d.text += '!';
+  d.history.push(current(d).text);   // a canonical snapshot — safe to store, cheap to adopt
+  original(d.history) === doc.history; // true
+  d.text += '?';                      // still editing
+});
+```
+
+An unmodified draft snapshots to its base in O(1); a modified container is
+copied and hashed, so `current()` in a hot loop costs what a produce costs.
+Both throw outside the recipe, like any other use of an escaped draft.
+`Undraft<D>` is their return type — the inverse of `Draft<T>`.
+
 ## Identity in a draft: the aliasing doctrine
 
 Inside a recipe you are writing plain mutable JavaScript, and valsem preserves

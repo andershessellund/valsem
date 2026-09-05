@@ -58,6 +58,7 @@ import {
   emitSeqOps,
   retractSeqPatches,
   seqTailProfile,
+  snapshotOf,
   _runInScope,
   _setCoreDraftFactories,
   type DraftState,
@@ -1087,6 +1088,26 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
         throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
     }
   }
+}
+
+/**
+ * @internal `current()`'s view of the two core kinds: a plain copy with nested
+ * drafts snapshotted, the state untouched. Lives here for the array
+ * accessors; referenced only by `current.ts`, so it tree-shakes with it.
+ */
+export function _snapshotCore(state: DraftState): unknown {
+  if (state.kind === 'array') {
+    const s = state as ArrayState;
+    const n = arrLen(s);
+    const out = new Array<unknown>(n);
+    for (let i = 0; i < n; i++) out[i] = snapshotOf(arrRead(s, i));
+    return out;
+  }
+  const s = state as ObjectState;
+  const src = latestObj(s);
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(src)) _defineRecordField(out, key, snapshotOf(src[key]));
+  return out;
 }
 
 function describe(target: unknown): string {

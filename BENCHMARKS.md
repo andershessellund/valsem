@@ -291,6 +291,7 @@ are honoured); gzip at level 9.
 | import | min | gz | note |
 | --- | --- | --- | --- |
 | `produce` | 22.9 KB | **8.2 KB** | was 42.9 / 13.7 before the draft protocol — it dragged in every collection |
+| `produce`, `current`, `original` | 24.2 KB | 8.6 KB | the inspectors register the core snapshots themselves, so `produce` alone carries none of it |
 | `deepEqual` | 2.9 KB | 1.4 KB | |
 | `intern` | 9.8 KB | 4.0 KB | |
 | `HashMap` | 10.4 KB | 4.2 KB | |
