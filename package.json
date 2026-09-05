@@ -42,7 +42,8 @@
   "files": [
     "dist",
     "src",
-    "!src/**/*.test.ts"
+    "!src/**/*.test.ts",
+    "!src/**/*.test-helpers.ts"
   ],
   "scripts": {
     "build": "tsc",
@@ -55,7 +56,8 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "prepack": "pnpm build"
   },
   "packageManager": "pnpm@10.32.0",
   "devDependencies": {
