@@ -473,14 +473,29 @@ intern(PlainDate.from('2026-08-31')) === intern(PlainDate.from('2026-08-31')); /
 Without the import, Temporal values fall back to reference semantics and
 `deepHash` throws — with an error naming this import.
 
-> **`Duration` compares field-wise, not by `Duration.compare`.** It is the one
-> kind with no `equals()` method, and no total equality exists for it:
-> `Duration.compare` calls `P1D` and `PT24H` equal but *throws* on `P1M` vs
-> `P30D` without a `relativeTo`, and an equality that throws cannot back a hash
-> table. So `valsem` compares a `Duration` on its canonical `toString()`:
-> `PT0H` equals `PT0M` (both normalise to `PT0S`), while `P1D` does **not**
-> equal `PT24H`. Normalise before valsem sees them if you need `compare`
+> **`Duration` compares strictly field‑wise, not by `Duration.compare`.** It
+> is the one kind with no `equals()` method, and no total equality exists for
+> it: `Duration.compare` calls `P1D` and `PT24H` equal but *throws* on `P1M`
+> vs `P30D` without a `relativeTo`, and an equality that throws cannot back a
+> hash table. So `valsem` compares a `Duration` on its ten fields, years
+> through nanoseconds — equal exactly when no accessor can tell them apart.
+> `PT0H` equals `PT0M` (every field is 0); `P1D` does **not** equal `PT24H`,
+> `PT1H` does **not** equal `PT60M`, and `{ milliseconds: 1500 }` does **not**
+> equal `{ seconds: 1, milliseconds: 500 }` even though both print `PT1.5S`.
+> Normalise before valsem sees them (`round`, `total`) if you need `compare`
 > semantics.
+
+> **`ZonedDateTime` time‑zone aliases are distinct values.** Temporal's own
+> `equals()` treats `[Asia/Calcutta]` and `[Asia/Kolkata]` as equal (it
+> resolves link names to their primary identifier), but preserves the
+> identifier as supplied — `.timeZoneId`, `toString()` and `toJSON()` all
+> differ. By the same standard as `Duration`, valsem compares a
+> `ZonedDateTime` on `epochNanoseconds`, `timeZoneId` and `calendarId`: alias
+> spellings are different values. Case and offset formatting are canonicalised
+> by Temporal at construction (`asia/kolkata` → `Asia/Kolkata`, `+0530` →
+> `+05:30`), so only link names are affected. This also keeps equality
+> independent of the runtime's tz link table. To merge aliases, normalise
+> first: `zdt.withTimeZone(canonicalId)`.
 
 ---
 

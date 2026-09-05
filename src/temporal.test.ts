@@ -63,47 +63,84 @@ describe('temporal — value semantics', () => {
   });
 });
 
-describe('temporal — ZonedDateTime time-zone aliases (equals() canonicalises, toString() does not)', () => {
-  const pairs: [string, string][] = [
+describe('temporal — ZonedDateTime is strictly field-wise: time-zone aliases are distinct values', () => {
+  // equals() resolves link names to their primary identifier; the accessors
+  // and toString() keep the identifier as supplied. Substitutability sides
+  // with the accessors — and does not depend on the runtime's link table.
+  const aliases: [string, string][] = [
     ['Asia/Calcutta', 'Asia/Kolkata'],
     ['Asia/Saigon', 'Asia/Ho_Chi_Minh'],
     ['US/Eastern', 'America/New_York'],
     ['Europe/Kiev', 'Europe/Kyiv'],
+    ['Etc/UTC', 'UTC'],
   ];
+  const at = (tz: string) => T.ZonedDateTime.from(`2020-06-01T12:00[${tz}]`);
 
-  it('holds the companion invariant across alias identifiers', () => {
-    for (const [x, y] of pairs) {
-      const a = T.ZonedDateTime.from(`2020-06-01T12:00[${x}]`);
-      const b = T.ZonedDateTime.from(`2020-06-01T12:00[${y}]`);
-      if (!a.equals(b)) continue; // runtime without alias data — nothing to test
+  it('alias identifiers are distinct values even where Temporal.equals() says equal', () => {
+    for (const [x, y] of aliases) {
+      const a = at(x);
+      const b = at(y);
+      expect(a.timeZoneId).not.toBe(b.timeZoneId);
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+      expect(intern(a)).not.toBe(intern(b));
+      expect(intern(a).timeZoneId).toBe(x); // each canonical keeps its own spelling
+      expect(intern(b).timeZoneId).toBe(y);
+    }
+  });
+
+  it('spellings Temporal canonicalises at construction are one value', () => {
+    // Case and offset formatting are normalised at the door; only link names
+    // are preserved as supplied.
+    for (const [x, y] of [
+      ['asia/kolkata', 'Asia/Kolkata'],
+      ['+0530', '+05:30'],
+      ['europe/copenhagen', 'Europe/Copenhagen'],
+    ]) {
+      const a = at(x!);
+      const b = at(y!);
+      expect(a.timeZoneId).toBe(b.timeZoneId);
       expect(deepEqual(a, b)).toBe(true);
       expect(deepHash(a)).toBe(deepHash(b));
+      expect(intern(a)).toBe(intern(b));
     }
   });
 
-  it('interns alias identifiers to ONE canonical, and deepEqual agrees before and after', () => {
-    for (const [x, y] of pairs) {
-      const a = T.ZonedDateTime.from(`2020-06-01T12:00[${x}]`);
-      const b = T.ZonedDateTime.from(`2020-06-01T12:00[${y}]`);
-      if (!a.equals(b)) continue;
-      const ia = intern(a);
-      const ib = intern(b);
-      expect(ia).toBe(ib);
-      expect(deepEqual(ia, ib)).toBe(true);
-    }
-  });
-
-  it('still distinguishes genuinely different zones and instants', () => {
+  it('agrees with equals() wherever the identifiers already match', () => {
     const a = T.ZonedDateTime.from('2020-06-01T12:00[Europe/Copenhagen]');
-    const b = T.ZonedDateTime.from('2020-06-01T12:00[Europe/London]'); // a different instant
-    const c = T.ZonedDateTime.from('2020-06-01T12:00[UTC]');
-    expect(deepEqual(a, b)).toBe(false);
-    expect(deepEqual(a, c)).toBe(false);
-    expect(intern(a)).not.toBe(intern(b));
+    const b = T.ZonedDateTime.from('2020-06-01T10:00[UTC]').withTimeZone('Europe/Copenhagen');
+    expect(a.equals(b)).toBe(true);
+    expect(deepEqual(a, b)).toBe(true);
+    expect(deepHash(a)).toBe(deepHash(b));
+    expect(intern(a)).toBe(intern(b));
+  });
+
+  it('distinguishes zone, instant, and calendar independently', () => {
+    const base = at('Europe/Copenhagen');
+    const sameInstantOtherZone = base.withTimeZone('Europe/Berlin'); // same offset, same instant
+    const sameWallOtherZone = at('Europe/London'); // a different instant
+    const otherCalendar = base.withCalendar('gregory');
+    const offsetSpelled = base.withTimeZone('+02:00'); // same instant, offset zone
+    for (const other of [sameInstantOtherZone, sameWallOtherZone, otherCalendar, offsetSpelled]) {
+      expect(deepEqual(base, other)).toBe(false);
+      expect(intern(base)).not.toBe(intern(other));
+    }
+    // Europe/Copenhagen became a tzdata link to Europe/Berlin in 2024b, so on
+    // such a runtime Temporal's equals() calls them EQUAL — and on an older
+    // one it does not. The strict answer above is the same everywhere; that
+    // environment-dependence is the second reason not to defer to equals().
+    expect(typeof base.equals(sameInstantOtherZone)).toBe('boolean');
+  });
+
+  it('normalising the zone is the way to merge aliases', () => {
+    const a = at('Asia/Calcutta').withTimeZone('Asia/Kolkata');
+    const b = at('Asia/Kolkata');
+    expect(deepEqual(a, b)).toBe(true);
+    expect(intern(a)).toBe(intern(b));
   });
 });
 
-describe('temporal — Duration is field-wise, not Duration.compare', () => {
+describe('temporal — Duration is strictly field-wise, not Duration.compare', () => {
   it('treats P1D and PT24H as distinct even though compare() says 0', () => {
     const day = T.Duration.from('P1D');
     const hours = T.Duration.from('PT24H');
@@ -111,9 +148,46 @@ describe('temporal — Duration is field-wise, not Duration.compare', () => {
     expect(deepEqual(day, hours)).toBe(false);
   });
 
-  it('agrees wherever toString() normalises', () => {
-    expect(deepEqual(T.Duration.from('PT0H'), T.Duration.from('PT0M'))).toBe(true);
-    expect(deepHash(T.Duration.from('PT0H'))).toBe(deepHash(T.Duration.from('PT0M')));
+  it('distinguishes every pair an accessor can distinguish — including where toString() folds', () => {
+    const distinct: [Temporal.DurationLike | string, Temporal.DurationLike | string][] = [
+      [{ milliseconds: 1500 }, { seconds: 1, milliseconds: 500 }], // both print PT1.5S
+      [{ microseconds: 1000 }, { milliseconds: 1 }], // both print PT0.001S
+      [{ nanoseconds: 1_500_000_000 }, { seconds: 1, milliseconds: 500 }],
+      ['PT1H', 'PT60M'],
+      ['PT90S', 'PT1M30S'],
+      ['P1W', 'P7D'],
+      ['P1D', 'PT24H'],
+      ['PT1H', '-PT1H'],
+    ];
+    for (const [x, y] of distinct) {
+      const a = T.Duration.from(x);
+      const b = T.Duration.from(y);
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+      expect(intern(a)).not.toBe(intern(b));
+    }
+    // The first two pairs are the ones toString() cannot tell apart.
+    expect(T.Duration.from({ milliseconds: 1500 }).toString()).toBe(
+      T.Duration.from({ seconds: 1, milliseconds: 500 }).toString(),
+    );
+  });
+
+  it('equates exactly the Durations whose ten fields agree, with equal hashes', () => {
+    const equal: [Temporal.DurationLike | string, Temporal.DurationLike | string][] = [
+      ['PT0H', 'PT0M'], // every field 0
+      ['PT0S', { hours: 0, nanoseconds: 0 }],
+      [{ hours: -0 }, { hours: 0 }], // Temporal normalises -0 at construction
+      ['P1DT2H', { days: 1, hours: 2 }],
+      [{ years: 1, nanoseconds: 1 }, 'P1YT0.000000001S'],
+      ['-P1M', { months: -1 }],
+    ];
+    for (const [x, y] of equal) {
+      const a = T.Duration.from(x);
+      const b = T.Duration.from(y);
+      expect(deepEqual(a, b)).toBe(true);
+      expect(deepHash(a)).toBe(deepHash(b));
+      expect(intern(a)).toBe(intern(b));
+    }
   });
 
   it('never throws where Duration.compare would', () => {
