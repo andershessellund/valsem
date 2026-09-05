@@ -434,34 +434,131 @@ export function trieRemove(
 }
 
 // ---------------------------------------------------------------------------
-// Iteration — structure-determined (hence content-determined) order
+// Iteration — structure-determined (hence content-determined) order: a
+// node's inline entries first, then its children in bit order.
+//
+// Explicit-stack iterator objects, not generators. A recursive generator
+// with `yield*` per level costs O(depth) generator resumptions per element
+// (measured ~47 ns/element on V8 for a 10k trie); one `next()` over a
+// small stack costs ~10 ns, and a direct callback walk ~6 ns. The classes
+// extend the global `Iterator` where it exists, so the iterator helpers
+// (`.map`, `.filter`, `.take`, …) work exactly as they did on generators.
 // ---------------------------------------------------------------------------
 
-/** Yield `[key, value]` pairs (stride 2). */
-export function* trieEntries(cfg: TrieConfig, node: HNode): Generator<[unknown, unknown]> {
-  const dataEnd = node.t === 0 ? popcount(node.dmap) * 2 : node.slots.length;
-  for (let i = 0; i < dataEnd; i += 2) {
-    yield [node.slots[i], node.slots[i + 1]];
-  }
-  if (node.t === 0) {
-    for (let i = dataEnd; i < node.slots.length; i++) {
-      yield* trieEntries(cfg, node.slots[i] as HNode);
+/** `Iterator` (ES2025) as a base class where the runtime has it; a plain base otherwise. */
+const IteratorBase = ((globalThis as { Iterator?: unknown }).Iterator ?? Object) as new () => object;
+
+/** Explicit-stack traversal shared by the three iterators: `next()` yields slot indices. */
+abstract class TrieIterator<T> extends IteratorBase implements IterableIterator<T> {
+  readonly #stride: 1 | 2;
+  readonly #nodes: HNode[] = [];
+  readonly #idx: number[] = [];
+  #depth = -1;
+
+  constructor(stride: 1 | 2, root: HNode) {
+    super();
+    this.#stride = stride;
+    if (root.slots.length > 0) {
+      this.#nodes.push(root);
+      this.#idx.push(0);
+      this.#depth = 0;
     }
+  }
+
+  /** The value to emit for the entry starting at `slots[i]`. */
+  protected abstract emit(slots: readonly unknown[], i: number): T;
+
+  next(): IteratorResult<T> {
+    const stride = this.#stride;
+    for (;;) {
+      const depth = this.#depth;
+      if (depth < 0) return { value: undefined, done: true };
+      const node = this.#nodes[depth]!;
+      const slots = node.slots;
+      const i = this.#idx[depth]!;
+      if (i >= slots.length) {
+        this.#depth = depth - 1; // this node is exhausted; resume its parent
+        continue;
+      }
+      const dataEnd = node.t === 0 ? popcount(node.dmap) * stride : slots.length;
+      if (i < dataEnd) {
+        this.#idx[depth] = i + stride;
+        return { value: this.emit(slots, i), done: false };
+      }
+      // A child: descend (the parent's index already points past it).
+      this.#idx[depth] = i + 1;
+      this.#nodes[depth + 1] = slots[i] as HNode;
+      this.#idx[depth + 1] = 0;
+      this.#depth = depth + 1;
+    }
+  }
+
+  [Symbol.iterator](): this {
+    return this;
   }
 }
 
-/** Yield keys/members (either stride). */
-export function* trieKeys(cfg: TrieConfig, node: HNode): Generator<unknown> {
+class KeyIterator extends TrieIterator<unknown> {
+  protected emit(slots: readonly unknown[], i: number): unknown {
+    return slots[i];
+  }
+}
+
+class ValueIterator extends TrieIterator<unknown> {
+  protected emit(slots: readonly unknown[], i: number): unknown {
+    return slots[i + 1];
+  }
+}
+
+class EntryIterator extends TrieIterator<[unknown, unknown]> {
+  protected emit(slots: readonly unknown[], i: number): [unknown, unknown] {
+    return [slots[i], slots[i + 1]];
+  }
+}
+
+/** `[member, member]` pairs (stride 1) — what `ReadonlySet.entries` yields. */
+class PairIterator extends TrieIterator<[unknown, unknown]> {
+  protected emit(slots: readonly unknown[], i: number): [unknown, unknown] {
+    const v = slots[i];
+    return [v, v];
+  }
+}
+
+/** Iterate keys/members (either stride). */
+export function trieKeys(cfg: TrieConfig, node: HNode): IterableIterator<unknown> {
+  return new KeyIterator(cfg.stride, node);
+}
+
+/** Iterate values (stride 2) — no `[key, value]` tuple allocated. */
+export function trieValues(cfg: TrieConfig, node: HNode): IterableIterator<unknown> {
+  return new ValueIterator(2, node);
+}
+
+/** Iterate `[key, value]` pairs (stride 2). */
+export function trieEntries(cfg: TrieConfig, node: HNode): IterableIterator<[unknown, unknown]> {
+  return new EntryIterator(2, node);
+}
+
+/** Iterate `[member, member]` pairs (stride 1). */
+export function triePairs(cfg: TrieConfig, node: HNode): IterableIterator<[unknown, unknown]> {
+  return new PairIterator(1, node);
+}
+
+/**
+ * Visit every entry with a callback, in iteration order — the fastest walk
+ * (no iterator protocol, no tuples). `fn` receives the slot array and the
+ * entry's starting index; for stride 2 the value is at `i + 1`.
+ */
+export function trieForEach(
+  cfg: TrieConfig,
+  node: HNode,
+  fn: (slots: readonly unknown[], i: number) => void,
+): void {
   const stride = cfg.stride;
-  const dataEnd = node.t === 0 ? popcount(node.dmap) * stride : node.slots.length;
-  for (let i = 0; i < dataEnd; i += stride) {
-    yield node.slots[i];
-  }
-  if (node.t === 0) {
-    for (let i = dataEnd; i < node.slots.length; i++) {
-      yield* trieKeys(cfg, node.slots[i] as HNode);
-    }
-  }
+  const slots = node.slots;
+  const dataEnd = node.t === 0 ? popcount(node.dmap) * stride : slots.length;
+  for (let i = 0; i < dataEnd; i += stride) fn(slots, i);
+  for (let i = dataEnd; i < slots.length; i++) trieForEach(cfg, slots[i] as HNode, fn);
 }
 
 /** @internal Node-pool sizes — exposed for sharing/canonicality tests. */

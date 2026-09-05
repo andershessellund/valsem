@@ -15,6 +15,8 @@ import {
   trieInsert,
   trieRemove,
   trieKeys,
+  triePairs,
+  trieForEach,
   NOT_FOUND,
   _trieStats,
   type HNode,
@@ -94,17 +96,12 @@ export class ValueSet<T> implements ReadonlySet<T> {
 
   /** Iterate `[value, value]` pairs, as `ReadonlySet.entries` does. */
   entries(): SetIterator<[T, T]> {
-    const root = this.#root;
-    return (function* () {
-      for (const v of trieKeys(CFG, root)) yield [v, v] as [T, T];
-    })() as SetIterator<[T, T]>;
+    return triePairs(CFG, this.#root) as SetIterator<[T, T]>;
   }
 
   /** Call `fn` for each element, as `ReadonlySet.forEach` does. */
   forEach(fn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: unknown): void {
-    for (const v of trieKeys(CFG, this.#root)) {
-      fn.call(thisArg, v as T, v as T, this);
-    }
+    trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i] as T, slots[i] as T, this));
   }
 
   // -------------------------------------------------------------------------

@@ -70,13 +70,14 @@ N = 10,000 unless stated.)
 | `List.push` | 3.5 µs | 0.17 µs | 1/21× |
 | build `Map` from 10k entries | 14.1 ms | 1.0 ms | 1/14× |
 | build `List` from 10k elements | 0.22 ms | 0.34 ms | 1.5× |
-| iterate 10k entries / members / elements | 470–790 µs | 137–182 µs | 1/3–4× |
 | `get` / `has`, hit or miss | 60–70 ns | 60–70 ns | parity (2× behind at N = 100) |
 
 **Where valsem wins — the rows the design exists for:**
 
 | op | valsem | Immutable | |
 | --- | --- | --- | --- |
+| iterate 10k `Map` entries / `Set` members | **115 / 109 µs** | 150 / 142 µs | 1.3× |
+| iterate 10k `List` elements | **31 µs** | 180 µs | 5.7× |
 | equals, two independently built equal `Map`s | **9 ns** | 544 µs | 60,000× |
 | equals, two equal `Set`s | **8 ns** | 627 µs | 80,000× |
 | equals, `List.from` vs push-chain | **8 ns** | 474 µs | 57,000× |
@@ -121,6 +122,17 @@ semantics: deriving a consed node's hash from its predecessor's (a
 positional sum-of-terms, as records and arrays already do, instead of the
 sequential `mix` chain), and a cheaper weak slot than one `WeakRef` per
 node. Neither is done yet.
+
+**Iteration** used to be 3–4× *behind* Immutable (470–790 µs for 10k). The
+cause was not the structures but how they were walked: recursive generators
+with `yield*` per level, so every element paid O(depth) generator
+resumptions (~47 ns/element for a trie, ~75 for the vector, measured), and
+`values()` stacked a second generator on `entries()`. They are now explicit-
+stack iterator objects (~10 ns/element for a trie; leaf-at-a-time for the
+vector, ~3–4 ns), `forEach` is a direct callback walk with no tuples, and
+the classes extend the global `Iterator` where it exists so the iterator
+helpers keep working. On JavaScriptCore the same change lands 1.1–1.8×
+ahead of Immutable.
 
 **Record values.** With `{ id, label, tags }` values, building a 10k map
 costs 22 ms against Immutable's 1.3–2 ms — the intern-on-entry tax, paid
@@ -196,6 +208,27 @@ the two designs it replaces (same harnesses, same machine):
 | `List.push` 100, node | 3.2 µs | 1.8 µs | **1.9 µs** |
 | frame loop, 100 sets/frame, node, max overrun | 3.2 ms | 3.0 ms | **1.4 ms** |
 | frame loop, 1,000 sets/frame, bun, max overrun | 5.3 ms | 2.6 ms | **2.7 ms** |
+
+**The bucket index stays a `Map`, keyed by `hash & 0x3fffffff`.** A
+hand-rolled open hash table (packed array of `Slot | Slot[]`, grow at ½,
+shrink-to-fit) was built and measured against it end to end. In a
+fixed-population micro-benchmark on V8 it wins — hits −20 %, misses and
+churn 2×, half the memory — but that is not where pools live: replaying the
+real per-op sequences it ties, in the frame loop it is indistinguishable,
+in the unbounded-growth loop it is ~10 % slower (JS rebuilds against a
+native rehash, plus GC on the multi-megabyte arrays), and on
+JavaScriptCore the native `Map` beats it 2× on hits. Chaining vs linear
+probing and load ½ vs ¼ were within noise on V8 (the table's work is ~30 ns
+of a ~600 ns churn op dominated by `new WeakRef`). What the exercise did
+find: three quarters of the uint32 hashes fall outside V8's 31-bit Smi
+range, so full-hash `Map` keys are boxed and cost ~2× on hits at 200k
+entries; masking to 30 bits fixes that (neutral on JSC) at the price of a
+`slot.hash` pre-check per candidate. And, for the curious, a sparse
+`Array(2³²−1)` indexed by the raw hash beats `Map` on hits at scale on V8
+(its dictionary keys are uint32 by definition) but loses 2–3× on
+delete-and-reinsert, which is what a pool does. `Slot extends WeakRef` was
+checked for deoptimizations under `--trace-deopt` (none) and saves an
+object header per slot over a wrapper object (56–77 vs 88 B).
 
 One row reads worse and is not: `pool-gc-bench`'s dormancy phase (drop
 everything, a few GC+yield rounds, measure what is left) shows ~7 MB

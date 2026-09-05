@@ -1,11 +1,21 @@
 // ---------------------------------------------------------------------------
 // intern-pool — weak pools; the engine reports deaths, idle time buries them.
 //
-// A pool is a Map<hash, bucket>; a bucket is one Slot (the overwhelmingly
-// common singleton case under a seeded 32-bit hash) or an array on a
-// genuine collision. A Slot IS the WeakRef to the pooled object, carrying
-// its hash and a shared WeakRef to the owning bucket map — one allocation
-// per registration, and the registry's holdings are the slot itself.
+// A pool is a Map from a 30-bit key to a bucket: one Slot (the overwhelmingly
+// common case) or an array when two slots share a key. A Slot IS the WeakRef
+// to the pooled object, carrying its full 32-bit hash and its pool — one
+// allocation per registration, and the registry's holdings are the slot
+// itself.
+//
+// The key is `hash & 0x3fffffff`, not the full uint32: V8's Smi range under
+// pointer compression is 31-bit signed, so three quarters of full hashes
+// would be boxed HeapNumber keys, and Map hits at scale cost ~2× more that
+// way (measured); on JavaScriptCore the masking is neutral. Slots of
+// different full hashes can therefore share a bucket, so every candidate is
+// pre-checked on `slot.hash` before it is dereferenced. A hand-rolled open
+// hash table was measured against this and rejected: equal on V8 in every
+// realistic regime, ~10 % slower where pools grow unboundedly (JS rebuilds
+// against a native rehash), and clearly slower on JavaScriptCore.
 //
 // Cleanup is driven by ONE global FinalizationRegistry: a pooled object's
 // death is reported once, by the engine, after the major GC that clears
@@ -35,13 +45,20 @@
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 
-/** A pooled member: the WeakRef itself, plus what reclaiming it needs. */
+/**
+ * A pooled member: the WeakRef itself, plus what reclaiming it needs — the
+ * full hash and the pool. The pool reference is strong on purpose: the
+ * registry retains a slot only until its target dies, so a dropped pool is
+ * retained exactly as long as its last live member — the members' own
+ * lifetime, not a leak. Subclassing WeakRef (rather than wrapping one) was
+ * measured: zero deoptimizations, identical deref/construction cost, and one
+ * object header less per slot.
+ */
 class Slot extends WeakRef<object> {
   constructor(
     target: object,
     readonly hash: number,
-    /** Shared WeakRef to the owning pool's bucket map — a dropped pool is not retained by its dying members. */
-    readonly owner: WeakRef<Map<number, Bucket>>,
+    readonly pool: InternPoolImpl<object>,
   ) {
     super(target);
   }
@@ -49,20 +66,12 @@ class Slot extends WeakRef<object> {
 
 type Bucket = Slot | Slot[];
 
-/** Remove a dead slot from its bucket. Idempotent: tolerates "already pruned". */
+/** Map key for a full 32-bit hash: the low 30 bits, always a Smi. */
+const KEY_MASK = 0x3fffffff;
+
+/** Remove a dead slot from its pool. Idempotent: tolerates "already pruned". */
 function reclaim(slot: Slot): void {
-  const buckets = slot.owner.deref();
-  if (buckets === undefined) return; // the pool itself is gone
-  const b = buckets.get(slot.hash);
-  if (b === undefined) return;
-  if (b === slot) {
-    buckets.delete(slot.hash);
-  } else if (Array.isArray(b)) {
-    const i = b.indexOf(slot);
-    if (i >= 0) b.splice(i, 1);
-    if (b.length === 1) buckets.set(slot.hash, b[0]!);
-    else if (b.length === 0) buckets.delete(slot.hash);
-  }
+  slot.pool._reclaim(slot);
 }
 
 // ---------------------------------------------------------------------------
@@ -185,28 +194,31 @@ export interface InternPool<T extends object> {
 
 class InternPoolImpl<T extends object> implements InternPool<T> {
   readonly #buckets = new Map<number, Bucket>();
-  readonly #owner = new WeakRef(this.#buckets); // ONE shared WeakRef per pool
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
-    const b = this.#buckets.get(hash);
+    const b = this.#buckets.get(hash & KEY_MASK);
     if (b === undefined) return undefined;
     if (Array.isArray(b)) {
-      for (const slot of b) {
+      for (let i = 0; i < b.length; i++) {
+        const slot = b[i]!;
+        if (slot.hash !== hash) continue; // shares the 30-bit key, not a candidate
         const candidate = slot.deref();
         if (candidate !== undefined && predicate(candidate as T)) return candidate as T;
       }
       return undefined;
     }
+    if (b.hash !== hash) return undefined;
     const candidate = b.deref();
     return candidate !== undefined && predicate(candidate as T) ? (candidate as T) : undefined;
   }
 
   register(value: T, hash: number): T {
-    const slot = new Slot(value, hash, this.#owner);
+    const slot = new Slot(value, hash, this as unknown as InternPoolImpl<object>);
     registry.register(value, slot);
-    const b = this.#buckets.get(hash);
+    const key = hash & KEY_MASK;
+    const b = this.#buckets.get(key);
     if (b === undefined) {
-      this.#buckets.set(hash, slot);
+      this.#buckets.set(key, slot);
     } else if (Array.isArray(b)) {
       // Prune dead members in passing (their reclaim may still be pending), then append.
       let w = 0;
@@ -214,11 +226,26 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       b.length = w;
       b.push(slot);
     } else if (b.deref() === undefined) {
-      this.#buckets.set(hash, slot); // replace the dead singleton in place
+      this.#buckets.set(key, slot); // replace the dead singleton in place
     } else {
-      this.#buckets.set(hash, [b, slot]);
+      this.#buckets.set(key, [b, slot]);
     }
     return value;
+  }
+
+  /** @internal Remove `slot` if it is still in its bucket. Idempotent. */
+  _reclaim(slot: Slot): void {
+    const key = slot.hash & KEY_MASK;
+    const b = this.#buckets.get(key);
+    if (b === slot) {
+      this.#buckets.delete(key);
+    } else if (Array.isArray(b)) {
+      const k = b.indexOf(slot);
+      if (k < 0) return; // already pruned in passing
+      b.splice(k, 1);
+      if (b.length === 1) this.#buckets.set(key, b[0]!);
+    }
+    // else: replaced in place by a live member — nothing to do
   }
 
   intern(object: T): T {
@@ -239,7 +266,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     let n = 0;
     for (const b of this.#buckets.values()) {
       if (Array.isArray(b)) {
-        for (const slot of b) if (slot.deref() !== undefined) n++;
+        for (let k = 0; k < b.length; k++) if (b[k]!.deref() !== undefined) n++;
       } else if (b.deref() !== undefined) {
         n++;
       }
@@ -247,9 +274,11 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     return n;
   }
 
-  /** @internal Test-only: bucket count, live or not (what reclaim shrinks). */
-  _bucketCount(): number {
-    return this.#buckets.size;
+  /** @internal Test-only: slots stored (live or awaiting reclaim), and bucket count. */
+  _stats(): { slots: number; buckets: number } {
+    let slots = 0;
+    for (const b of this.#buckets.values()) slots += Array.isArray(b) ? b.length : 1;
+    return { slots, buckets: this.#buckets.size };
   }
 }
 
@@ -295,16 +324,17 @@ export function _pendingCount(): number {
   return pending.length;
 }
 
-/** @internal Test-only: reclaim every parked slot now, synchronously. */
+/** @internal Test-only: reclaim every parked slot now, synchronously, and forget any pending drain (a test's fake scheduler may never fire). */
 export function _drainNow(): number {
   const n = pending.length;
   while (pending.length > 0) reclaim(pending.pop()!);
+  scheduled = false;
   return n;
 }
 
-/** @internal Test-only: buckets in a pool, live or awaiting reclaim. */
-export function _bucketCount(pool: InternPool<object>): number {
-  return (pool as InternPoolImpl<object>)._bucketCount();
+/** @internal Test-only: slots stored in a pool (live or awaiting reclaim) and its bucket count. */
+export function _poolStats(pool: InternPool<object>): { slots: number; buckets: number } {
+  return (pool as InternPoolImpl<object>)._stats();
 }
 
 /** @internal Test-only: the stack bound. */

@@ -27,6 +27,8 @@ import {
   trieRemove,
   trieEntries,
   trieKeys,
+  trieValues,
+  trieForEach,
   NOT_FOUND,
   _trieStats,
   type HNode,
@@ -106,10 +108,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Iterate the values (content-determined order — see the class docs). */
   values(): MapIterator<V> {
-    const root = this.#root;
-    return (function* () {
-      for (const [, v] of trieEntries(CFG, root)) yield v as V;
-    })() as MapIterator<V>;
+    return trieValues(CFG, this.#root) as MapIterator<V>;
   }
 
   /** Iterate the `[key, value]` entries (content-determined order — see the class docs). */
@@ -124,9 +123,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Call `fn` for each entry, as `ReadonlyMap.forEach` does. */
   forEach(fn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
-    for (const [k, v] of trieEntries(CFG, this.#root)) {
-      fn.call(thisArg, v as V, k as K, this);
-    }
+    trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i + 1] as V, slots[i] as K, this));
   }
 
   [equalsSym](other: unknown): boolean {
