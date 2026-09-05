@@ -7,7 +7,9 @@ export default defineConfig({
         // The intern-pool suite exercises real GC reclamation (WeakRef death
         // reported through FinalizationRegistry, then the deferred drain);
         // those tests skip themselves when globalThis.gc is unavailable.
-        execArgv: ['--expose-gc'],
+        // --allow-natives-syntax lets fast-properties.test.ts ask V8 whether a
+        // canonical record is in fast (not dictionary) mode.
+        execArgv: ['--expose-gc', '--allow-natives-syntax'],
       },
     },
   },

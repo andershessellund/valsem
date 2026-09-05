@@ -24,7 +24,6 @@ import { deepHash, _deepHashWithAcc } from './deep-hash.js';
 import { _setPrecomputedHashes } from './deep-hash.js';
 import {
   interned as internedSym,
-  _defineRecordField,
   _equalsMethods,
   _immutableTypes,
   _mutableBuiltinReason,
@@ -146,12 +145,20 @@ export function intern<T>(value: T): T {
       if (depth > _maxDepth()) throw _depthError('intern');
       const rec = obj as Record<string, unknown>;
       const keys = Object.keys(rec).sort();
-      const internalized: Record<string, unknown> = {};
+      // Built with Object.fromEntries, not key-by-key assignment into `{}`:
+      // V8 flips an object that grows one property at a time into dictionary
+      // mode at ~20 keys, and a canonical record is read (and spread by every
+      // produce) for the rest of its life — 6× slower reads, 60–150× slower
+      // copies. fromEntries yields a fast-mode object at any width, and it
+      // defines `__proto__` as an own data property, which is the record
+      // semantics we want.
+      const entries: [string, unknown][] = [];
       for (const k of keys) {
         const v = rec[k];
         if (v === undefined) continue;
-        _defineRecordField(internalized, k, intern(v));
+        entries.push([k, intern(v)]);
       }
+      const internalized = Object.fromEntries(entries);
       return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
     } finally {
       depth--;

@@ -155,8 +155,11 @@ function makeItems(n) {
 // --- wide-record -----------------------------------------------------------
 {
   console.log('\nwide-record — 1000-key record, modify one value');
-  const rec = {};
-  for (let i = 0; i < 1000; i++) rec[`key${i}`] = i;
+  // Object.fromEntries, not key-by-key assignment: V8 flips an object grown
+  // one property at a time into dictionary mode at ~20 keys, which makes every
+  // contender's spread of it 100× slower and would measure the fixture, not
+  // the library.
+  const rec = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`key${i}`, i]));
 
   const valsemBase = intern(rec);
   bench('valsem produce', (i) => {
@@ -166,11 +169,18 @@ function makeItems(n) {
   });
 
   const immerBase = immerProduce({ ...rec }, () => {});
-  bench('immer', (i) => {
+  bench('immer (autofreeze on)', (i) => {
     immerProduce(immerBase, (d) => {
       d.key500 = i;
     });
   });
+  setAutoFreeze(false);
+  bench('immer (autofreeze off)', (i) => {
+    immerProduce(immerBase, (d) => {
+      d.key500 = i;
+    });
+  });
+  setAutoFreeze(true);
 
   const mutativeBase = { ...rec };
   bench('mutative', (i) => {

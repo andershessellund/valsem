@@ -38,7 +38,7 @@ machinery. Two structural facts set the floor:
 | --- | --- | --- | --- | --- |
 | 10k-entry map, one set | **3.5 µs** | 474 µs | 400 µs | their drafts copy the container; `ValueMap` copies a trie path |
 | 10k-element list, set+push | **4.8 µs** | 9.6 µs | 9.0 µs | |
-| 1000-key record, one set | **180 µs** | 208 µs | 208 µs | spread-copy floor is 153 µs |
+| 1000-key record, one set | **19 µs** | 125 µs (2 µs isolated) | 220 µs | the copy site is megamorphic in any real app — see below; immer's 2 µs needs a monomorphic site |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | transition memoization — and the only `===` results |
 | `deepEqual`, raw arrays ≥ 100 elements | 2.5–2.9× faster than fast-deep-equal | | | |
 | `deepEqual`, raw records | parity on equal walks, 1.6–1.8× faster on unequal | | | |
@@ -48,6 +48,43 @@ The recurrent row is the one that matters for applications: a successor is
 a pure function of (canonical base, exact delta), so a state the program
 has produced before costs O(touched) — no copy, no hash walk — and comes
 back **pointer-identical**.
+
+## Two V8 facts about copying a wide record
+
+The 1000-key row above used to read 180 / 208 / 208 µs with a
+"spread-copy floor of 153 µs". All three numbers were the fixture, not the
+libraries. `node --allow-natives-syntax scripts/record-copy-bench.mjs`
+shows both effects:
+
+- **Key-by-key construction goes to dictionary mode at ~20 keys.** An
+  object grown by assigning properties one at a time into `{}` leaves
+  fast-properties mode at 20 keys in a fresh process; `Object.fromEntries`
+  stays fast at any width. Reads on a dictionary-mode object are ~6×
+  slower and copying one is 60–150× slower. `intern()` used to build
+  canonical records key by key, so every canonical record with 20+ keys —
+  and every produce successor copied from it — paid this for life. It now
+  builds with `fromEntries` (`src/fast-properties.test.ts` pins the mode).
+- **Object spread is an inline cache; a library's copy site is
+  megamorphic.** `{ ...base }` goes through CloneObjectIC, which is a
+  memcpy while the site has seen ≤4 shapes and a ~100 ns-per-property
+  generic fallback after that. A hand-rolled spread in application code
+  is monomorphic and copies 1000 keys in 1 µs; the single copy site inside
+  immer, mutative or valsem sees every shape in the application and copies
+  the same record in 110–125 µs. `Object.assign({}, base)` is a builtin
+  whose fast path keys on the source map, not on a site: 1.1 µs at 1000
+  keys however many shapes came before. produce's draft copy uses it (an
+  own `__proto__` key, which `[[Set]]` would swallow, takes the spread).
+
+| 1000-key copy | ≤4 shapes at the site | megamorphic site |
+| --- | --- | --- |
+| `{ ...base }` | 1.2 µs | 121 µs |
+| `Object.assign({}, base)` | 1.1 µs | 1.1 µs |
+| 20-key copy, same two | 0.04 / 0.05 µs | 0.26 / 0.05 µs |
+
+The benchmark fixture matters for the same reason: `scripts/produce-bench`
+now builds its wide record with `fromEntries`, and immer's 125 µs in the
+table is its spread site after the earlier arenas — 2 µs in a fresh
+process, which is the number to compare a monomorphic call site against.
 
 ## The value collections vs Immutable.js
 
@@ -305,6 +342,7 @@ update-throughput number shows:
 | `node scripts/big-array-bench.mjs` | the arena of record: results held in a ring, one contender × scheduling mode per process |
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
+| `node --allow-natives-syntax scripts/record-copy-bench.mjs` | dictionary-mode threshold by construction method; spread vs `Object.assign` at a megamorphic copy site |
 | `npx bun@latest scripts/<any>.mjs` | any of the above on JavaScriptCore (`VALSEM_DIST=<dir>` points `collections-bench` at an alternative build) |
 
 Methodology rules learned the hard way, and now baked into the scripts:

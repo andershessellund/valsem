@@ -154,7 +154,15 @@ function latestObj(state: ObjectState): Record<string, unknown> {
 
 function prepareObjCopy(state: ObjectState): void {
   if (state.copy === null) {
-    state.copy = { ...state.base };
+    const base = state.base;
+    // Object.assign, not `{ ...base }`: object spread goes through V8's
+    // CloneObjectIC, and this one site sees every record shape in the
+    // application, so it is megamorphic in practice — the generic fallback
+    // costs ~100 ns per property (a 1000-key record: 110 µs instead of 1).
+    // Object.assign's builtin fast path keys on the source map directly and
+    // stays at memcpy speed at any site. The one semantic difference is an
+    // own `__proto__` key, which [[Set]] would swallow: those take the spread.
+    state.copy = hasOwn(base, '__proto__') ? { ...base } : Object.assign({}, base);
     state.assigned = new Map();
   }
 }
