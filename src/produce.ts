@@ -38,82 +38,51 @@
 // applyPatches is implemented ON TOP of produce.
 // ---------------------------------------------------------------------------
 
-import { intern, internHash, _hashCacheHas, _accOf, _internPrehashed } from './intern.js';
-import { _depthError, _maxDepth } from './limits.js';
+import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _powP } from './deep-hash.js';
-import { interned as internedMarker, _defineRecordField } from './deep-equal.js';
-import { ValueMap } from './value-map.js';
-import { ValueSet } from './value-set.js';
-import { ValueList } from './value-list.js';
+import { _defineRecordField } from './deep-equal.js';
+import {
+  toDraft,
+  DRAFT_STATE,
+  createDraftState,
+  draftOf,
+  stateOf,
+  isDraftable,
+  same,
+  markChanged,
+  assertUnrevoked,
+  assertAssignable,
+  createChildDraft,
+  resolve,
+  finalizeState,
+  emitSeqOps,
+  retractSeqPatches,
+  seqTailProfile,
+  _runInScope,
+  _setCoreDraftFactories,
+  type DraftState,
+  type Patch,
+  type PatchPath,
+  type PatchRecorder,
+  type SeqOp,
+} from './draft-core.js';
+
+export { isDraft, toDraft } from './draft-core.js';
+export type { Patch, PatchPath, PatchKinds, PatchRecorder, DraftState } from './draft-core.js';
 
 /** Recipe return sentinel: "the result is `undefined`" (distinct from returning nothing). */
 export const nothing: unique symbol = Symbol('valsem.nothing');
-
-const DRAFT_STATE = Symbol('valsem.draftState');
-const INTERNAL = Symbol('valsem.draftInternal');
 
 // ---------------------------------------------------------------------------
 // Patch vocabulary
 // ---------------------------------------------------------------------------
 
-/**
- * Path from the root to the container a patch operates on. Segments are
- * record keys (string), sequence indices (number), or — under a map — the
- * canonical key value itself.
- */
-export type PatchPath = readonly unknown[];
-
-export type Patch =
-  | { kind: 'replace'; path: PatchPath; value: unknown }
-  | { kind: 'record.set'; path: PatchPath; key: string; value: unknown }
-  | { kind: 'record.delete'; path: PatchPath; key: string }
-  | { kind: 'list.set'; path: PatchPath; index: number; value: unknown }
-  | {
-      kind: 'list.splice';
-      path: PatchPath;
-      index: number;
-      remove: number;
-      insert: readonly unknown[];
-    }
-  | { kind: 'map.set'; path: PatchPath; key: unknown; value: unknown }
-  | { kind: 'map.delete'; path: PatchPath; key: unknown }
-  | { kind: 'set.add'; path: PatchPath; value: unknown }
-  | { kind: 'set.delete'; path: PatchPath; value: unknown };
-
-interface PatchRecorder {
-  patches: Patch[];
-  inverse: Patch[];
-}
-
 // ---------------------------------------------------------------------------
 // Scope and draft states
 // ---------------------------------------------------------------------------
 
-interface Scope {
-  parent: Scope | undefined;
-  states: AnyState[];
-}
-
-let currentScope: Scope | undefined;
-
-interface BaseState {
-  scope: Scope;
-  parent: AnyState | undefined;
-  modified: boolean;
-  /** Memoized finalize result — aliased drafts converge on one canonical. */
-  result: unknown;
-  finalized: boolean;
-  revoked: boolean;
-}
-
-/** Recorded sequence ops: positions from the log, operand refs captured live. */
-type SeqOp =
-  | { t: 'set'; i: number; value: unknown; old: unknown }
-  | { t: 'splice'; i: number; rc: number; inserted: unknown[]; removed: unknown[] };
-
-interface ObjectState extends BaseState {
-  type: 'object';
-  base: Record<string, unknown>;
+interface ObjectState extends DraftState<Record<string, unknown>> {
+  kind: 'object';
   copy: Record<string, unknown> | null;
   /** true = set, false = deleted; absent key = only child-drafted. */
   assigned: Map<string, boolean> | null;
@@ -128,9 +97,8 @@ interface ObjectState extends BaseState {
   revoke: () => void;
 }
 
-interface ArrayState extends BaseState {
-  type: 'array';
-  base: unknown[];
+interface ArrayState extends DraftState<unknown[]> {
+  kind: 'array';
   /**
    * Virtual mode (copy === null): point edits over the base plus an appended
    * tail — index reads/writes and push/pop never copy the base. A structural
@@ -159,66 +127,11 @@ interface ArrayState extends BaseState {
   revoke: () => void;
 }
 
-interface MapState extends BaseState {
-  type: 'map';
-  base: ValueMap<unknown, unknown>;
-  /** Canonical key → current value (draft or raw). */
-  edits: Map<unknown, unknown>;
-  /** Canonical key → true (set) | false (deleted); absent = child-drafted only. */
-  assigned: Map<unknown, boolean>;
-  cleared: boolean;
-  draft: DraftMap<unknown, unknown>;
-}
-
-interface SetState extends BaseState {
-  type: 'set';
-  base: ValueSet<unknown>;
-  added: Set<unknown>;
-  removed: Set<unknown>;
-  cleared: boolean;
-  draft: DraftSet<unknown>;
-}
-
-interface ListState extends BaseState {
-  type: 'list';
-  base: ValueList<unknown>;
-  /**
-   * Virtual mode (items === null): point edits over the base plus an
-   * appended tail — no O(n) materialization for get/set/push/pop flows.
-   */
-  vEdits: Map<number, unknown>;
-  vTail: unknown[];
-  /** Materialized working array — created only when a splice forces it. */
-  items: unknown[] | null;
-  /** Always recorded for lists (never goes opaque). */
-  ops: SeqOp[];
-  /** Indices whose base value was child-drafted on read. */
-  drafted: Set<number>;
-  draft: DraftList<unknown>;
-}
-
-type AnyState = ObjectState | ArrayState | MapState | SetState | ListState;
-
-function stateOf(value: unknown): AnyState | undefined {
-  return value !== null && typeof value === 'object'
-    ? ((value as Record<symbol, unknown>)[DRAFT_STATE] as AnyState | undefined)
-    : undefined;
-}
-
-/** Whether `value` is a valsem draft (proxy or collection draft). */
-export function isDraft(value: unknown): boolean {
-  return stateOf(value) !== undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
 /** SameValueZero. */
-function same(a: unknown, b: unknown): boolean {
-  return a === b || (a !== a && b !== b);
-}
-
 // Records are keyed by OWN properties only. Every membership test on a base
 // or copy goes through this rather than `in`, which walks the prototype
 // chain: `'toString' in {}` is true, and treating Object.prototype's
@@ -229,54 +142,6 @@ const hasOwn = (o: object, k: PropertyKey): boolean => Object.prototype.hasOwnPr
 /** `rec[key]` for an OWN key, `undefined` otherwise (never the prototype's). */
 function ownValue(rec: Record<string, unknown>, key: string): unknown {
   return hasOwn(rec, key) ? rec[key] : undefined;
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  if (v === null || typeof v !== 'object') return false;
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
-}
-
-/** Values produce hands out as drafts. */
-function isDraftable(v: unknown): boolean {
-  return (
-    isPlainObject(v) ||
-    Array.isArray(v) ||
-    v instanceof ValueMap ||
-    v instanceof ValueSet ||
-    v instanceof ValueList
-  );
-}
-
-function markChanged(state: AnyState): void {
-  if (!state.modified) {
-    state.modified = true;
-    if (state.parent) markChanged(state.parent);
-  }
-}
-
-function assertUnrevoked(state: AnyState): void {
-  if (state.revoked) {
-    throw new Error(
-      'valsem: this draft escaped its produce() call and can no longer be used. ' +
-        'Drafts are only valid inside the recipe.',
-    );
-  }
-}
-
-function assertAssignable(value: unknown, into: AnyState): void {
-  const vState = stateOf(value);
-  if (vState !== undefined && vState.scope !== into.scope) {
-    throw new Error('valsem: cannot assign a draft from a different produce() call.');
-  }
-}
-
-function createChildDraft(value: unknown, parent: AnyState): unknown {
-  if (isPlainObject(value)) return createObjectDraft(value, parent).draft;
-  if (Array.isArray(value)) return createArrayDraft(value, parent).draft;
-  if (value instanceof ValueMap) return createMapDraft(value, parent).draft;
-  if (value instanceof ValueSet) return createSetDraft(value, parent).draft;
-  return createListDraft(value as ValueList<unknown>, parent).draft;
 }
 
 // ---------------------------------------------------------------------------
@@ -392,16 +257,10 @@ const objectTraps: ProxyHandler<object> = {
   },
 };
 
-function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): ObjectState {
-  const scope = parent ? parent.scope : currentScope!;
-  const state: ObjectState = {
-    type: 'object',
-    scope,
+function createObjectDraft(base: Record<string, unknown>, parent?: DraftState): ObjectState {
+  const state = createDraftState<ObjectState>({
+    kind: 'object',
     parent,
-    modified: false,
-    result: undefined,
-    finalized: false,
-    revoked: false,
     base,
     copy: null,
     assigned: null,
@@ -409,11 +268,11 @@ function createObjectDraft(base: Record<string, unknown>, parent?: AnyState): Ob
     drafted: null,
     draft: null as unknown as object,
     revoke: null as unknown as () => void,
-  };
+    finalize: finalizeObject,
+  });
   const { proxy, revoke } = Proxy.revocable(state as unknown as object, objectTraps);
   state.draft = proxy;
   state.revoke = revoke;
-  scope.states.push(state);
   return state;
 }
 
@@ -684,16 +543,10 @@ const arrayTraps: ProxyHandler<object> = {
   },
 };
 
-function createArrayDraft(base: unknown[], parent?: AnyState): ArrayState {
-  const scope = parent ? parent.scope : currentScope!;
-  const state: ArrayState = {
-    type: 'array',
-    scope,
+function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
+  const state = createDraftState<ArrayState>({
+    kind: 'array',
     parent,
-    modified: false,
-    result: undefined,
-    finalized: false,
-    revoked: false,
     base,
     vEdits: new Map(),
     vTail: [],
@@ -704,610 +557,28 @@ function createArrayDraft(base: unknown[], parent?: AnyState): ArrayState {
     drafted: null,
     draft: null as unknown as unknown[],
     revoke: null as unknown as () => void,
-  };
+    finalize: finalizeArray,
+  });
   const { proxy, revoke } = Proxy.revocable([state] as unknown as object, arrayTraps);
   state.draft = proxy as unknown as unknown[];
   state.revoke = revoke;
-  scope.states.push(state);
   return state;
 }
 
-// ---------------------------------------------------------------------------
-// Collection drafts
-// ---------------------------------------------------------------------------
+// The two built-in kinds, registered with the core so draftOf()/createChildDraft()
+// reach them without draft-core depending on this module. (A top-level call,
+// but not a side effect a bundler must preserve: it only matters once
+// `produce` is called, and then this module is in the bundle anyway — so the
+// package declares this file side-effect-free and produce-less bundles drop
+// it.)
+_setCoreDraftFactories(createObjectDraft, createArrayDraft);
+
 
 /** Mutable draft twin of {@link ValueMap}, handed out inside produce(). */
-export class DraftMap<K, V> {
-  declare readonly [DRAFT_STATE]: MapState;
-
-  constructor(token: symbol, state: MapState) {
-    if (token !== INTERNAL) {
-      throw new TypeError('valsem: DraftMap instances are created by produce()');
-    }
-    Object.defineProperty(this, DRAFT_STATE, { value: state, enumerable: false });
-  }
-
-  get #state(): MapState {
-    const s = this[DRAFT_STATE];
-    assertUnrevoked(s);
-    return s;
-  }
-
-  get size(): number {
-    const s = this.#state;
-    let n = s.cleared ? 0 : s.base.size;
-    for (const [k, assigned] of s.assigned) {
-      const inBase = !s.cleared && s.base.has(k);
-      if (assigned && !inBase) n++;
-      else if (!assigned && inBase) n--;
-    }
-    return n;
-  }
-
-  has(key: K): boolean {
-    const s = this.#state;
-    const k = intern(key);
-    const assigned = s.assigned.get(k);
-    if (assigned !== undefined) return assigned;
-    return !s.cleared && s.base.has(k);
-  }
-
-  get(key: K): V | undefined {
-    const s = this.#state;
-    const k = intern(key);
-    if (s.edits.has(k)) {
-      const edited = s.edits.get(k);
-      // A frozen assigned value (a canonical placed into the draft) must
-      // copy-on-write when read for mutation — same rule as the traps.
-      if (
-        !s.finalized &&
-        isDraftable(edited) &&
-        stateOf(edited) === undefined &&
-        Object.isFrozen(edited)
-      ) {
-        const child = createChildDraft(edited, s);
-        s.edits.set(k, child); // stays assigned — resolves at finalize
-        return child as V;
-      }
-      return edited as V;
-    }
-    if (s.assigned.get(k) === false || s.cleared) return undefined;
-    const value = s.base.get(k);
-    if (value !== undefined && isDraftable(value) && !s.finalized) {
-      const child = createChildDraft(value, s);
-      s.edits.set(k, child); // child-drafted — deliberately NOT assigned
-      return child as V;
-    }
-    return value as V | undefined;
-  }
-
-  set(key: K, value: V): this {
-    const s = this.#state;
-    const k = intern(key);
-    if (this.has(key as K)) {
-      const current = s.edits.has(k) ? s.edits.get(k) : s.base.get(k);
-      if (same(current, value)) return this;
-    }
-    assertAssignable(value, s);
-    markChanged(s);
-    s.edits.set(k, value);
-    s.assigned.set(k, true);
-    return this;
-  }
-
-  delete(key: K): boolean {
-    const s = this.#state;
-    if (!this.has(key)) return false;
-    const k = intern(key);
-    markChanged(s);
-    s.edits.delete(k);
-    s.assigned.set(k, false);
-    return true;
-  }
-
-  clear(): void {
-    const s = this.#state;
-    if (this.size === 0) return;
-    markChanged(s);
-    s.cleared = true;
-    s.edits.clear();
-    s.assigned.clear();
-  }
-
-  *entries(): IterableIterator<[K, V]> {
-    const s = this.#state;
-    if (!s.cleared) {
-      for (const [k, v] of s.base) {
-        if (s.assigned.get(k) === false || s.edits.has(k)) continue;
-        yield [k as K, v as V];
-      }
-    }
-    for (const [k, v] of s.edits) {
-      if (s.assigned.get(k) === false) continue;
-      yield [k as K, v as V];
-    }
-  }
-
-  *keys(): IterableIterator<K> {
-    for (const [k] of this.entries()) yield k;
-  }
-
-  *values(): IterableIterator<V> {
-    for (const [, v] of this.entries()) yield v;
-  }
-
-  [Symbol.iterator](): IterableIterator<[K, V]> {
-    return this.entries();
-  }
-
-  forEach(fn: (value: V, key: K, map: DraftMap<K, V>) => void, thisArg?: unknown): void {
-    for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
-  }
-}
-
-/** Mutable draft twin of {@link ValueSet}, handed out inside produce(). */
-export class DraftSet<T> {
-  declare readonly [DRAFT_STATE]: SetState;
-
-  constructor(token: symbol, state: SetState) {
-    if (token !== INTERNAL) {
-      throw new TypeError('valsem: DraftSet instances are created by produce()');
-    }
-    Object.defineProperty(this, DRAFT_STATE, { value: state, enumerable: false });
-  }
-
-  get #state(): SetState {
-    const s = this[DRAFT_STATE];
-    assertUnrevoked(s);
-    return s;
-  }
-
-  get size(): number {
-    const s = this.#state;
-    return (s.cleared ? 0 : s.base.size - s.removed.size) + s.added.size;
-  }
-
-  has(value: T): boolean {
-    const s = this.#state;
-    const v = intern(value);
-    if (s.added.has(v)) return true;
-    if (s.removed.has(v) || s.cleared) return false;
-    return s.base.has(v);
-  }
-
-  add(value: T): this {
-    const s = this.#state;
-    if (this.has(value)) return this;
-    const v = intern(value);
-    markChanged(s);
-    if (!s.cleared && s.base.has(v)) {
-      s.removed.delete(v); // re-added base member
-    } else {
-      s.added.add(v);
-    }
-    return this;
-  }
-
-  delete(value: T): boolean {
-    const s = this.#state;
-    if (!this.has(value)) return false;
-    const v = intern(value);
-    markChanged(s);
-    if (!s.added.delete(v)) s.removed.add(v);
-    return true;
-  }
-
-  clear(): void {
-    const s = this.#state;
-    if (this.size === 0) return;
-    markChanged(s);
-    s.cleared = true;
-    s.added.clear();
-    s.removed.clear();
-  }
-
-  *values(): IterableIterator<T> {
-    const s = this.#state;
-    if (!s.cleared) {
-      for (const v of s.base) {
-        if (!s.removed.has(v)) yield v as T;
-      }
-    }
-    yield* s.added as Set<T>;
-  }
-
-  keys(): IterableIterator<T> {
-    return this.values();
-  }
-
-  [Symbol.iterator](): IterableIterator<T> {
-    return this.values();
-  }
-
-  forEach(fn: (value: T, value2: T, set: DraftSet<T>) => void, thisArg?: unknown): void {
-    for (const v of this.values()) fn.call(thisArg, v, v, this);
-  }
-}
-
-/** Mutable draft twin of {@link ValueList}, handed out inside produce(). */
-export class DraftList<T> {
-  declare readonly [DRAFT_STATE]: ListState;
-
-  constructor(token: symbol, state: ListState) {
-    if (token !== INTERNAL) {
-      throw new TypeError('valsem: DraftList instances are created by produce()');
-    }
-    Object.defineProperty(this, DRAFT_STATE, { value: state, enumerable: false });
-  }
-
-  get #state(): ListState {
-    const s = this[DRAFT_STATE];
-    assertUnrevoked(s);
-    return s;
-  }
-
-  /** Fold the virtual edits/tail into a materialized working array. */
-  #materialize(): unknown[] {
-    const s = this.#state;
-    if (s.items === null) {
-      const items = [...s.base.toArray()]; // spread: the snapshot is frozen
-      for (const [i, v] of s.vEdits) items[i] = v;
-      items.push(...s.vTail);
-      s.items = items;
-      s.vEdits.clear();
-      s.vTail.length = 0;
-    }
-    return s.items;
-  }
-
-  get length(): number {
-    const s = this.#state;
-    return s.items === null ? s.base.length + s.vTail.length : s.items.length;
-  }
-
-  /** Current value at `index`; only base-positioned values are child-drafted. */
-  #read(index: number): unknown {
-    const s = this.#state;
-    if (s.items !== null) return s.items[index];
-    if (index < s.base.length) {
-      return s.vEdits.has(index) ? s.vEdits.get(index) : s.base.get(index);
-    }
-    return s.vTail[index - s.base.length];
-  }
-
-  get(index: number): T | undefined {
-    const s = this.#state;
-    if (!Number.isInteger(index) || index < 0 || index >= this.length) return undefined;
-    const value = this.#read(index);
-    // Draft values still at their base position (assigned/inserted material
-    // is the caller's own and comes back raw — the immer rule), and frozen
-    // assigned values (canonicals must copy-on-write, not throw — mutative's
-    // #18 family).
-    if (
-      isDraftable(value) &&
-      !s.finalized &&
-      stateOf(value) === undefined &&
-      (value === s.base.get(index) || Object.isFrozen(value))
-    ) {
-      const child = createChildDraft(value, s);
-      s.drafted.add(index);
-      if (s.items !== null) s.items[index] = child;
-      else s.vEdits.set(index, child);
-      return child as T;
-    }
-    return value as T;
-  }
-
-  set(index: number, value: T): this {
-    const s = this.#state;
-    if (!Number.isInteger(index) || index < 0 || index >= this.length) {
-      throw new RangeError(`DraftList.set: index ${index} out of range [0, ${this.length})`);
-    }
-    const current = this.#read(index);
-    if (same(current, value)) return this;
-    assertAssignable(value, s);
-    markChanged(s);
-    s.ops.push({ t: 'set', i: index, value, old: current });
-    if (s.items !== null) s.items[index] = value;
-    else if (index < s.base.length) s.vEdits.set(index, value);
-    else s.vTail[index - s.base.length] = value;
-    return this;
-  }
-
-  push(...values: T[]): number {
-    const s = this.#state;
-    for (const v of values) assertAssignable(v, s);
-    markChanged(s);
-    const len = this.length;
-    s.ops.push({ t: 'splice', i: len, rc: 0, inserted: values.slice(), removed: [] });
-    if (s.items !== null) s.items.push(...values);
-    else s.vTail.push(...values);
-    return len + values.length;
-  }
-
-  pop(): T | undefined {
-    const s = this.#state;
-    const len = this.length;
-    if (len === 0) return undefined;
-    markChanged(s);
-    let removed: unknown;
-    if (s.items !== null) {
-      removed = s.items.pop();
-    } else if (s.vTail.length > 0) {
-      removed = s.vTail.pop();
-    } else {
-      removed = this.#materialize().pop();
-    }
-    s.ops.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
-    return removed as T;
-  }
-
-  splice(start: number, deleteCount?: number, ...values: T[]): T[] {
-    const s = this.#state;
-    for (const v of values) assertAssignable(v, s);
-    const items = this.#materialize();
-    const len = items.length;
-    let at = Math.trunc(start);
-    at = at < 0 ? Math.max(len + at, 0) : Math.min(at, len);
-    const rc =
-      deleteCount === undefined
-        ? len - at
-        : Math.min(Math.max(Math.trunc(deleteCount), 0), len - at);
-    markChanged(s);
-    const removed = items.splice(at, rc, ...values);
-    s.ops.push({
-      t: 'splice',
-      i: at,
-      rc,
-      inserted: values.slice(),
-      removed: removed.slice(),
-    });
-    return removed as T[];
-  }
-
-  *[Symbol.iterator](): IterableIterator<T> {
-    const s = this.#state;
-    if (s.items !== null) {
-      yield* s.items as T[];
-    } else if (s.vEdits.size === 0 && s.vTail.length === 0) {
-      yield* s.base as Iterable<T>;
-    } else {
-      const baseLen = s.base.length;
-      for (let i = 0; i < baseLen; i++) {
-        yield (s.vEdits.has(i) ? s.vEdits.get(i) : s.base.get(i)) as T;
-      }
-      yield* s.vTail as T[];
-    }
-  }
-
-  toArray(): readonly T[] {
-    return [...this];
-  }
-}
-
-function createMapDraft(base: ValueMap<unknown, unknown>, parent?: AnyState): MapState {
-  const scope = parent ? parent.scope : currentScope!;
-  const state: MapState = {
-    type: 'map',
-    scope,
-    parent,
-    modified: false,
-    result: undefined,
-    finalized: false,
-    revoked: false,
-    base,
-    edits: new Map(),
-    assigned: new Map(),
-    cleared: false,
-    draft: null as unknown as DraftMap<unknown, unknown>,
-  };
-  state.draft = new DraftMap(INTERNAL, state);
-  scope.states.push(state);
-  return state;
-}
-
-function createSetDraft(base: ValueSet<unknown>, parent?: AnyState): SetState {
-  const scope = parent ? parent.scope : currentScope!;
-  const state: SetState = {
-    type: 'set',
-    scope,
-    parent,
-    modified: false,
-    result: undefined,
-    finalized: false,
-    revoked: false,
-    base,
-    added: new Set(),
-    removed: new Set(),
-    cleared: false,
-    draft: null as unknown as DraftSet<unknown>,
-  };
-  state.draft = new DraftSet(INTERNAL, state);
-  scope.states.push(state);
-  return state;
-}
-
-function createListDraft(base: ValueList<unknown>, parent?: AnyState): ListState {
-  const scope = parent ? parent.scope : currentScope!;
-  const state: ListState = {
-    type: 'list',
-    scope,
-    parent,
-    modified: false,
-    result: undefined,
-    finalized: false,
-    revoked: false,
-    base,
-    vEdits: new Map(),
-    vTail: [],
-    items: null,
-    ops: [],
-    drafted: new Set(),
-    draft: null as unknown as DraftList<unknown>,
-  };
-  state.draft = new DraftList(INTERNAL, state);
-  scope.states.push(state);
-  return state;
-}
-
 // ---------------------------------------------------------------------------
 // Finalize — the intern walk
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve any value reachable from a draft to its canonical form: drafts
- * finalize (memoized); canonical values pass in O(1); foreign material
- * adopts — walked once for embedded drafts, then interned.
- */
-function resolve(
-  value: unknown,
-  path: PatchPath | null,
-  recorder: PatchRecorder | undefined,
-): unknown {
-  const state = stateOf(value);
-  if (state !== undefined) return finalizeState(state, path, recorder);
-  return adopt(value);
-}
-
-/** Restore-side value for inverse patches: a draft restores its base. */
-function restoreValue(value: unknown): unknown {
-  const state = stateOf(value);
-  if (state !== undefined) return intern(state.base);
-  return intern(value);
-}
-
-let adoptDepth = 0;
-
-/** Intern foreign material, finalizing any drafts embedded in it. */
-function adopt(value: unknown): unknown {
-  if (value === null || typeof value !== 'object') return value;
-  // O(1) recognition of canonical material: the [interned] marker covers the
-  // collections and pooled value types; the hash cache covers canonical
-  // plain data.
-  if ((value as Record<symbol, unknown>)[internedMarker] === true || _hashCacheHas(value)) {
-    return value;
-  }
-  // Same decode-boundary depth cap as intern: adopt recurses over foreign
-  // material a recipe grafted in, which can be hostile or cyclic.
-  adoptDepth++; // inside the try's reach: the cap throw must unwind it too
-  try {
-    if (adoptDepth > _maxDepth()) throw _depthError('produce');
-    return adoptUncached(value);
-  } finally {
-    adoptDepth--;
-  }
-}
-
-function adoptUncached(value: object): unknown {
-  if (isPlainObject(value)) {
-    let changed = false;
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value)) {
-      const child = value[key];
-      const resolved = resolve(child, null, undefined);
-      if (resolved !== child) changed = true;
-      if (resolved !== undefined) _defineRecordField(out, key, resolved);
-      else if (child !== undefined) changed = true; // record semantics drop undefined
-    }
-    return intern(changed ? out : value);
-  }
-  if (Array.isArray(value)) {
-    let changed = false;
-    const out = new Array<unknown>(value.length);
-    for (let i = 0; i < value.length; i++) {
-      const child = value[i];
-      const resolved = resolve(child, null, undefined);
-      if (resolved !== child) changed = true;
-      out[i] = resolved;
-    }
-    return intern(changed ? out : value);
-  }
-  // Registered immutables pool; class instances pass through; mutable
-  // built-ins throw with their teaching errors.
-  return intern(value);
-}
-
-function finalizeState(
-  state: AnyState,
-  path: PatchPath | null,
-  recorder: PatchRecorder | undefined,
-): unknown {
-  if (state.finalized) return state.result;
-  state.finalized = true;
-
-  if (!state.modified) {
-    state.result = intern(state.base);
-    return state.result;
-  }
-
-  switch (state.type) {
-    case 'object':
-      return finalizeObject(state, path, recorder);
-    case 'array':
-      return finalizeArray(state, path, recorder);
-    case 'list':
-      return finalizeList(state, path, recorder);
-    case 'map':
-      return finalizeMap(state, path, recorder);
-    case 'set':
-      return finalizeSet(state, path, recorder);
-  }
-}
-
-/** Emit the recorded structural ops of a sequence as patches, both directions. */
-function emitSeqOps(ops: SeqOp[], path: PatchPath, recorder: PatchRecorder): void {
-  for (const op of ops) {
-    if (op.t === 'set') {
-      recorder.patches.push({
-        kind: 'list.set',
-        path,
-        index: op.i,
-        value: resolve(op.value, null, undefined),
-      });
-      recorder.inverse.unshift({
-        kind: 'list.set',
-        path,
-        index: op.i,
-        value: restoreValue(op.old),
-      });
-    } else {
-      recorder.patches.push({
-        kind: 'list.splice',
-        path,
-        index: op.i,
-        remove: op.rc,
-        insert: op.inserted.map((r) => resolve(r, null, undefined)),
-      });
-      recorder.inverse.unshift({
-        kind: 'list.splice',
-        path,
-        index: op.i,
-        remove: op.inserted.length,
-        insert: op.removed.map(restoreValue),
-      });
-    }
-  }
-}
-
-/**
- * Retract a sequence node's own op patches after finalize concluded the
- * successor IS the base. Op patches must be emitted BEFORE children resolve
- * (children patch against post-splice indices), so a netted-out sequence
- * leaves its ops in the recorder; on the `=== base` outcome no child can
- * have emitted (a changed child forces a different result), so the marked
- * regions hold exactly this node's entries: `patchMark..` in `patches`,
- * the first `inverseCount` in `inverse` (one unshift per op).
- */
-function retractSeqPatches(
-  recorder: PatchRecorder,
-  patchMark: number,
-  inverseCount: number,
-): void {
-  recorder.patches.length = patchMark;
-  recorder.inverse.splice(0, inverseCount);
-}
-
-/** Net index diff plus one tail splice — the intent-lost patch fallback. */
 function emitSeqDiff(
   base: unknown[],
   resolved: unknown[],
@@ -1352,33 +623,6 @@ function emitSeqDiff(
       insert: base.slice(common),
     });
   }
-}
-
-/**
- * If every op is a positional set or a tail splice, positions BELOW the
- * low-water mark are stable: return the assigned indices, the final length,
- * and `low` — the minimum length reached. Everything at index ≥ low was
- * rewritten by the tail-splice sequence (pop-then-push changes content at
- * indices below the base length without changing the length!) and must be
- * taken from the final items, not delta'd. Mid-sequence splices → null.
- */
-function seqTailProfile(
-  ops: SeqOp[],
-  baseLen: number,
-): { setIdx: Set<number>; finalLen: number; low: number } | null {
-  let len = baseLen;
-  let low = baseLen;
-  const setIdx = new Set<number>();
-  for (const op of ops) {
-    if (op.t === 'set') {
-      setIdx.add(op.i);
-    } else {
-      if (op.i + op.rc !== len) return null;
-      len = op.i + op.inserted.length;
-      if (op.i < low) low = op.i;
-    }
-  }
-  return { setIdx, finalLen: len, low };
 }
 
 function finalizeObject(
@@ -1670,188 +914,35 @@ function finalizeArray(
   return state.result;
 }
 
-function finalizeList(
-  state: ListState,
-  path: PatchPath | null,
-  recorder: PatchRecorder | undefined,
-): unknown {
-  const emitting = recorder !== undefined && path !== null;
-  const patchMark = emitting ? recorder!.patches.length : 0;
-  const opCount = state.ops.length;
-  if (emitting) emitSeqOps(state.ops, path!, recorder);
-
-  const assignedIdx = new Set<number>();
-  for (const op of state.ops) if (op.t === 'set') assignedIdx.add(op.i);
-
-  if (state.items === null) {
-    // Virtual mode: replay point edits and the appended tail onto the base
-    // persistently — O(edits · log n), no materialization ever happened.
-    let result = state.base;
-    for (const [i, v] of state.vEdits) {
-      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
-      result = result.set(i, resolve(v, childPath, recorder));
-    }
-    for (const v of state.vTail) {
-      result = result.push(resolve(v, null, recorder));
-    }
-    if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
-    state.result = result;
-    return result;
-  }
-
-  const items = state.items;
-  const profile = seqTailProfile(state.ops, state.base.length);
-  if (profile !== null && profile.finalLen === items.length) {
-    // Materialized but positions stable below the low-water mark: replay
-    // persistently — sets below `low`, then rebuild the rewritten tail.
-    const L = state.base.length;
-    const L2 = items.length;
-    const low = profile.low;
-    let result = state.base;
-    const touched = new Set(assignedIdx);
-    for (const i of state.drafted) touched.add(i);
-    for (const i of touched) {
-      if (i >= low) continue;
-      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
-      result = result.set(i, resolve(items[i], childPath, recorder));
-    }
-    for (let k = low; k < L; k++) result = result.pop();
-    for (let i = low; i < L2; i++) result = result.push(resolve(items[i], null, recorder));
-    if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
-    state.result = result;
-    return result;
-  }
-
-  // Mid-sequence splices: rebuild from the resolved items.
-  const resolved = new Array<unknown>(items.length);
-  for (let i = 0; i < items.length; i++) {
-    const st = stateOf(items[i]);
-    const childPath =
-      emitting && st !== undefined && !st.finalized ? [...path!, i] : null;
-    resolved[i] = resolve(items[i], childPath, recorder);
-  }
-  state.result = ValueList.from(resolved);
-  if (emitting && state.result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
-  return state.result;
-}
-
-function finalizeMap(
-  state: MapState,
-  path: PatchPath | null,
-  recorder: PatchRecorder | undefined,
-): unknown {
-  let result = state.cleared
-    ? (ValueMap.empty() as ValueMap<unknown, unknown>)
-    : state.base;
-  const emitting = recorder !== undefined && path !== null;
-
-  if (emitting && state.cleared) {
-    for (const [k, v] of state.base) {
-      if (state.assigned.get(k) !== undefined) continue; // covered below
-      recorder.patches.push({ kind: 'map.delete', path: path!, key: k });
-      recorder.inverse.unshift({ kind: 'map.set', path: path!, key: k, value: v });
-    }
-  }
-
-  for (const [key, wasSet] of state.assigned) {
-    const hadBefore = state.base.has(key);
-    const before = state.base.get(key);
-    if (wasSet) {
-      const after = resolve(state.edits.get(key), null, recorder);
-      result = result.set(key, after);
-      if (emitting) {
-        if (hadBefore && !state.cleared && same(before, after)) continue;
-        recorder.patches.push({ kind: 'map.set', path: path!, key, value: after });
-        recorder.inverse.unshift(
-          hadBefore
-            ? { kind: 'map.set', path: path!, key, value: before }
-            : { kind: 'map.delete', path: path!, key },
-        );
-      }
-    } else {
-      result = result.delete(key);
-      if (emitting && hadBefore) {
-        recorder.patches.push({ kind: 'map.delete', path: path!, key });
-        recorder.inverse.unshift({ kind: 'map.set', path: path!, key, value: before });
-      }
-    }
-  }
-
-  // Child-drafted (unassigned) entries: deeper patches at path + key.
-  for (const [key, value] of state.edits) {
-    if (state.assigned.has(key)) continue;
-    const childPath = emitting ? [...path!, key] : null;
-    result = result.set(key, resolve(value, childPath, recorder));
-  }
-
-  state.result = result;
-  return result;
-}
-
-function finalizeSet(
-  state: SetState,
-  path: PatchPath | null,
-  recorder: PatchRecorder | undefined,
-): unknown {
-  let result = state.cleared ? (ValueSet.empty() as ValueSet<unknown>) : state.base;
-  for (const v of state.removed) result = result.delete(v);
-  for (const v of state.added) result = result.add(v);
-  state.result = result;
-
-  if (recorder !== undefined && path !== null) {
-    const removedAll = state.cleared
-      ? [...state.base].filter((v) => !state.added.has(v))
-      : [...state.removed];
-    for (const v of removedAll) {
-      recorder.patches.push({ kind: 'set.delete', path, value: v });
-      recorder.inverse.unshift({ kind: 'set.add', path, value: v });
-    }
-    for (const v of state.added) {
-      if (state.cleared && state.base.has(v)) continue;
-      recorder.patches.push({ kind: 'set.add', path, value: v });
-      recorder.inverse.unshift({ kind: 'set.delete', path, value: v });
-    }
-  }
-  return result;
-}
-
 // ---------------------------------------------------------------------------
 // produce
 // ---------------------------------------------------------------------------
 
-/** Draft twin of a value type: mutable in place inside a recipe. */
-export type Draft<T> = T extends ValueMap<infer K, infer V>
-  ? DraftMap<K, V>
-  : T extends ValueSet<infer U>
-    ? DraftSet<U>
-    : T extends ValueList<infer U>
-      ? DraftList<U>
-      : T extends ReadonlyArray<infer U>
-        ? Draft<U>[]
-        : T extends object
-          ? { -readonly [P in keyof T]: Draft<T[P]> }
-          : T;
+/**
+ * The draft twin of a value type — mutable in place inside a recipe.
+ *
+ * Plain objects and arrays map to their writable shapes; anything that
+ * implements `[toDraft]` maps to whatever its draft state's `draft` is
+ * (`ValueMap<K, V>` → `DraftMap<K, V>`, and likewise for your own types).
+ */
+export type Draft<T> = T extends { [toDraft](parent?: DraftState): { draft: infer D } }
+  ? D
+  : T extends ReadonlyArray<infer U>
+    ? Draft<U>[]
+    : T extends object
+      ? { -readonly [P in keyof T]: Draft<T[P]> }
+      : T;
 
 function runProduce<T>(
   base: T,
   recipe: (draft: Draft<T>) => unknown,
   recorder: PatchRecorder | undefined,
 ): T {
-  const scope: Scope = { parent: currentScope, states: [] };
-  currentScope = scope;
-  try {
-    let rootState: AnyState | undefined;
+  return _runInScope(() => {
+    let rootState: DraftState | undefined;
     let draft: unknown = base;
     if (isDraftable(base)) {
-      rootState = isPlainObject(base)
-        ? createObjectDraft(base as Record<string, unknown>)
-        : Array.isArray(base)
-          ? createArrayDraft(base)
-          : base instanceof ValueMap
-            ? createMapDraft(base)
-            : base instanceof ValueSet
-              ? createSetDraft(base)
-              : createListDraft(base as ValueList<unknown>);
+      rootState = draftOf(base);
       draft = rootState.draft;
     }
 
@@ -1888,13 +979,7 @@ function runProduce<T>(
       result = intern(base as unknown);
     }
     return result as T;
-  } finally {
-    for (const s of scope.states) {
-      s.revoked = true;
-      if (s.type === 'object' || s.type === 'array') s.revoke();
-    }
-    currentScope = scope.parent;
-  }
+  });
 }
 
 /**
@@ -1972,6 +1057,11 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
 function applyRun(draft: unknown, patches: readonly Patch[]): void {
   for (const p of patches) {
     const target = navigate(draft, p.path);
+    const state = stateOf(target);
+    if (state !== undefined && state.applyPatch !== undefined) {
+      state.applyPatch(state, p); // a draftable kind applies its own patches
+      continue;
+    }
     switch (p.kind) {
       case 'record.set':
         (target as Record<string, unknown>)[p.key] = p.value;
@@ -1980,38 +1070,30 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
         delete (target as Record<string, unknown>)[p.key];
         break;
       case 'list.set':
-        if (target instanceof DraftList) target.set(p.index, p.value);
-        else (target as unknown[])[p.index] = p.value;
+        (target as unknown[])[p.index] = p.value;
         break;
       case 'list.splice':
-        if (target instanceof DraftList) {
-          target.splice(p.index, p.remove, ...(p.insert as unknown[]));
-        } else {
-          (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
-        }
+        (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
         break;
-      case 'map.set':
-        (target as DraftMap<unknown, unknown>).set(p.key, p.value);
-        break;
-      case 'map.delete':
-        (target as DraftMap<unknown, unknown>).delete(p.key);
-        break;
-      case 'set.add':
-        (target as DraftSet<unknown>).add(p.value);
-        break;
-      case 'set.delete':
-        (target as DraftSet<unknown>).delete(p.value);
-        break;
+      default:
+        throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
     }
   }
+}
+
+function describe(target: unknown): string {
+  const state = stateOf(target);
+  return state !== undefined ? `${state.kind} draft` : Array.isArray(target) ? 'plain array' : typeof target;
 }
 
 function navigate(draft: unknown, path: PatchPath): unknown {
   let cur = draft;
   for (const seg of path) {
-    if (cur instanceof DraftMap) cur = cur.get(seg);
-    else if (cur instanceof DraftList) cur = cur.get(seg as number);
-    else cur = (cur as Record<string | number, unknown>)[seg as string | number];
+    const state = stateOf(cur);
+    cur =
+      state !== undefined && state.childAt !== undefined
+        ? state.childAt(state, seg)
+        : (cur as Record<string | number, unknown>)[seg as string | number];
   }
   return cur;
 }

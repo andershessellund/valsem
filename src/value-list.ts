@@ -28,6 +28,8 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
+import { toDraft, type DraftState } from './draft-core.js';
+import { createListDraft, type ListState } from './draft-list.js';
 
 const BITS = 5;
 const WIDTH = 32;
@@ -301,8 +303,8 @@ export class ValueList<T> {
   }
 
   /** Iterate the elements in index order. */
-  [Symbol.iterator](): IterableIterator<T> {
-    return new ListIterator<T>(this.#root, this.#shift, this.#tail);
+  [Symbol.iterator](): ArrayIterator<T> {
+    return new ListIterator<T>(this.#root, this.#shift, this.#tail) as unknown as ArrayIterator<T>;
   }
 
   /** Call `fn` for each element in index order, as `Array.prototype.forEach` does. */
@@ -338,6 +340,11 @@ export class ValueList<T> {
       (other as ValueList<T>).#root === this.#root &&
       (other as ValueList<T>).#tail === this.#tail
     );
+  }
+
+  /** The `produce` draft protocol: a {@link DraftList} over this list. */
+  [toDraft](parent?: DraftState): ListState<T> {
+    return createListDraft(this, parent, ValueList.from);
   }
 
   /** Append `value` (interned on entry). Returns the canonical successor. */

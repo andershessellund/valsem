@@ -312,7 +312,7 @@ describe('corpus — property-suite finds (pinned)', () => {
     // replaced by the base value, not interned into the successor.
     const base = intern({ arr: [{ a: 1 }, { b: 2 }, 3] });
     const next = produce(base, (d) => {
-      void d.arr[0]!.a; // read-only touch — drafts the child, changes nothing
+      void (d.arr[0] as { a?: number }).a; // read-only touch — drafts the child, changes nothing
       d.arr.push(4); // keeps ops mode, then force materialization:
       d.arr.splice(2, 1); // mid-copy state now holds the child draft
     });

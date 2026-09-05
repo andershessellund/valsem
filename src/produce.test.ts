@@ -6,11 +6,11 @@ import {
   applyPatches,
   nothing,
   isDraft,
-  DraftMap,
-  DraftSet,
-  DraftList,
   type Patch,
 } from './produce.js';
+import { DraftMap } from './draft-map.js';
+import { DraftSet } from './draft-set.js';
+import { DraftList } from './draft-list.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';

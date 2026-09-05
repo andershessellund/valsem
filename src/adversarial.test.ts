@@ -56,7 +56,7 @@ describe('prototype-chain keys reach records only as OWN keys', () => {
     const untrusted = JSON.parse(payload) as Record<string, unknown>;
     const next = produce(base, (d) => void ((d as Record<string, unknown>).x = untrusted));
     expect(next).toBe(intern({ name: 'a', n: 1, x: untrusted }));
-    const x = (next as { x: object }).x;
+    const x = (next as unknown as { x: object }).x;
     expect(Object.getPrototypeOf(x)).toBe(Object.prototype);
     expect(Object.keys(x).sort()).toEqual(Object.keys(untrusted).sort());
   });

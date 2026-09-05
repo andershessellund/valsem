@@ -28,14 +28,8 @@ export type { InternPool } from './intern-pool.js';
 export { configureHasher, createMarvin32Hasher, getHashSeed } from './hasher.js';
 export { configureLimits } from './limits.js';
 export type { Hasher } from './hasher.js';
-export {
-  produce,
-  produceWithPatches,
-  applyPatches,
-  nothing,
-  isDraft,
-  DraftMap,
-  DraftSet,
-  DraftList,
-} from './produce.js';
-export type { Draft, Patch, PatchPath } from './produce.js';
+export { produce, produceWithPatches, applyPatches, nothing, isDraft, toDraft } from './produce.js';
+export type { Draft, Patch, PatchPath, PatchKinds } from './produce.js';
+export { DraftMap } from './draft-map.js';
+export { DraftSet } from './draft-set.js';
+export { DraftList } from './draft-list.js';

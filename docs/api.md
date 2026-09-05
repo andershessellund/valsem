@@ -14,7 +14,8 @@
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
 | `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |
 | `nothing` / `isDraft` | symbol / function | Recipe sentinel for "result is `undefined`"; draft detection. |
-| `DraftMap` / `DraftSet` / `DraftList` | class | Mutable draft twins of the collections, handed out inside `produce`. |
+| `DraftMap` / `DraftSet` / `DraftList` | class | Mutable draft twins of the collections, handed out inside `produce`; `get()` returns drafts (`Draft<V>`). |
+| `toDraft` | symbol | The draft protocol: implement `[toDraft](parent)` to make a type draftable; `Draft<T>` infers a type's draft from it. Toolkit in `valsem/draft`. |
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt-in value-semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
@@ -39,3 +40,23 @@ layer). Not for application code.
 | `defineRecordField` | function | `__proto__`-safe record-field definition, for building records from untrusted keys. |
 | `hasValueSemantics` | function | Whether a type has registered equality **and** hash handlers. |
 | `mutableBuiltinReason` | function | The shared rejection table: why a mutable built-in is not a value, as error text. |
+
+## `valsem/draft`
+
+The toolkit for making your own types draftable — the protocol `produce`
+uses for everything but plain objects and arrays, and the route the built-in
+collections take. Covered by semver like `valsem/binding`.
+
+| export | description |
+| --- | --- |
+| `toDraft` | The protocol symbol: implement `[toDraft](parent)` on a class, returning a `DraftState`. Also exported from `valsem`. |
+| `createDraftState(fields)` | Build and register a draft state for the running `produce()`; supply your fields, `draft`, `finalize`, and optionally `applyPatch`/`childAt`/`revoke`. |
+| `markChanged(state)` | Record a mutation (bubbles to the root). |
+| `assertUnrevoked(state)` | Throw the teaching error once the recipe has ended. |
+| `assertAssignable(value, state)` | Reject drafts from another `produce()` call. |
+| `createChildDraft(value, state)` | Draft a nested draftable value lazily. |
+| `resolve(value, path, recorder)` | Finalize a child (draft or foreign material) to its canonical form, emitting its patches under `path`. |
+| `restoreValue(value)` | The inverse-patch value for a child (a draft restores its base). |
+| `isDraftable(value)` / `isDraft(value)` / `stateOf(draft)` | Introspection. |
+| `emitSeqOps`, `retractSeqPatches`, `seqTailProfile` | The sequence-patch helpers arrays and `ValueList` share, for list-like kinds. |
+| `DraftState`, `Patch`, `PatchKinds`, `PatchPath`, `PatchRecorder`, `SeqOp` | Types. Extend `PatchKinds` by declaration merging to add your own patch kinds with exact narrowing. |

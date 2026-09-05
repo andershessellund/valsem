@@ -80,13 +80,13 @@ describe('intern on entry — probes are canonicalized', () => {
 
 describe('toArray() — the interned flat and cross-representation unity', () => {
   it('toArray()[i] === get(i), always', () => {
-    const l = ValueList.of({ a: 1 }, 2, 'three');
+    const l = ValueList.of<unknown>({ a: 1 }, 2, 'three');
     const snap = l.toArray();
     for (let i = 0; i < l.length; i++) expect(snap[i]).toBe(l.get(i));
   });
 
   it('toArray() === intern of the equal plain array', () => {
-    const l = ValueList.of({ a: 1 }, 2);
+    const l = ValueList.of<unknown>({ a: 1 }, 2);
     expect(l.toArray()).toBe(intern([{ a: 1 }, 2]));
     expect(Object.isFrozen(l.toArray())).toBe(true);
     expect(l.toArray()).toBe(l.toArray()); // memoized

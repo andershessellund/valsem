@@ -61,7 +61,9 @@ npm install valsem
 
 The price is up-front: canonicalising a value means hashing it and looking it
 up in a pool, so building and updating costs more than a plain copy. The
-[benchmarks](#benchmarks) below show both sides.
+[benchmarks](#benchmarks) below show both sides. It is small, and it
+tree-shakes: `produce` alone is **8 KB gzipped**, `deepEqual` alone 1.4 KB,
+the whole package 15 KB.
 
 ## Coming from immer
 
@@ -301,6 +303,36 @@ import 'valsem/temporal';
 deepEqual(Temporal.PlainDate.from('2026-09-05'), Temporal.PlainDate.from('2026-09-05')); // true
 ```
 
+### Bring your own draftable
+
+`produce` drafts plain objects and arrays itself. Everything else — the
+built-in `ValueMap`/`ValueSet`/`ValueList` included — arrives through one
+protocol: a class implements `[toDraft](parent)`, returning a draft state
+built with the `valsem/draft` toolkit. The state carries the mutable draft the
+recipe receives and a `finalize` that turns it back into the canonical value
+(emitting patches); `Draft<T>` infers the draft type from it, so
+`produce(interval, (d) => { d.hi = 5; })` is fully typed:
+
+```ts
+import { toDraft, createDraftState, markChanged, assertUnrevoked, type DraftState } from 'valsem/draft';
+
+class Interval {
+  // …a canonical value type, as above…
+  [toDraft](parent?: DraftState): IntervalState {
+    const state = createDraftState<IntervalState>({
+      kind: 'interval', parent, base: this, lo: this.lo, hi: this.hi,
+      draft: null!, finalize: (s) => Interval.of(s.lo, s.hi),
+    });
+    state.draft = new IntervalDraft(state); // getters/setters that call assertUnrevoked + markChanged
+    return state;
+  }
+}
+```
+
+The [guide](https://andershessellund.github.io/valsem/guide/extending#bring-your-own-draftable)
+has the complete worked example — nested drafting, custom patch kinds with
+exact narrowing, `applyPatches` support — which is also a test in the repo.
+
 ## Guarantees
 
 - **Immutable.** Everything `produce`, `intern` and the collections return is
@@ -348,6 +380,7 @@ bindings (`valsem/binding`).
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
+| `toDraft`, `valsem/draft` | making types draftable — the protocol `produce` uses for everything but plain objects and arrays |
 | `configureHasher`, `configureLimits` | hardening knobs |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |
 

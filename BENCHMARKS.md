@@ -246,6 +246,36 @@ retention penalty nearly vanishes (1.9 vs 1.7 µs); and valsem's iteration
 beats Immutable's there (`Map` 10k: 306 µs vs 1.01 ms). The kept-objects
 cost of `WeakRef` is an engine property, not a design one.
 
+## Bundle size
+
+esbuild, minified, through the package name (so `exports` and `sideEffects`
+are honoured); gzip at level 9.
+
+| import | min | gz | note |
+| --- | --- | --- | --- |
+| `produce` | 22.9 KB | **8.2 KB** | was 42.9 / 13.7 before the draft protocol — it dragged in every collection |
+| `deepEqual` | 2.9 KB | 1.4 KB | |
+| `intern` | 9.8 KB | 4.0 KB | |
+| `HashMap` | 10.4 KB | 4.2 KB | |
+| `ValueMap` | 20.9 KB | 7.6 KB | includes its own draft (+1.5 KB gz over the pre-protocol 6.1) — the deliberate side of the trade |
+| everything | 47.3 KB | 15.2 KB | |
+| immer `produce` | 9.3 KB | 3.8 KB | 12.3 / 4.7 with `enableMapSet` |
+| mutative `create` | 19.2 KB | 6.4 KB | |
+| Immutable.js `Map` | 65.5 KB | 18.5 KB | |
+
+`produce` at 8 KB is ~2× immer, and honestly so: the remaining ~3.5 KB of
+that is the hasher, the pool and the structural hash — the machinery that
+makes results canonical. It cannot be shaken away, only paid for.
+
+One packaging lesson: `sideEffects` must not list modules whose only
+top-level effect is *self-registration* (the interner wiring its caches into
+`deepEqual`/`deepHash`, `produce` registering its two draft kinds with the
+core, the hasher drawing its seed). Those effects only matter once the
+module's own exports are in use — in which case the bundler keeps the module
+anyway — and listing them forces every barrel import to carry them:
+`deepEqual` alone went from 2.9 KB to 22 KB when they were listed. Only
+`valsem/temporal`, whose entire purpose is a side effect, is declared.
+
 ## The arena the frontend actually runs
 
 Update-throughput benchmarks score valsem's defining feature zero: in one

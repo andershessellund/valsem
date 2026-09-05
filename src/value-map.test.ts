@@ -119,7 +119,7 @@ describe('ValueMap — encapsulation & the ReadonlyMap contract', () => {
 
 describe('ValueMap — undefined IS a value here, unlike in records', () => {
   it('stores undefined distinctly from absence', () => {
-    const base = ValueMap.fromObject({ a: 1 });
+    const base = ValueMap.fromObject<number | undefined>({ a: 1 });
     const withU = base.set('b', undefined);
     expect(withU.size).toBe(2);
     expect(withU.has('b')).toBe(true);

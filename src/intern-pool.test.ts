@@ -75,7 +75,7 @@ describe('InternPool — canonicality', () => {
     const b = pool.intern(new Point(1, 2));
     expect(a).toBe(b);
     expect(Object.isFrozen(a)).toBe(true);
-    expect((a as Record<symbol, unknown>)[interned as unknown as symbol]).toBe(true);
+    expect((a as unknown as Record<symbol, unknown>)[interned as unknown as symbol]).toBe(true);
     expect(pool.intern(new Point(3, 4))).not.toBe(a);
   });
 

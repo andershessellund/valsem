@@ -353,7 +353,7 @@ describe('deepEqual — the [interned] type contract', () => {
       }
     }
     const canonical = pool.intern(new Pt(42));
-    expect((canonical as Record<symbol, unknown>)[interned as unknown as symbol]).toBe(true);
+    expect((canonical as unknown as Record<symbol, unknown>)[interned as unknown as symbol]).toBe(true);
     expect(deepEqual(canonical, canonical)).toBe(true); // identity
     expect(deepEqual(canonical, pool.intern(new Pt(43)))).toBe(false); // distinct canonicals
     expect(deepEqual(canonical, { x: 42 })).toBe(false); // cross-kind

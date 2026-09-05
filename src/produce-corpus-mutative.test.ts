@@ -18,7 +18,7 @@ describe('mutative corpus — #18: assigning a non-draft, then mutating it', () 
     const base = intern({ a: { v: 1 }, b: { w: 2 } });
     const next = produce(base, (d) => {
       (d as Record<string, unknown>).c = base.b;
-      (d as { c: { w: number } }).c.w = 9;
+      (d as unknown as { c: { w: number } }).c.w = 9;
     });
     expect(next).toBe(intern({ a: { v: 1 }, b: { w: 2 }, c: { w: 9 } }));
     expect(base.b).toBe(intern({ w: 2 })); // canonical untouched
@@ -119,7 +119,7 @@ describe('mutative corpus — opaque array methods (copyWithin/fill)', () => {
     const base = intern({ arr: [1, 2, 3] });
     const next = produce(base, (d) => {
       (d.arr as unknown[]).fill({ x: 0 }, 1);
-      (d.arr[1] as { x: number }).x = 5;
+      (d.arr[1] as unknown as { x: number }).x = 5;
     });
     // fill writes ONE object into both slots; mutating through index 1
     // mutates that shared object — both slots reflect it (plain JS

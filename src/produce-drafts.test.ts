@@ -4,7 +4,10 @@
 // (The produce suites test outcomes; this one tests the instruments.)
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, DraftMap, DraftSet, DraftList } from './produce.js';
+import { produce, produceWithPatches, } from './produce.js';
+import { DraftMap } from './draft-map.js';
+import { DraftSet } from './draft-set.js';
+import { DraftList } from './draft-list.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';

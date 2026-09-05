@@ -261,7 +261,7 @@ describe('deepHash — diagnostic for unregistered Temporal', () => {
   it.skipIf(typeof (globalThis as { Temporal?: unknown }).Temporal === 'undefined')(
     'points at the valsem/temporal import',
     () => {
-    expect(() => deepHash(Temporal.PlainDate.from('2026-08-31'))).toThrow(
+    expect(() => deepHash((globalThis as { Temporal?: any }).Temporal.PlainDate.from('2026-08-31'))).toThrow(
       /import 'valsem\/temporal'/,
     );
     },

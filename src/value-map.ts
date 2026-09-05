@@ -20,6 +20,8 @@
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
+import { toDraft, type DraftState } from './draft-core.js';
+import { createMapDraft, type MapState } from './draft-map.js';
 import {
   createTrieConfig,
   trieGet,
@@ -129,6 +131,11 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   [equalsSym](other: unknown): boolean {
     // Hash consing makes deep equality a pointer comparison on roots.
     return other instanceof ValueMap && (other as ValueMap<K, V>).#root === this.#root;
+  }
+
+  /** The `produce` draft protocol: a {@link DraftMap} over this map. */
+  [toDraft](parent?: DraftState): MapState<K, V> {
+    return createMapDraft(this, parent, ValueMap.empty);
   }
 
   /**

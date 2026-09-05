@@ -9,6 +9,8 @@
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
+import { toDraft, type DraftState } from './draft-core.js';
+import { createSetDraft, type SetState } from './draft-set.js';
 import {
   createTrieConfig,
   trieGet,
@@ -152,6 +154,11 @@ export class ValueSet<T> implements ReadonlySet<T> {
   [equalsSym](other: unknown): boolean {
     // Hash consing makes deep equality a pointer comparison on roots.
     return other instanceof ValueSet && (other as ValueSet<T>).#root === this.#root;
+  }
+
+  /** The `produce` draft protocol: a {@link DraftSet} over this set. */
+  [toDraft](parent?: DraftState): SetState<T> {
+    return createSetDraft(this, parent, ValueSet.empty);
   }
 
   /** Add `value` (interned on entry). Returns `this` if a structural equal is present. */

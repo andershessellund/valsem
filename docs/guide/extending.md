@@ -145,3 +145,125 @@ equality no longer depends on the runtime's tz link table (`Europe/Kiev`
 became a link to `Europe/Kyiv` only in 2022). To merge aliases, normalise
 first: `zdt.withTimeZone(canonicalId)`.
 :::
+
+## Bring your own draftable
+
+`produce` knows two shapes natively — plain objects and arrays. Everything
+else it drafts arrives through one protocol, and the built-in
+`ValueMap`/`ValueSet`/`ValueList` are simply its first three users: a class
+implements `[toDraft](parent)` and returns a *draft state* built with the
+`valsem/draft` toolkit. This is also what keeps the package small: `produce`
+never imports the collections, so a bundle that uses only `produce` carries
+none of them (8 KB gzipped), and a bundle that uses only `ValueMap` carries
+no proxies.
+
+A draft state has:
+
+- `draft` — the object the recipe receives; your mutable twin.
+- `finalize(state, path, recorder)` — called once, only if something changed:
+  return the canonical result, resolving children with `resolve()`, and, when
+  `path` is not null, push this container's patches into `recorder` (forward
+  into `patches`, inverse `unshift`ed into `inverse`).
+- optionally `applyPatch(state, patch)` and `childAt(state, segment)`, so
+  `applyPatches` can route patches to your draft and navigate through it.
+
+Your draft calls `assertUnrevoked(state)` before every operation (drafts do
+not survive the recipe) and `markChanged(state)` after every mutation (it
+bubbles to the root). Nested values are drafted with `createChildDraft` on
+first read — the immer rule — and `Draft<T>` infers your draft type from
+`[toDraft]`'s return type, so recipes are fully typed.
+
+The complete example — a canonical `Interval` with a nested record, its own
+patch kind, and `applyPatches` support — is
+[`src/draftable.test.ts`](https://github.com/andershessellund/valsem/blob/main/src/draftable.test.ts)
+in the repository; the essential shape is:
+
+```ts
+import {
+  toDraft, DRAFT_STATE, createDraftState, markChanged, assertUnrevoked,
+  createChildDraft, resolve, isDraft, isDraftable,
+  type DraftState, type PatchPath, type PatchRecorder, type Patch,
+} from 'valsem/draft';
+
+// Your own patch kind, merged into the union so `patch.kind` narrows exactly.
+declare module 'valsem/draft' {
+  interface PatchKinds {
+    'interval.set': { kind: 'interval.set'; path: PatchPath; lo: number; hi: number };
+  }
+}
+
+interface IntervalState extends DraftState<Interval> {
+  kind: 'interval';
+  lo: number;
+  hi: number;
+  meta: unknown; // the nested record, replaced by a child draft on first read
+  draft: IntervalDraft;
+}
+
+class Interval {
+  // …canonical value type: private constructor, pool, [equals], [hashCode]…
+  [toDraft](parent?: DraftState): IntervalState {
+    const state = createDraftState<IntervalState>({
+      kind: 'interval', parent, base: this,
+      lo: this.lo, hi: this.hi, meta: this.meta,
+      draft: null as unknown as IntervalDraft,
+      finalize: finalizeInterval,
+      applyPatch: applyIntervalPatch,
+      childAt: (s, segment) => (segment === 'meta' ? (s as IntervalState).draft.meta : undefined),
+    });
+    state.draft = new IntervalDraft(state);
+    return state;
+  }
+}
+
+class IntervalDraft {
+  declare readonly [DRAFT_STATE]: IntervalState;
+  constructor(state: IntervalState) {
+    Object.defineProperty(this, DRAFT_STATE, { value: state, enumerable: false });
+  }
+  get #state() { const s = this[DRAFT_STATE]; assertUnrevoked(s); return s; }
+  get hi() { return this.#state.hi; }
+  set hi(v: number) { const s = this.#state; if (v !== s.hi) { s.hi = v; markChanged(s); } }
+  get meta() {
+    const s = this.#state;
+    if (!isDraft(s.meta) && isDraftable(s.meta)) s.meta = createChildDraft(s.meta, s);
+    return s.meta as { label: string };
+  }
+  // …lo likewise…
+}
+
+function finalizeInterval(state: DraftState<Interval>, path: PatchPath | null, recorder?: PatchRecorder) {
+  const s = state as IntervalState;
+  const meta = resolve(s.meta, path === null ? null : [...path, 'meta'], recorder) as { label: string };
+  const result = Interval.of(s.lo, s.hi, meta);
+  if (recorder && path !== null && (s.lo !== s.base.lo || s.hi !== s.base.hi)) {
+    recorder.patches.push({ kind: 'interval.set', path, lo: s.lo, hi: s.hi });
+    recorder.inverse.unshift({ kind: 'interval.set', path, lo: s.base.lo, hi: s.base.hi });
+  }
+  return result;
+}
+
+function applyIntervalPatch(state: DraftState<Interval>, p: Patch) {
+  if (p.kind !== 'interval.set') throw new Error(`cannot apply ${p.kind} to an interval`);
+  const d = (state as IntervalState).draft;
+  d.lo = p.lo;
+  d.hi = p.hi;
+}
+```
+
+With that in place, an `Interval` drafts anywhere a value can sit — at the
+root, inside a record, inside a `ValueList` — with patches that round-trip:
+
+```ts
+const next = produce(intern({ range: Interval.of(0, 10) }), (d) => {
+  d.range.hi = 5;          // typed: Draft<{ range: Interval }> is { range: IntervalDraft }
+  d.range.meta.label = 'b';
+});
+next.range === Interval.of(0, 5, { label: 'b' }); // true — canonical
+```
+
+Two conventions to keep: a no-op edit must leave the state unmodified (check
+`v !== s.hi` before `markChanged`), so that `produce(x, () => {}) === x`
+holds through your type; and `finalize` must return the canonical instance
+(build it through your interning factory), or equal results would not be
+`===`.

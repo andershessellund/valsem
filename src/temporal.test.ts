@@ -10,7 +10,8 @@ import { deepEqual, deepHash, intern } from './index.js';
 
 const HAS_TEMPORAL = typeof (globalThis as { Temporal?: unknown }).Temporal !== 'undefined';
 if (HAS_TEMPORAL) await import('./temporal.js');
-const T = (globalThis as { Temporal?: typeof Temporal }).Temporal!;
+// Node's Temporal has no lib types yet; the tests talk to it untyped.
+const T = (globalThis as { Temporal?: any }).Temporal;
 const describeTemporal = describe.skipIf(!HAS_TEMPORAL);
 
 describeTemporal('temporal — value semantics', () => {
@@ -155,7 +156,7 @@ describeTemporal('temporal — Duration is strictly field-wise, not Duration.com
   });
 
   it('distinguishes every pair an accessor can distinguish — including where toString() folds', () => {
-    const distinct: [Temporal.DurationLike | string, Temporal.DurationLike | string][] = [
+    const distinct: [Record<string, number> | string, Record<string, number> | string][] = [
       [{ milliseconds: 1500 }, { seconds: 1, milliseconds: 500 }], // both print PT1.5S
       [{ microseconds: 1000 }, { milliseconds: 1 }], // both print PT0.001S
       [{ nanoseconds: 1_500_000_000 }, { seconds: 1, milliseconds: 500 }],
@@ -179,7 +180,7 @@ describeTemporal('temporal — Duration is strictly field-wise, not Duration.com
   });
 
   it('equates exactly the Durations whose ten fields agree, with equal hashes', () => {
-    const equal: [Temporal.DurationLike | string, Temporal.DurationLike | string][] = [
+    const equal: [Record<string, number> | string, Record<string, number> | string][] = [
       ['PT0H', 'PT0M'], // every field 0
       ['PT0S', { hours: 0, nanoseconds: 0 }],
       [{ hours: -0 }, { hours: 0 }], // Temporal normalises -0 at construction
