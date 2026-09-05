@@ -3,10 +3,11 @@
 //
 // Compares cleanup strategies over hash-bucketed WeakRef pools:
 //
-//   shipped  — the InternPool as shipped (circle sweeper + GC-epoch backstop
-//              since the strategy swap; formerly a threshold sweep)
-//   fr       — FinalizationRegistry per entry (the global pool's pre-swap
-//              mechanism)
+//   shipped  — the InternPool as shipped: FinalizationRegistry reports each
+//              death, the callback parks the slot, and cleanup runs in idle
+//              time (requestIdleCallback / setImmediate) in bounded slices
+//   fr       — FinalizationRegistry per entry, cleanup inline in the callback
+//              (what "shipped" degrades to where nothing can defer)
 //   circle   — the standalone circle prototype, no backstop, lookups pay 1
 //   circ+gc  — the standalone prototype in the shipped configuration
 //   none     — no cleanup at all (baseline; isolates each strategy's tax)

@@ -6,8 +6,8 @@
 //   2. Hash code is precomputed and cached in a WeakMap (O(1) deepHash)
 //   3. The interner does NOT hold strong references — canonical copies may
 //      be garbage-collected when no other references exist; their pool
-//      metadata is then reclaimed by the shared incremental sweeper
-//      (see intern-pool.ts for the design and its measured rationale).
+//      metadata is then reclaimed in idle time (see intern-pool.ts for the
+//      design and its measured rationale).
 //
 // Supported value types: primitives (returned as-is), plain objects, arrays,
 // and any type registered as `{ immutable: true }` via `deepEqual.register`
@@ -53,7 +53,7 @@ _setPrecomputedHashes(hashCache);
 _setCanonicals(hashCache);
 
 // ---------------------------------------------------------------------------
-// Pool — the global weak pool, on the shared sweeper machinery
+// Pool — the global weak pool
 // ---------------------------------------------------------------------------
 
 const pool = createInternPool<object>();

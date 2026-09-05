@@ -12,10 +12,7 @@ npm install valsem
 > (`union`, `isSubsetOf`, …, which `ValueSet` delegates to) — that is:
 > **Node ≥ 22**, and all current browsers, workers, Deno, and Bun.
 > `valsem/temporal` additionally needs a `Temporal` global: native in recent
-> Node, or a polyfill. `FinalizationRegistry` is
-> optional — when present, valsem uses a single sentinel as a GC‑epoch hint
-> for pool cleanup, never one cell per value. Ships as ES modules with full
-> TypeScript types.
+> Node, or a polyfill. Ships as ES modules with full TypeScript types.
 
 ---
 
@@ -176,10 +173,12 @@ That yields three properties at once:
 
 The pool holds values **weakly** (via `WeakRef`), so canonical instances are
 garbage‑collected once you stop referencing them — interning does not leak
-memory. Pool bookkeeping is reclaimed by an incremental, traffic‑driven
-sweeper (plus a single GC‑epoch sentinel): a bounded constant tax on pool
-operations, with no per‑entry finalizers, no monolithic cleanup passes, and no
-timers.
+memory. Pool bookkeeping is reclaimed in **idle time**: the engine reports each
+death once (a single global `FinalizationRegistry`), the callback only parks
+the dead slot, and the actual cleanup runs under `requestIdleCallback` where
+it exists (browser windows), else `setImmediate` (Node, Bun), in bounded
+slices — no sweeping of live entries, no per‑registration tax, no timers, and
+nothing retained after values die.
 
 ```ts
 import { deepEqual, internHash } from 'valsem';

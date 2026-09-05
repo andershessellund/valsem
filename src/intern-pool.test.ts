@@ -1,32 +1,45 @@
-// The weak-pool machinery: bucket records on the global sweep circle.
+// The weak-pool machinery: buckets, and deferred reclamation of dead slots.
 //
-// Structural invariants (linkage, slot accounting, collision promotion and
-// demotion) are deterministic; reclamation tests need real GC and skip
-// themselves when globalThis.gc is unavailable (vitest.config.ts passes
-// --expose-gc to workers, so normally they run).
-import { describe, it, expect } from 'vitest';
-import { createInternPool, _sweepNow, _circleState } from './intern-pool.js';
+// Bucket behaviour (collision promotion/demotion, pruning in passing) is
+// deterministic. Reclamation needs real GC — the engine reports a death via
+// FinalizationRegistry only after the major GC that clears the WeakRef —
+// and those tests skip themselves when globalThis.gc is unavailable
+// (vitest.config.ts passes --expose-gc to workers, so normally they run).
+// The idle scheduler is exercised through a fake requestIdleCallback
+// installed on globalThis; Node has none, so the shipped default here is
+// setImmediate.
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  createInternPool,
+  _pendingCount,
+  _drainNow,
+  _bucketCount,
+  _MAX_PENDING,
+} from './intern-pool.js';
 import { equals, hashCode, interned } from './deep-equal.js';
 
 const gc = (globalThis as { gc?: () => void }).gc;
 const hasGC = typeof gc === 'function';
+const turn = (): Promise<void> => new Promise((r) => setImmediate(r));
 
 /**
  * Repeated gc + macrotask turns until `cond` holds (or rounds run out).
  *
  * The job boundary BEFORE gc() is essential: `WeakRef.deref()` (which the
- * condition typically performs, via size()/sweeps) puts its target on the
- * agent's [[KeptAlive]] list until the current job ends, so a gc() in the
- * same job treats every deref'd object as a root. The turns after gc() let
- * FinalizationRegistry callbacks land (they run as their own post-GC tasks).
+ * condition typically performs, via size()) puts its target on the agent's
+ * [[KeptAlive]] list until the current job ends, so a gc() in the same job
+ * treats every deref'd object as a root. The turns after gc() let the
+ * FinalizationRegistry callback land (it runs as its own post-GC task) and
+ * the setImmediate drain run after it.
  */
 async function collectUntil(cond: () => boolean, rounds = 20): Promise<boolean> {
   for (let i = 0; i < rounds; i++) {
     if (cond()) return true;
-    await new Promise((r) => setImmediate(r));
+    await turn();
     gc!();
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await turn();
+    await turn();
+    await turn();
   }
   return cond();
 }
@@ -45,6 +58,15 @@ class Point {
     return other instanceof Point && other.x === this.x && other.y === this.y;
   }
 }
+
+type G = { requestIdleCallback?: unknown; setImmediate?: unknown };
+const g = globalThis as G;
+const realSetImmediate = g.setImmediate;
+afterEach(() => {
+  delete g.requestIdleCallback;
+  g.setImmediate = realSetImmediate;
+  _drainNow();
+});
 
 describe('InternPool — canonicality', () => {
   it('intern() collapses equal instances to one ===', () => {
@@ -68,96 +90,149 @@ describe('InternPool — canonicality', () => {
     expect(pool.lookup(42, (x) => x.v === 4)).toBeUndefined();
     expect(pool.lookup(7, () => true)).toBeUndefined();
     expect(pool.size()).toBe(3);
+    expect(_bucketCount(pool)).toBe(1);
   });
-});
 
-describe('InternPool — circle invariants', () => {
-  it('registrations link records; linkage stays valid; slots are accounted', () => {
-    const before = _circleState(); // validates linkage as a side effect
+  it('one bucket per hash; size counts members', () => {
     const pool = createInternPool<{ v: number }>();
     const held: object[] = [];
     for (let i = 0; i < 100; i++) held.push(pool.register({ v: i }, i));
-    const after = _circleState();
-    expect(after.records - before.records).toBe(100);
-    expect(after.slots - before.slots).toBe(100);
+    expect(_bucketCount(pool)).toBe(100);
+    expect(pool.size()).toBe(100);
     expect(held.length).toBe(100);
-  });
-
-  it('a collision bucket is one record with several slots', () => {
-    const before = _circleState();
-    const pool = createInternPool<{ v: number }>();
-    const held = [pool.register({ v: 1 }, 5), pool.register({ v: 2 }, 5), pool.register({ v: 3 }, 5)];
-    const after = _circleState();
-    expect(after.records - before.records).toBe(1);
-    expect(after.slots - before.slots).toBe(3);
-    expect(held.length).toBe(3);
   });
 });
 
 describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => {
-  it('sweeping removes dead members and their records', async () => {
+  it('dead members leave the pool and their buckets are reclaimed (setImmediate drain)', async () => {
     const pool = createInternPool<{ v: number }>();
-    const before = _circleState();
     // Register in a callee so nothing on this frame retains the values.
     (function registerDoomed() {
       for (let i = 0; i < 200; i++) pool.register({ v: i }, 1_000_000 + i);
     })();
-    const grown = _circleState();
-    expect(grown.records - before.records).toBe(200);
-
-    const cleaned = await collectUntil(() => {
-      _sweepNow(10_000); // more than one full pass over everything in the circle
-      return pool.size() === 0;
-    });
+    expect(_bucketCount(pool)).toBe(200);
+    const cleaned = await collectUntil(() => pool.size() === 0 && _bucketCount(pool) === 0);
     expect(cleaned).toBe(true);
-
-    const swept = _circleState();
-    expect(swept.records - before.records).toBeLessThanOrEqual(0);
-    expect(swept.slots).toBeLessThanOrEqual(grown.slots - 200);
+    expect(_pendingCount()).toBe(0); // the drain ran; nothing left parked
   });
 
-  it('a dead singleton is replaced in place on re-registration (record reused)', async () => {
+  it('deaths are parked for idle time when requestIdleCallback exists, and drained there', async () => {
+    const idleCallbacks: Array<(d: { timeRemaining(): number }) => void> = [];
+    g.requestIdleCallback = (cb: (d: { timeRemaining(): number }) => void) => {
+      idleCallbacks.push(cb);
+    };
+    const pool = createInternPool<{ v: number }>();
+    (function registerDoomed() {
+      for (let i = 0; i < 300; i++) pool.register({ v: i }, 3_000_000 + i);
+    })();
+    // Wait for the deaths to be REPORTED (parked), not reclaimed: with a fake
+    // rIC that never fires, buckets stay until we run the idle callback.
+    const parked = await collectUntil(() => _pendingCount() >= 300);
+    expect(parked).toBe(true);
+    expect(pool.size()).toBe(0); // deref() is already undefined…
+    expect(_bucketCount(pool)).toBe(300); // …but the bookkeeping waits for idle time
+    expect(idleCallbacks.length).toBe(1); // scheduled once, not once per death
+
+    // Idle time arrives, in a deadline-bounded slice.
+    let budget = 2;
+    idleCallbacks.shift()!({ timeRemaining: () => budget-- });
+    expect(_bucketCount(pool)).toBeLessThan(300); // progress…
+    expect(idleCallbacks.length).toBe(1); // …and rescheduled for the rest
+    idleCallbacks.shift()!({ timeRemaining: () => 50 });
+    expect(_bucketCount(pool)).toBe(0);
+    expect(_pendingCount()).toBe(0);
+  });
+
+  it('with neither requestIdleCallback nor setImmediate, deaths are reclaimed inline', async () => {
+    delete g.requestIdleCallback;
+    g.setImmediate = undefined;
+    try {
+      const pool = createInternPool<{ v: number }>();
+      (function registerDoomed() {
+        for (let i = 0; i < 100; i++) pool.register({ v: i }, 4_000_000 + i);
+      })();
+      // Nothing can be parked, so the only way to zero buckets is inline reclaim.
+      for (let round = 0; round < 20 && _bucketCount(pool) > 0; round++) {
+        await new Promise((r) => (realSetImmediate as typeof setImmediate)(r));
+        gc!();
+        await new Promise((r) => (realSetImmediate as typeof setImmediate)(r));
+        await new Promise((r) => (realSetImmediate as typeof setImmediate)(r));
+      }
+      expect(_bucketCount(pool)).toBe(0);
+      expect(_pendingCount()).toBe(0);
+    } finally {
+      g.setImmediate = realSetImmediate;
+    }
+  });
+
+  it('a dead singleton is replaced in place on re-registration, before or after its reclaim', async () => {
     const pool = createInternPool<{ v: number }>();
     (function registerDoomed() {
       pool.register({ v: 1 }, 77);
     })();
     expect(await collectUntil(() => pool.size() === 0)).toBe(true);
-
-    const before = _circleState();
     const fresh = pool.register({ v: 2 }, 77);
-    const after = _circleState();
-    // Normally the dead singleton's record is reused in place (delta 0); a
-    // backstop slice during collection may have already removed it (delta 1).
-    expect(after.records - before.records).toBeLessThanOrEqual(1);
+    expect(_bucketCount(pool)).toBe(1);
     expect(pool.lookup(77, (x) => x.v === 2)).toBe(fresh);
     expect(pool.size()).toBe(1);
+    // A late reclaim of the OLD slot must not evict the new member.
+    _drainNow();
+    expect(pool.lookup(77, (x) => x.v === 2)).toBe(fresh);
   });
 
-  it('survivors stay canonical across sweeps', async () => {
+  it('a collision bucket prunes dead members in passing and demotes to a singleton', async () => {
+    g.requestIdleCallback = () => {}; // park deaths; never drain
+    const pool = createInternPool<{ v: number }>();
+    const keep = pool.register({ v: 0 }, 55);
+    (function registerDoomed() {
+      pool.register({ v: 1 }, 55);
+      pool.register({ v: 2 }, 55);
+    })();
+    expect(await collectUntil(() => pool.size() === 1)).toBe(true);
+    // Reclaims are parked; the next register into this bucket prunes anyway.
+    const added = pool.register({ v: 3 }, 55);
+    expect(pool.size()).toBe(2);
+    expect(pool.lookup(55, (x) => x.v === 0)).toBe(keep);
+    expect(pool.lookup(55, (x) => x.v === 3)).toBe(added);
+    // Draining the stale reclaims afterwards is a no-op on the pruned bucket.
+    _drainNow();
+    expect(pool.size()).toBe(2);
+    expect(_bucketCount(pool)).toBe(1);
+  });
+
+  it('survivors stay canonical across reclamation', async () => {
     const pool = createInternPool<Point>();
     const keep = pool.intern(new Point(9, 9));
     (function registerDoomed() {
       for (let i = 0; i < 100; i++) pool.intern(new Point(i, 1000));
     })();
-    const cleaned = await collectUntil(() => {
-      _sweepNow(10_000);
-      return pool.size() === 1;
-    });
-    expect(cleaned).toBe(true);
+    expect(await collectUntil(() => pool.size() === 1)).toBe(true);
     expect(pool.intern(new Point(9, 9))).toBe(keep);
   });
 
-  it('the GC-epoch backstop reclaims without any pool traffic', async () => {
-    expect(_circleState().backstopArmed).toBe(true);
-    const pool = createInternPool<{ v: number }>();
+  it('a dropped pool is not retained by its dying members', async () => {
+    let pool: ReturnType<typeof createInternPool<{ v: number }>> | null = createInternPool();
     (function registerDoomed() {
-      for (let i = 0; i < 500; i++) pool.register({ v: i }, 2_000_000 + i);
+      for (let i = 0; i < 50; i++) pool!.register({ v: i }, 5_000_000 + i);
     })();
-    const grown = _circleState();
+    pool = null; // the pool and its bucket map are now garbage too
+    // Reclaims of its slots must not throw when the owner is gone.
+    expect(await collectUntil(() => _pendingCount() === 0, 10)).toBe(true);
+  });
 
-    // No further pool operations: only GC epochs may clean. The backstop
-    // sweeps a bounded slice per epoch, so allow several rounds.
-    const cleaned = await collectUntil(() => _circleState().slots < grown.slots);
-    expect(cleaned).toBe(true);
+  it('past the stack bound, deaths are reclaimed inline (memory stays bounded)', async () => {
+    g.requestIdleCallback = () => {}; // idle never comes
+    const pool = createInternPool<{ v: number }>();
+    const N = _MAX_PENDING + 2_000;
+    (function registerDoomed() {
+      for (let i = 0; i < N; i++) pool.register({ v: i }, 6_000_000 + i);
+    })();
+    const reported = await collectUntil(() => _bucketCount(pool) <= N - 1_000, 40);
+    expect(reported).toBe(true);
+    // The stack filled to its bound; every death past it was reclaimed inline.
+    expect(_pendingCount()).toBeLessThanOrEqual(_MAX_PENDING);
+    expect(_bucketCount(pool)).toBeLessThanOrEqual(_MAX_PENDING);
+    _drainNow();
+    expect(_bucketCount(pool)).toBe(0);
   });
 });

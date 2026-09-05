@@ -29,8 +29,8 @@
 //     within a process because members are compared by identity, so equal
 //     content means the same instances).
 //
-// Node pools ride the shared incremental sweeper (intern-pool.ts), which was
-// sized for exactly this node-registration traffic.
+// Node pools are ordinary intern pools (intern-pool.ts): every consed node is
+// a weakly-held pool member, reclaimed in idle time once unreferenced.
 // ---------------------------------------------------------------------------
 
 import { createInternPool, type InternPool } from './intern-pool.js';

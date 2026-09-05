@@ -1,161 +1,147 @@
 // ---------------------------------------------------------------------------
-// intern-pool — weak pools with a global incremental sweeper.
+// intern-pool — weak pools; the engine reports deaths, idle time buries them.
 //
-// Every pool is a Map<hash, bucket record>; a bucket inlines the singleton
-// case (overwhelmingly common under a seeded 32-bit hash) — `refs` is one
-// WeakRef until a genuine collision promotes it to an array. The records of
-// ALL pools sit in one circular doubly-linked list, and dead refs are
-// reclaimed by an incremental sweeper whose cursor advances around that
-// circle. The cleanup bill is split three ways:
+// A pool is a Map<hash, bucket>; a bucket is one Slot (the overwhelmingly
+// common singleton case under a seeded 32-bit hash) or an array on a
+// genuine collision. A Slot IS the WeakRef to the pooled object, carrying
+// its hash and a shared WeakRef to the owning bucket map — one allocation
+// per registration, and the registry's holdings are the slot itself.
 //
-//   * registrations pay the traffic tax — REGISTER_BUDGET slots of sweep
-//     credit each, accrued through a pending counter so the fixed cost of a
-//     sweep call lands once per TICK_THRESHOLD operations;
-//   * GC epochs pay the death tax — ONE FinalizationRegistry sentinel (O(1)
-//     cells total, never per entry) fires after each GC — the only event
-//     that can create dead refs — and runs one bounded sweep slice;
-//   * lookups pay nothing.
+// Cleanup is driven by ONE global FinalizationRegistry: a pooled object's
+// death is reported once, by the engine, after the major GC that clears
+// its WeakRef (the only time anything can be dead — scavenges never clear
+// WeakRefs). The callback does the minimum — push the slot on a stack —
+// and the actual bucket surgery runs when the thread is otherwise idle:
 //
-// A record whose bucket empties unlinks itself and deletes its map entry
-// through a per-pool WeakRef to the owning map (one shared WeakRef per pool).
-// A dropped pool's records unlink wholesale as the cursor meets them; its
-// records whose values still live are visited as live until those values die.
+//   * requestIdleCallback where it exists (browser windows): the work lands
+//     in time the host has declared worthless, in deadline-bounded slices;
+//   * else setImmediate (Node, Bun): bounded slices, one per event-loop
+//     turn, so a large post-GC batch never becomes one long task;
+//   * else no deferral — the slot is reclaimed inside the callback.
 //
-// The guarantee: dead pool metadata anywhere is reclaimed within
-// O(total metadata / budget) subsequent registrations, or a few GC epochs,
-// whichever comes first. If all traffic and GC stop, stranded metadata is
-// frozen at its instantaneous footprint — and pooled values themselves are
-// never retained at all. Nothing grows without traffic; everything shrinks
-// with any traffic. Cleanup is a bounded tax: no monolithic sweep pass, no
-// per-entry FinalizationRegistry, no timers.
+// The stack is bounded (MAX_PENDING); past the bound, deaths are reclaimed
+// inline until idle time drains it. Order is irrelevant — every reclaim is
+// independent — so LIFO push/pop is the cheapest correct structure.
 //
-// Requires WeakRef. FinalizationRegistry is optional — used, when present,
-// only as the GC-epoch backstop (without it, cleanup is traffic-driven only).
-// This design was chosen over per-entry FinalizationRegistry and over
-// monolithic threshold sweeps on measurement (scripts/pool-gc-bench.mjs):
-// equal-or-better wall time, in-batch and post-GC pauses at baseline GC
-// levels, and geometrically-converging dormancy cleanup.
+// What this replaced: an incremental sweeper that walked every pool's
+// buckets in bounded slices on a registration-driven schedule. Measured end
+// to end (frame-loop, pool churn, and collection benchmarks, on V8 and JSC),
+// that schedule did nothing between major GCs — nothing was ever dead — and
+// its per-registration tax was the only thing it reliably delivered.
+//
+// Requires WeakRef and FinalizationRegistry (ES2021; every supported
+// runtime ships both).
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 
-const REGISTER_BUDGET = 2; // ref slots of sweep credit per registration
-const TICK_THRESHOLD = 16; // run the sweeper once this much credit accrues
-const BACKSTOP_MIN_SLICE = 1024; // GC-epoch slice floor …
-const BACKSTOP_MAX_SLICE = 32_768; // … and cap: the slice is a pause too
-
-/** A bucket record: one hash's weak members, linked into the global circle. */
-interface Node {
-  hash: number;
-  /** Shared WeakRef to the owning pool's bucket map; null only on the sentinel. */
-  owner: WeakRef<Map<number, Node>> | null;
-  /** One WeakRef (singleton bucket) or an array (true hash collision); null only on the sentinel. */
-  refs: WeakRef<object> | WeakRef<object>[] | null;
-  prev: Node;
-  next: Node;
+/** A pooled member: the WeakRef itself, plus what reclaiming it needs. */
+class Slot extends WeakRef<object> {
+  constructor(
+    target: object,
+    readonly hash: number,
+    /** Shared WeakRef to the owning pool's bucket map — a dropped pool is not retained by its dying members. */
+    readonly owner: WeakRef<Map<number, Bucket>>,
+  ) {
+    super(target);
+  }
 }
 
-// The sentinel keeps the circle non-empty; the sweeper skips it free of charge.
-const sentinel: Node = {
-  hash: 0,
-  owner: null,
-  refs: null,
-  prev: undefined as unknown as Node,
-  next: undefined as unknown as Node,
+type Bucket = Slot | Slot[];
+
+/** Remove a dead slot from its bucket. Idempotent: tolerates "already pruned". */
+function reclaim(slot: Slot): void {
+  const buckets = slot.owner.deref();
+  if (buckets === undefined) return; // the pool itself is gone
+  const b = buckets.get(slot.hash);
+  if (b === undefined) return;
+  if (b === slot) {
+    buckets.delete(slot.hash);
+  } else if (Array.isArray(b)) {
+    const i = b.indexOf(slot);
+    if (i >= 0) b.splice(i, 1);
+    if (b.length === 1) buckets.set(slot.hash, b[0]!);
+    else if (b.length === 0) buckets.delete(slot.hash);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deferred reclamation
+// ---------------------------------------------------------------------------
+
+const MAX_PENDING = 100_000; // slots parked for idle time before deaths are reclaimed inline
+const IMMEDIATE_SLICE = 4096; // slots per setImmediate turn (~0.5 ms)
+const IDLE_MIN_SLICE = 64; // always make progress, even on a zero-remaining deadline
+
+/** Dead slots awaiting idle time. LIFO — reclaims are independent, order is free. */
+const pending: Slot[] = [];
+let scheduled = false;
+
+// Structural globalThis access: this module compiles against neither the
+// DOM nor the Node ambient globals. Looked up at schedule time, not import
+// time — one typeof per drain, and a test can install a fake.
+interface IdleDeadline {
+  timeRemaining(): number;
+}
+const _g = globalThis as {
+  requestIdleCallback?: (cb: (deadline: IdleDeadline) => void) => unknown;
+  setImmediate?: (cb: () => void) => unknown;
 };
-sentinel.prev = sentinel;
-sentinel.next = sentinel;
 
-let cursor: Node = sentinel;
-let slots = 0; // ref slots in the circle (live + not-yet-swept dead)
-let pending = 0; // accrued sweep credit not yet spent
-
-/** Insert just behind the cursor: a fresh bucket is visited last. */
-function link(record: Node): void {
-  const at = cursor;
-  const before = at.prev;
-  before.next = record;
-  record.prev = before;
-  record.next = at;
-  at.prev = record;
+function canDefer(): boolean {
+  return typeof _g.requestIdleCallback === 'function' || typeof _g.setImmediate === 'function';
 }
 
-/** Detach from the circle; self-loops mark the record unlinked. */
-function unlink(record: Node): void {
-  record.prev.next = record.next;
-  record.next.prev = record.prev;
-  record.prev = record;
-  record.next = record;
-}
-
-function tick(credit: number): void {
-  pending += credit;
-  if (pending >= TICK_THRESHOLD) {
-    const budget = pending;
-    pending = 0;
-    sweep(budget);
+function schedule(): void {
+  if (scheduled) return;
+  if (typeof _g.requestIdleCallback === 'function') {
+    scheduled = true;
+    _g.requestIdleCallback(drainIdle);
+  } else if (typeof _g.setImmediate === 'function') {
+    scheduled = true;
+    _g.setImmediate(drainImmediate);
   }
 }
 
-function sweep(budget: number): void {
-  let node = cursor;
-  while (budget > 0) {
-    if (node === sentinel) {
-      node = node.next;
-      if (node === sentinel) break; // circle is empty
-      continue;
-    }
-    const next = node.next;
-    const refs = node.refs!;
-    // The owner WeakRef is deref'd ONLY on the removal path: live visits (the
-    // overwhelmingly common case) touch just the member ref itself.
-    if (Array.isArray(refs)) {
-      budget -= refs.length;
-      let w = 0;
-      for (let r = 0; r < refs.length; r++) {
-        if (refs[r]!.deref() !== undefined) refs[w++] = refs[r]!;
-      }
-      slots -= refs.length - w;
-      refs.length = w;
-      if (w === 0) {
-        node.owner!.deref()?.delete(node.hash);
-        unlink(node);
-      } else if (w === 1) {
-        node.refs = refs[0]!; // demote back to the singleton form
-      }
-    } else {
-      budget -= 1;
-      if (refs.deref() === undefined) {
-        slots -= 1;
-        node.owner!.deref()?.delete(node.hash);
-        unlink(node);
-      }
-    }
-    node = next;
+function drainIdle(deadline: IdleDeadline): void {
+  scheduled = false;
+  let n = 0;
+  while (pending.length > 0 && (n < IDLE_MIN_SLICE || deadline.timeRemaining() > 1)) {
+    reclaim(pending.pop()!);
+    n++;
   }
-  cursor = node;
+  if (pending.length > 0) schedule();
 }
 
-// The GC-epoch backstop. The registry must be reachable from a module-level
-// binding: an unreferenced FinalizationRegistry is itself collected and its
-// callbacks silently stop (measured, not theorized).
-let backstop: FinalizationRegistry<number> | undefined;
-if (typeof FinalizationRegistry === 'function') {
-  const registry = new FinalizationRegistry<number>(() => {
-    sweep(Math.min(Math.max(BACKSTOP_MIN_SLICE, slots >> 1), BACKSTOP_MAX_SLICE));
-    arm();
-  });
-  const arm = (): void => registry.register({}, 0);
-  backstop = registry;
-  arm();
+function drainImmediate(): void {
+  scheduled = false;
+  for (let n = 0; n < IMMEDIATE_SLICE && pending.length > 0; n++) reclaim(pending.pop()!);
+  if (pending.length > 0) schedule();
 }
+
+// The registry must be reachable from a module-level binding: an
+// unreferenced FinalizationRegistry is itself collected and its callbacks
+// silently stop (measured, not theorized).
+const registry = new FinalizationRegistry<Slot>((slot) => {
+  if (pending.length >= MAX_PENDING || !canDefer()) {
+    reclaim(slot);
+    return;
+  }
+  pending.push(slot);
+  schedule();
+});
+
+// ---------------------------------------------------------------------------
+// Pools
+// ---------------------------------------------------------------------------
 
 /**
  * A typed, weakly-held pool of canonical instances of `T`.
  *
- * Members are retained via `WeakRef` and reclaimed by the shared incremental
- * sweeper (see the module header), so an instance leaves the pool once
- * nothing else references it. This backs the persistent
+ * Members are retained via `WeakRef` and leave the pool once nothing else
+ * references them: the engine reports each death after the major GC that
+ * collects it, and the pool's bookkeeping is reclaimed in idle time (see the
+ * module header). This backs the persistent
  * {@link ValueList}/{@link ValueMap}/{@link ValueSet}/{@link InternedString}
  * collections and any consumer value type (see {@link createInternPool}).
  *
@@ -177,7 +163,7 @@ export interface InternPool<T extends object> {
   /**
    * Register a freshly-allocated instance with its hash. The instance is
    * weakly retained; once unreferenced elsewhere it will be GC'd and its
-   * pool metadata reclaimed by the sweeper.
+   * pool metadata reclaimed.
    */
   register(value: T, hash: number): T;
 
@@ -198,54 +184,39 @@ export interface InternPool<T extends object> {
 }
 
 class InternPoolImpl<T extends object> implements InternPool<T> {
-  readonly #buckets = new Map<number, Node>();
+  readonly #buckets = new Map<number, Bucket>();
   readonly #owner = new WeakRef(this.#buckets); // ONE shared WeakRef per pool
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
-    const record = this.#buckets.get(hash);
-    if (record === undefined) return undefined;
-    const refs = record.refs!;
-    if (Array.isArray(refs)) {
-      for (const ref of refs) {
-        const candidate = ref.deref();
+    const b = this.#buckets.get(hash);
+    if (b === undefined) return undefined;
+    if (Array.isArray(b)) {
+      for (const slot of b) {
+        const candidate = slot.deref();
         if (candidate !== undefined && predicate(candidate as T)) return candidate as T;
       }
       return undefined;
     }
-    const candidate = refs.deref();
+    const candidate = b.deref();
     return candidate !== undefined && predicate(candidate as T) ? (candidate as T) : undefined;
   }
 
   register(value: T, hash: number): T {
-    tick(REGISTER_BUDGET);
-    const record = this.#buckets.get(hash);
-    if (record === undefined) {
-      const fresh: Node = {
-        hash,
-        owner: this.#owner,
-        refs: new WeakRef(value),
-        prev: sentinel,
-        next: sentinel,
-      };
-      this.#buckets.set(hash, fresh);
-      link(fresh);
-      slots += 1;
-    } else if (Array.isArray(record.refs)) {
-      // Prune dead in passing, then append.
-      const refs = record.refs;
+    const slot = new Slot(value, hash, this.#owner);
+    registry.register(value, slot);
+    const b = this.#buckets.get(hash);
+    if (b === undefined) {
+      this.#buckets.set(hash, slot);
+    } else if (Array.isArray(b)) {
+      // Prune dead members in passing (their reclaim may still be pending), then append.
       let w = 0;
-      for (let r = 0; r < refs.length; r++) {
-        if (refs[r]!.deref() !== undefined) refs[w++] = refs[r]!;
-      }
-      slots -= refs.length - w;
-      refs.length = w;
-      refs.push(new WeakRef(value));
-      slots += 1;
-    } else if (record.refs!.deref() === undefined) {
-      record.refs = new WeakRef(value); // replace the dead singleton in place
+      for (let r = 0; r < b.length; r++) if (b[r]!.deref() !== undefined) b[w++] = b[r]!;
+      b.length = w;
+      b.push(slot);
+    } else if (b.deref() === undefined) {
+      this.#buckets.set(hash, slot); // replace the dead singleton in place
     } else {
-      record.refs = [record.refs as WeakRef<object>, new WeakRef(value)];
-      slots += 1;
+      this.#buckets.set(hash, [b, slot]);
     }
     return value;
   }
@@ -253,10 +224,11 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   intern(object: T): T {
     if ((object as Record<symbol, unknown>)[internedSym] === true) return object;
     const hash = (object as Record<symbol, unknown>)[hashCodeSym] as number;
-    const found = this.lookup(hash, c => {
-      const eq = (object as Record<symbol, unknown>)[equalsSym];
-      return typeof eq === 'function' && !!(eq as (other: unknown) => boolean).call(object, c);
-    });
+    const eq = (object as Record<symbol, unknown>)[equalsSym];
+    const found = this.lookup(
+      hash,
+      (c) => typeof eq === 'function' && !!(eq as (other: unknown) => boolean).call(object, c),
+    );
     if (found !== undefined) return found;
     (object as Record<symbol, unknown>)[internedSym] = true;
     Object.freeze(object);
@@ -265,15 +237,19 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
   size(): number {
     let n = 0;
-    for (const record of this.#buckets.values()) {
-      const refs = record.refs!;
-      if (Array.isArray(refs)) {
-        for (const ref of refs) if (ref.deref() !== undefined) n++;
-      } else if (refs.deref() !== undefined) {
+    for (const b of this.#buckets.values()) {
+      if (Array.isArray(b)) {
+        for (const slot of b) if (slot.deref() !== undefined) n++;
+      } else if (b.deref() !== undefined) {
         n++;
       }
     }
     return n;
+  }
+
+  /** @internal Test-only: bucket count, live or not (what reclaim shrinks). */
+  _bucketCount(): number {
+    return this.#buckets.size;
   }
 }
 
@@ -314,31 +290,22 @@ export function createInternPool<T extends object>(): InternPool<T> {
 // Test-only inspection hooks (not exported from the package barrel)
 // ---------------------------------------------------------------------------
 
-/** @internal Test-only: run the sweeper for exactly `budget` ref slots. */
-export function _sweepNow(budget: number): void {
-  sweep(budget);
+/** @internal Test-only: dead slots parked for idle time. */
+export function _pendingCount(): number {
+  return pending.length;
 }
 
-/**
- * @internal Test-only: circle statistics with full linkage validation —
- * throws if the circular list is corrupted.
- */
-export function _circleState(): {
-  records: number;
-  slots: number;
-  pending: number;
-  backstopArmed: boolean;
-} {
-  let records = 0;
-  let prev: Node = sentinel;
-  let node = sentinel.next;
-  while (node !== sentinel) {
-    if (node.prev !== prev) throw new Error('intern-pool circle corrupted: prev linkage');
-    records++;
-    if (records > 100_000_000) throw new Error('intern-pool circle corrupted: unterminated');
-    prev = node;
-    node = node.next;
-  }
-  if (sentinel.prev !== prev) throw new Error('intern-pool circle corrupted: tail linkage');
-  return { records, slots, pending, backstopArmed: backstop !== undefined };
+/** @internal Test-only: reclaim every parked slot now, synchronously. */
+export function _drainNow(): number {
+  const n = pending.length;
+  while (pending.length > 0) reclaim(pending.pop()!);
+  return n;
 }
+
+/** @internal Test-only: buckets in a pool, live or awaiting reclaim. */
+export function _bucketCount(pool: InternPool<object>): number {
+  return (pool as InternPoolImpl<object>)._bucketCount();
+}
+
+/** @internal Test-only: the stack bound. */
+export const _MAX_PENDING = MAX_PENDING;

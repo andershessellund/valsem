@@ -6,7 +6,7 @@
 // under a left-complete 32-ary branch structure, plus a tail of the last
 // 1..32 elements — which is exactly what hash consing requires. Every node
 // (trunk leaves, branches, and the tail, which is itself a leaf node) is
-// interned through the sweeper-backed pool: children cons before parents, so
+// interned through a weak pool: children cons before parents, so
 // equal content converges on the same nodes process-wide, however it was
 // built (push sequences, from(), set/pop detours — all one canonical
 // instance), and [equals] is two pointer comparisons (root and tail).
