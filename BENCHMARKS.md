@@ -99,9 +99,10 @@ silent wrong answer (`deepEqual({ [s]: 1 }, { [s]: 2 })` used to be `true`).
 
 ## memoize
 
-`pnpm bench:memoize`. A memo hit follows the same rule as everything else:
-O(1) on canonical arguments, a structural walk on raw ones. A selector over
-100 items (filter + map, 241 ns to recompute):
+`pnpm bench:memoize`. memoize is built on valsem's premise — state is
+interned when it is constructed, so everything downstream is O(1) — and the
+numbers split cleanly into "used as intended" and "not". A selector over 100
+items (filter + map, 241 ns to recompute):
 
 | call | ns |
 | --- | --- |
@@ -112,12 +113,24 @@ O(1) on canonical arguments, a structural walk on raw ones. A selector over
 | hit, `maxSize` 8, working set of 8 | 52 |
 | miss + evict, `maxSize` 8, working set of 9 | 4,900 |
 
-Raw arguments cost ~100 ns per record node per hit (321 ns for a 3-key
-record, 22 µs for 200 keys; canonical: 32–36 ns at any width), so on raw
-data memoization only wins when the function is dearer than a walk of its
-arguments. The design follows: arguments must be values, results are
-interned, and the recommended shape is canonical state in, small fresh
-config object beside it.
+The first three rows are the intended use: canonical state, possibly with
+a small config literal built fresh beside it (which a reference-keyed
+memoizer misses every time). The raw-arguments row is what skipping the
+boundary costs: ~100 ns per record node per hit (321 ns for a 3-key record,
+22 µs for 200 keys; canonical: 32–36 ns at any width), against ~12 ns per
+node for a `JSON.stringify` cache key — which is faster on raw data and
+wrong in general (key-order-sensitive, blind to `undefined`, `NaN`,
+symbols, and every valsem collection). Intern at the boundary and the
+question does not arise.
+
+Two designs were measured and rejected. Keying an identity `Map` on the
+first argument (lodash's 13 ns path, correct here because canonical `===`
+is value equality) degrades to a linear scan whenever many entries share a
+first argument — the common selector shape. Building on `HashMap` saves 300
+bytes gzipped and costs 2–2.5× on every hit (two canonical arguments: 55 →
+133 ns) and 3.75× on primitive-argument misses, because `intern(args)`
+copies the tuple, pools it (a WeakRef per novel call), and freezes it, where
+a hash fold over the arguments allocates nothing.
 
 ## The value collections vs Immutable.js
 

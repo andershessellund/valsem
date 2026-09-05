@@ -10,11 +10,14 @@
 // instance, which is also what makes a mutable result impossible — a
 // function returning something valsem cannot canonicalise is rejected.
 //
-// The cost follows the same rule as `deepEqual` and `HashMap`: a hit on
-// canonical arguments is O(1) — their hash is cached and equality is `===` —
-// while raw arguments are hashed and compared structurally on every call,
-// so on raw data memoization only wins when the function is dearer than a
-// walk of its arguments (~40 ns per node).
+// Built on valsem's premise: state is interned when it is constructed, so
+// everything downstream is O(1). Used as intended — canonical arguments — a
+// hit is ~40 ns at any size: the hash is on the value, equality is `===`.
+// Used otherwise — raw payloads — it is slow: every call hashes and compares
+// the arguments structurally (~100 ns per record node), which is easily
+// dearer than recomputing. Not built on HashMap on purpose: `intern(args)`
+// copies, pools and freezes the tuple per call, measured at 2–2.5× the hit
+// cost of the hash fold below for 300 bytes of bundle (BENCHMARKS.md).
 //
 // Eviction is LRU over `maxSize` entries (default 1: "the same call as last
 // time", the reselect default). The cache holds its arguments and results

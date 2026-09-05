@@ -14,7 +14,7 @@
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
 | `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |
 | `nothing` / `isDraft` | symbol / function | Recipe sentinel for "result is `undefined`"; draft detection. |
-| `memoize(fn, { maxSize })` | function | A pure function of values, remembered by content: equal argument tuples return the same interned result. LRU over `maxSize` (default 1). O(1) hits on canonical arguments; a structural walk on raw ones. |
+| `memoize(fn, { maxSize })` | function | A pure function of values, remembered by content: equal argument tuples return the same interned result. LRU over `maxSize` (default 1). Fast as intended — O(1) hits (~40 ns) on canonical arguments — and slow otherwise: raw arguments are hashed and compared on every call. Intern your state first, as everywhere in valsem. |
 | `current(draft)` / `original(draft)` | function | Inside a recipe: the canonical value of what the draft holds right now (the draft stays live), and the base it was made from. `Undraft<D>` is their return type — the inverse of `Draft<T>`. Tree-shake with `produce`: a bundle that never calls them carries neither. |
 | `DraftMap` / `DraftSet` / `DraftList` | class | Mutable draft twins of the collections, handed out inside `produce`; `get()` returns drafts (`Draft<V>`). |
 | `toDraft` | symbol | The draft protocol: implement `[toDraft](parent)` to make a type draftable; `Draft<T>` infers a type's draft from it. Toolkit in `valsem/draft`. |

@@ -159,12 +159,17 @@ visible(state.todos, { done: false }); // runs
 visible(state.todos, { done: false }); // ~40 ns, and the SAME array instance — a fresh literal is the same value
 ```
 
-Arguments are matched by value, not by reference, so a config object built on
-every render still hits. Results are interned: equal calls return `===`
-results, and a function returning something valsem cannot canonicalise is
-rejected rather than shared. `maxSize` is an LRU bound (default 1, the
-"same call as last time" memo). The cost rule is `HashMap`'s: canonical
-arguments hit in O(1); raw ones are walked, so memoize state, not payloads.
+Built on the premise the rest of valsem runs on: you interned your state when
+it was constructed, so a hit on canonical arguments is **O(1) at any size**,
+about 40 ns, because the hash is already on the value and equality is `===`.
+A small config literal built fresh each call still hits, matched by value
+(~200 ns for a few keys) — the case reference-keyed memoizers miss every
+time. Hand it raw payloads instead and it is **slow**: a full hash-and-compare
+walk per call, easily dearer than recomputing. Memoize canonical state, not
+raw data. Results are interned: equal calls return `===` results, and a
+function returning something valsem cannot canonicalise is rejected rather
+than shared. `maxSize` is an LRU bound (default 1, the "same call as last
+time" memo).
 
 ### `ValueMap`, `ValueSet`, `ValueList` — canonical immutable collections
 
