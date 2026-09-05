@@ -269,3 +269,19 @@ describe('deepHash — diagnostic for unregistered Temporal', () => {
     );
   });
 });
+
+describe('deepHash — own keys only (prototype pollution cannot split the invariant)', () => {
+  it('an Object.prototype record and an equal null-prototype record hash alike under pollution', () => {
+    const a = { x: 1 };
+    const b = Object.assign(Object.create(null), { x: 1 }) as Record<string, unknown>;
+    expect(deepEqual(a, b)).toBe(true);
+    (Object.prototype as unknown as Record<string, unknown>)['polluted'] = 7;
+    try {
+      expect(deepEqual(a, b)).toBe(true);
+      expect(deepHash(a)).toBe(deepHash(b));
+      expect(deepHash({ x: 1 })).toBe(deepHash(a));
+    } finally {
+      delete (Object.prototype as unknown as Record<string, unknown>)['polluted'];
+    }
+  });
+});

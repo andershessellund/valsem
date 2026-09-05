@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ValueSet } from './value-set.js';
-import { interned } from './deep-equal.js';
+import { equals, interned } from './deep-equal.js';
 
 describe('ValueSet', () => {
   it('empty sets are identical', () => {
@@ -100,5 +100,16 @@ describe('ValueSet — encapsulation & the ReadonlySet contract', () => {
     copy.add(2);
     expect(copy.size).toBe(2);
     expect(s.size).toBe(1);
+  });
+});
+
+describe('ValueSet — [equals]', () => {
+  it('is root identity for ValueSets and false for anything else', () => {
+    const a = ValueSet.from([1, 2]);
+    expect(a[equals](ValueSet.from([2, 1]))).toBe(true);
+    expect(a[equals](ValueSet.from([1, 2, 3]))).toBe(false);
+    expect(a[equals](new Set([1, 2]))).toBe(false);
+    expect(a[equals]([1, 2])).toBe(false);
+    expect(a[equals](null)).toBe(false);
   });
 });

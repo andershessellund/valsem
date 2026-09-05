@@ -9,6 +9,7 @@ import {
   DraftMap,
   DraftSet,
   DraftList,
+  type Patch,
 } from './produce.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
@@ -396,6 +397,33 @@ describe('produceWithPatches — semantic patches, both directions', () => {
     expect(patches).toEqual([{ kind: 'replace', path: [], value: intern({ b: 2 }) }]);
     expect(applyPatches(base, patches)).toBe(result);
     expect(applyPatches(result, inverse)).toBe(base);
+  });
+
+  it('applyPatches applies strictly in order — a replace does not jump the queue', () => {
+    const base = intern({ a: 1 });
+    const patches: Patch[] = [
+      { kind: 'record.set', path: [], key: 'b', value: 2 },
+      { kind: 'replace', path: [], value: { z: 9 } },
+    ];
+    expect(applyPatches(base, patches)).toBe(intern({ z: 9 }));
+
+    // …and edits AFTER a replace land on the replacement.
+    const patches2: Patch[] = [
+      { kind: 'record.set', path: [], key: 'b', value: 2 },
+      { kind: 'replace', path: [], value: { z: 9 } },
+      { kind: 'record.set', path: [], key: 'w', value: 3 },
+    ];
+    expect(applyPatches(base, patches2)).toBe(intern({ z: 9, w: 3 }));
+
+    // A replace, then a run, then another replace: the middle run is discarded
+    // by the second replace, exactly as sequential application would.
+    const patches3: Patch[] = [
+      { kind: 'replace', path: [], value: { z: 9 } },
+      { kind: 'record.set', path: [], key: 'w', value: 3 },
+      { kind: 'replace', path: [], value: { q: 0 } },
+    ];
+    expect(applyPatches(base, patches3)).toBe(intern({ q: 0 }));
+    expect(() => applyPatches(base, [{ kind: 'replace', path: ['x'], value: 1 }])).toThrow(/root/);
   });
 
   it('no-change recipes emit no patches', () => {

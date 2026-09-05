@@ -56,12 +56,15 @@ export class HashMap<K, V> {
    * Get existing value or create and insert a new one.
    *
    * Avoids the double-lookup pattern of `if (!has) set(create())`.
-   * The `factory` is only called when the key is not found.
+   * The `factory` is only called when the key is not found, and receives the
+   * canonical (interned) key. A factory result of `undefined` is stored and
+   * cached like any other value.
    */
   getOrCreate(key: K, factory: (key: K) => V): V {
     const ik = intern(key);
-    const existing = this.#map.get(ik);
-    if (existing !== undefined) return existing;
+    // Presence, not `!== undefined`: a stored `undefined` is a cached result
+    // too, and must not re-run the factory.
+    if (this.#map.has(ik)) return this.#map.get(ik) as V;
     const value = factory(ik);
     this.#map.set(ik, value);
     return value;

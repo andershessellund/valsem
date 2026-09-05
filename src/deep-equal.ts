@@ -20,6 +20,20 @@
 // No circular reference handling — state values should be plain data.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Protocol symbols
+//
+// `equals`, `hashCode` and `interned` are the PROTOCOL third-party types
+// implement to become values, so they live in the global symbol registry
+// (`Symbol.for`): a `Money` class written against one copy of valsem must be
+// recognised by a differently-versioned copy elsewhere in the dependency
+// graph, or it would silently fall to reference semantics. The keys are
+// VERSIONED, like the hash seed's: a copy only ever reads the protocol it
+// understands, and a future incompatible protocol change bumps the suffix so
+// an older copy sees those instances as plain unregistered classes. Internal
+// symbols (draft state, sentinels) are ordinary `Symbol()`s — per copy.
+// ---------------------------------------------------------------------------
+
 /**
  * Symbol for opt-in value semantics on class instances.
  *
@@ -36,7 +50,7 @@
  * }
  * ```
  */
-export const equals: unique symbol = Symbol.for('valsem.equals') as any;
+export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 
 /**
  * Symbol for companion hash code on class instances.
@@ -47,7 +61,7 @@ export const equals: unique symbol = Symbol.for('valsem.equals') as any;
  * Must be implemented alongside {@link equals} to maintain the invariant:
  * `a[equals](b) === true → readHash(a) === readHash(b)`.
  */
-export const hashCode: unique symbol = Symbol.for('valsem.hashCode') as any;
+export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
 
 /**
  * Symbol marking a value of an **auto-interning type**.
@@ -66,8 +80,17 @@ export const hashCode: unique symbol = Symbol.for('valsem.hashCode') as any;
  *
  * Marking a type whose instances can be constructed around the pool breaks
  * equality — the contract is the constructor discipline, not the flag.
+ *
+ * A consequence worth stating: two copies of valsem in one process (a
+ * duplicate install) have two `ValueSet` classes, two pools, and instances
+ * that are never `===`. They compare UNEQUAL, and that is the intended
+ * answer — they are different types, and nothing guarantees two versions
+ * agree on hashing, iteration order, or the meaning of `[equals]`. A value
+ * from another copy is opaque here: `intern` passes it through, and a
+ * collection stores it as an opaque member. Dedupe your install if you need
+ * one canonical instance.
  */
-export const interned: unique symbol = Symbol.for('valsem.interned') as any;
+export const interned: unique symbol = Symbol.for('valsem.interned.v1') as any;
 
 // ---------------------------------------------------------------------------
 // Type-handler registry
@@ -228,7 +251,9 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   //    of a marked type is canonical by construction. A non-identical pair
   //    with EITHER side marked is therefore unequal — same type would mean
   //    both marked; a mixed pair is cross-kind; two distinct canonicals are
-  //    distinct values. One or two property reads, no map lookups.
+  //    distinct values. (Two copies of valsem in one process are two types:
+  //    their instances are unequal, by design — see the symbol's doc.) One
+  //    or two property reads, no map lookups.
   // 2. Canonical plain data (the injected interner hash cache): both
   //    canonical + non-identical ⟹ structurally distinct — stronger than
   //    comparing hash values, which can collide.
@@ -269,6 +294,11 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     if (typeof ha === 'number' && typeof hb === 'number' && ha !== hb) return false;
     return eq.call(a, b);
   }
+
+  // Mirror of the branch above: `b` declares [equals] and `a` does not, so
+  // the pair is cross-kind. Without this, the answer would depend on argument
+  // order (a's structural walk cannot see b's symbol key).
+  if (equals in (b as any)) return false;
 
   // Registry lookup by constructor
   if (a.constructor === b.constructor) {

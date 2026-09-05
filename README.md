@@ -113,8 +113,8 @@ intern({ at: new Date(0) });  // throws
 intern(new Set([1]));         // throws — names ValueSet.from
 ```
 
-`deepEqual` is the one exception — deliberately total, and not as a
-concession. For mutable objects, **reference equality is the correct
+`deepEqual` is the one exception — deliberately total over the values valsem
+admits, and not as a concession. For mutable objects, **reference equality is the correct
 answer**: equality means observational substitutability, and two distinct
 `Date`s are not substitutable — one `setTime()` later they observably
 diverge. Content comparison over independently‑mutable objects asserts a
@@ -586,12 +586,27 @@ position or intent makes it meaningful there:
   collide into one bucket. The 32‑bit hashes are for bucketing, not
   authentication. For untrusted‑input deployments that also worry about seed
   recovery via timing, swap in a keyed PRF with `configureHasher(...)` (e.g.
-  SipHash over `getHashSeed()`) — called once at startup, before any hashing.
+  SipHash over `getHashSeed()`) — called once at startup, before any hashing
+  (a later call is rejected: interned values carry their hashes, so a swap
+  mid‑flight would split one value into two canonicals).
+- **Duplicate installs are two types.** Two copies of valsem in one process
+  (a transitive dependency pinning a different minor) share the hash seed
+  through `globalThis`, so plain data hashes and compares the same in both.
+  Their collections do not: a `ValueSet` from the other copy is a different
+  class with its own pool, and nothing guarantees two versions agree on
+  hashing, iteration order, or what `[equals]` means — so its instances
+  compare **unequal** here, and `intern` passes them through opaque. That is
+  the intended answer, not a gap. If you need one canonical instance across
+  your dependency graph, dedupe the install.
 - **Depth‑capped admission.** `intern`, `deepHash`, and `produce`'s adoption
   walk recursively, so hostile (or cyclic) input would otherwise exhaust the
   stack. Nesting deeper than 512 levels is rejected with a teaching error;
   raise the cap with `configureLimits({ maxDepth })` if your data is honestly
-  that deep. (`deepEqual` is a passive, total query and stays uncapped.)
+  that deep. (`deepEqual` stays uncapped: a cap would change verdicts on
+  honestly deep equal structures. It never throws on a *type*, and it is total
+  over admitted values — but on raw, never‑admitted input it is an ordinary
+  recursive walk, so cyclic input or nesting deeper than the engine's stack
+  overflows the stack, as any recursive comparison does. Admit first.)
 
 ---
 
@@ -614,7 +629,7 @@ position or intent makes it meaningful there:
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt‑in value‑semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
-| `configureLimits` | function | Decode‑boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk — deeply nested or cyclic input gets a teaching error instead of a stack overflow. `deepEqual` stays total and uncapped. |
+| `configureLimits` | function | Decode‑boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk — deeply nested or cyclic input gets a teaching error instead of a stack overflow. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
 | `InternPool` / `Hasher` / `RegisterOptions` | type | Pool interface; pluggable leaf‑hash interface; `register` options (`immutable`). |
 
 ### `valsem/temporal`

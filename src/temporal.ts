@@ -4,7 +4,8 @@
 // Importing this module for its side effect registers, for each Temporal type:
 //
 //   * an equality handler   (its own `equals()`, except Duration — see below)
-//   * a hash handler        (over the canonical `toString()`)
+//   * a hash handler        (over the canonical `toString()` — except
+//                            ZonedDateTime, whose zone aliases need care)
 //   * an immutability declaration, so `intern()` pools Temporal values as
 //     canonical `===` instances rather than passing them through
 //
@@ -41,6 +42,8 @@ type Kind = (typeof KINDS)[number];
 interface TemporalValue {
   toString(): string;
   equals?(other: unknown): boolean;
+  epochNanoseconds?: bigint;
+  calendarId?: string;
 }
 
 /** Structural view of a Temporal constructor. */
@@ -90,8 +93,7 @@ export function registerTemporal(): void {
     if (typeof ctor !== 'function' || typeof ctor.from !== 'function') continue;
 
     const equalsFn = buildEquals(kind, ctor);
-    const hashFn = (value: TemporalValue): number =>
-      hashString(`Temporal.${kind}|${value.toString()}`);
+    const hashFn = buildHash(kind);
 
     deepEqual.register(
       ctor as unknown as new (...args: any[]) => TemporalValue,
@@ -105,10 +107,30 @@ export function registerTemporal(): void {
 }
 
 /**
+ * Hash for one Temporal kind — over exactly what its `equals()` compares.
+ *
+ * For every kind but `ZonedDateTime`, `toString()` is a faithful canonical
+ * form: calendars are canonicalised at construction, and the fields
+ * `equals()` reads are the fields that print. `ZonedDateTime` is the
+ * exception: `equals()` compares time zones by their PRIMARY identifier, so
+ * `[Asia/Calcutta]` and `[Asia/Kolkata]` are equal — but `toString()` emits
+ * the identifier as supplied. Hashing the string would give one value two
+ * hashes, and once interned, two canonical instances. So it hashes the
+ * instant and the calendar and leaves the zone out: strictly fewer bits, but
+ * never a split.
+ */
+function buildHash(kind: Kind): (value: TemporalValue) => number {
+  if (kind === 'ZonedDateTime') {
+    return (value) =>
+      hashString(`Temporal.ZonedDateTime|${value.epochNanoseconds}|${value.calendarId}`);
+  }
+  return (value) => hashString(`Temporal.${kind}|${value.toString()}`);
+}
+
+/**
  * Equality for one Temporal kind. Every kind but `Duration` ships an `equals()`
- * that is authoritative and agrees with `toString()` — including the cases
- * worth worrying about, where a differing time zone or a non-ISO calendar shows
- * up in the string. `Duration` has no `equals()`; see {@link registerTemporal}.
+ * that is authoritative. `Duration` has no `equals()`; see
+ * {@link registerTemporal}.
  */
 function buildEquals(kind: Kind, ctor: TemporalCtor): (a: TemporalValue, b: TemporalValue) => boolean {
   if (kind !== 'Duration' && typeof ctor.prototype.equals === 'function') {

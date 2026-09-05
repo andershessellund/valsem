@@ -27,6 +27,29 @@ describe('decode-boundary depth limits', () => {
     expect(deepHash([1])).toBe(deepHash([1]));
   });
 
+  it('the guard resets after MANY rejections — no per-rejection leak', () => {
+    // A counter incremented outside its try/finally leaks +1 per cap hit;
+    // after `cap` hits every call is over the cap. Hit the cap more times
+    // than the cap itself, then admit values at the cap's exact edge.
+    try {
+      configureLimits({ maxDepth: 20 });
+      const tooDeep = nested(30);
+      for (let i = 0; i < 25; i++) expect(() => deepHash(tooDeep)).toThrow(/nesting depth/);
+      for (let i = 0; i < 25; i++) expect(() => intern(tooDeep)).toThrow(/nesting depth/);
+      for (let i = 0; i < 25; i++) {
+        expect(() => produce(intern({ a: 1 }), (d) => void ((d as Record<string, unknown>).x = tooDeep)))
+          .toThrow(/nesting depth/);
+      }
+      const edge = nested(20); // exactly the cap: still admissible
+      expect(() => deepHash(edge)).not.toThrow();
+      expect(() => intern(edge)).not.toThrow();
+      expect(() => produce(intern({ a: 1 }), (d) => void ((d as Record<string, unknown>).x = nested(19))))
+        .not.toThrow();
+    } finally {
+      configureLimits({ maxDepth: 512 });
+    }
+  });
+
   it('cyclic input gets the teaching error, not a bare stack overflow', () => {
     const cyc: Record<string, unknown> = { x: 1 };
     cyc['self'] = cyc;
@@ -37,10 +60,21 @@ describe('decode-boundary depth limits', () => {
     ).toThrow(/cyclic input/);
   });
 
-  it('deepEqual stays total — no depth cap on the passive query', () => {
-    // 600 > the admission cap, and deepEqual walks it fine.
+  it('deepEqual is uncapped — it walks past the admission cap', () => {
+    // 600 > the admission cap, and deepEqual walks it fine: no cap, so no
+    // verdict change on honestly deep equal structures.
     expect(deepEqual(nested(600), nested(600))).toBe(true);
     expect(deepEqual(nested(600), nested(600, 2))).toBe(false);
+  });
+
+  it('deepEqual on raw cyclic input is an ordinary recursive walk (documented: admit first)', () => {
+    const a: Record<string, unknown> = { n: 1 };
+    a['self'] = a;
+    const b: Record<string, unknown> = { n: 1 };
+    b['self'] = b;
+    // Not a teaching error — the documented contract is totality over
+    // ADMITTED values; raw cycles overflow the stack like any recursive walk.
+    expect(() => deepEqual(a, b)).toThrow(RangeError);
   });
 
   it('the cap is reconfigurable, both ways', () => {

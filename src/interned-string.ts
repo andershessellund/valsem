@@ -42,6 +42,9 @@ export class InternedString {
 
   /** Canonical InternedString for `value`. */
   static for(value: string): InternedString {
+    if (typeof value !== 'string') {
+      throw new TypeError(`InternedString.for: expected a string, got ${typeof value}`);
+    }
     const hash = hashString(value);
     const found = pool.lookup(hash, c => c.value === value);
     if (found !== undefined) return found;
@@ -53,3 +56,4 @@ export class InternedString {
     return pool.size();
   }
 }
+

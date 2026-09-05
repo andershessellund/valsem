@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { HashMap } from './hash-map.js';
+import { intern } from './intern.js';
 
 describe('HashMap', () => {
   // --- Basic CRUD ---
@@ -109,6 +110,46 @@ describe('HashMap', () => {
   });
 
   // --- Iteration ---
+
+  it('getOrCreate() caches an undefined result — the factory runs once', () => {
+    const map = new HashMap<{ id: number }, number | undefined>();
+    let calls = 0;
+    const factory = (): undefined => {
+      calls++;
+      return undefined;
+    };
+    expect(map.getOrCreate({ id: 1 }, factory)).toBeUndefined();
+    expect(map.getOrCreate({ id: 1 }, factory)).toBeUndefined();
+    expect(map.getOrCreate({ id: 1 }, factory)).toBeUndefined();
+    expect(calls).toBe(1);
+    expect(map.size).toBe(1);
+    expect(map.has({ id: 1 })).toBe(true);
+  });
+
+  it('getOrCreate() hands the factory the canonical key', () => {
+    const map = new HashMap<{ id: number }, object>();
+    const raw = { id: 7 };
+    const seen = map.getOrCreate(raw, (k) => k);
+    expect(seen).not.toBe(raw);
+    expect(seen).toBe(intern(raw));
+    expect(Object.isFrozen(seen)).toBe(true);
+  });
+
+  it('getCanonical() hits on a canonical key and misses (silently) on a raw one', () => {
+    const map = new HashMap<{ id: number }, string>();
+    map.set({ id: 1 }, 'v');
+    expect(map.getCanonical(intern({ id: 1 }))).toBe('v');
+    expect(map.getCanonical({ id: 1 })).toBeUndefined(); // documented: no intern call
+  });
+
+  it('iteration yields canonical keys, not the caller\'s objects', () => {
+    const map = new HashMap<{ id: number }, string>();
+    const k = { id: 1 };
+    map.set(k, 'v');
+    const [yielded] = [...map.keys()];
+    expect(yielded).not.toBe(k);
+    expect(yielded).toBe(intern(k));
+  });
 
   it('entries() yields all key-value pairs', () => {
     const map = new HashMap<string, number>();

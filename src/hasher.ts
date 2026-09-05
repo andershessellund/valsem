@@ -123,12 +123,30 @@ export function createMarvin32Hasher(k0: number, k1: number): Hasher {
 // ---------------------------------------------------------------------------
 
 let configured = false;
-const _default = createMarvin32Hasher(SEED[0]!, SEED[1]!);
+let hashed = false; // has any leaf been hashed yet? (configureHasher's ordering guard)
+let active: Hasher = createMarvin32Hasher(SEED[0]!, SEED[1]!);
+
+// The exported leaf functions start as one-shot trampolines: the first call
+// records that hashing has begun (so a later configureHasher is rejected),
+// rebinds both live bindings to the active hasher's functions, and delegates.
+// Every subsequent call goes straight to the hasher — the ordering guard
+// costs nothing on the hot path.
+function arm(): void {
+  hashed = true;
+  hashString = active.string;
+  hashNumber = active.number;
+}
 
 /** @internal Active string-leaf hash. Rebound by {@link configureHasher}. */
-export let hashString: (s: string) => number = _default.string;
+export let hashString: (s: string) => number = (s) => {
+  arm();
+  return hashString(s);
+};
 /** @internal Active number-leaf hash. Rebound by {@link configureHasher}. */
-export let hashNumber: (n: number) => number = _default.number;
+export let hashNumber: (n: number) => number = (n) => {
+  arm();
+  return hashNumber(n);
+};
 
 /**
  * Replace the leaf hashing primitives process-wide.
@@ -142,7 +160,10 @@ export let hashNumber: (n: number) => number = _default.number;
  * {@link getHashSeed}) for deployments that ingest untrusted data and want
  * resistance to seed recovery via timing.
  *
- * @throws Error if called more than once.
+ * @throws Error if called more than once, or after any value has already
+ * been hashed (interned values would keep their old hashes, and structurally
+ * equal values interned afterwards would land in different buckets — two
+ * canonical instances for one value).
  *
  * @example
  * ```ts
@@ -154,9 +175,15 @@ export let hashNumber: (n: number) => number = _default.number;
  */
 export function configureHasher(hasher: Hasher): void {
   if (configured) {
-    throw new Error('valsem: configureHasher() may only be called once, before any hashing.');
+    throw new Error('valsem: configureHasher() may only be called once.');
+  }
+  if (hashed) {
+    throw new Error(
+      'valsem: configureHasher() must run before any value is hashed or interned — ' +
+        'a hash has already been computed in this process. Call it at startup, ' +
+        'before the first deepHash/intern/collection use.',
+    );
   }
   configured = true;
-  hashString = hasher.string;
-  hashNumber = hasher.number;
+  active = hasher;
 }

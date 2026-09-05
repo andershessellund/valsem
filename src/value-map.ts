@@ -191,7 +191,9 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   static fromObject<V>(obj: Record<string, V>): ValueMap<string, V> {
     let root: HNode = CFG.empty;
     let size = 0;
-    for (const k in obj) {
+    // Own keys only: `for...in` would also admit inherited enumerable keys
+    // (prototype pollution) as entries of the value.
+    for (const k of Object.keys(obj)) {
       const raw = obj[k];
       if (raw === undefined) continue;
       const v = intern(raw);
@@ -209,3 +211,4 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     return _trieStats(CFG);
   }
 }
+

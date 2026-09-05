@@ -17,7 +17,7 @@
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt-in value-semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
-| `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays total and uncapped. |
+| `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
 | `InternPool` / `Hasher` / `RegisterOptions` | type | Pool interface; pluggable leaf-hash interface; `register` options (`immutable`). |
 
 ## `valsem/temporal`

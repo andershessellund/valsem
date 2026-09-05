@@ -63,6 +63,46 @@ describe('temporal — value semantics', () => {
   });
 });
 
+describe('temporal — ZonedDateTime time-zone aliases (equals() canonicalises, toString() does not)', () => {
+  const pairs: [string, string][] = [
+    ['Asia/Calcutta', 'Asia/Kolkata'],
+    ['Asia/Saigon', 'Asia/Ho_Chi_Minh'],
+    ['US/Eastern', 'America/New_York'],
+    ['Europe/Kiev', 'Europe/Kyiv'],
+  ];
+
+  it('holds the companion invariant across alias identifiers', () => {
+    for (const [x, y] of pairs) {
+      const a = T.ZonedDateTime.from(`2020-06-01T12:00[${x}]`);
+      const b = T.ZonedDateTime.from(`2020-06-01T12:00[${y}]`);
+      if (!a.equals(b)) continue; // runtime without alias data — nothing to test
+      expect(deepEqual(a, b)).toBe(true);
+      expect(deepHash(a)).toBe(deepHash(b));
+    }
+  });
+
+  it('interns alias identifiers to ONE canonical, and deepEqual agrees before and after', () => {
+    for (const [x, y] of pairs) {
+      const a = T.ZonedDateTime.from(`2020-06-01T12:00[${x}]`);
+      const b = T.ZonedDateTime.from(`2020-06-01T12:00[${y}]`);
+      if (!a.equals(b)) continue;
+      const ia = intern(a);
+      const ib = intern(b);
+      expect(ia).toBe(ib);
+      expect(deepEqual(ia, ib)).toBe(true);
+    }
+  });
+
+  it('still distinguishes genuinely different zones and instants', () => {
+    const a = T.ZonedDateTime.from('2020-06-01T12:00[Europe/Copenhagen]');
+    const b = T.ZonedDateTime.from('2020-06-01T12:00[Europe/London]'); // a different instant
+    const c = T.ZonedDateTime.from('2020-06-01T12:00[UTC]');
+    expect(deepEqual(a, b)).toBe(false);
+    expect(deepEqual(a, c)).toBe(false);
+    expect(intern(a)).not.toBe(intern(b));
+  });
+});
+
 describe('temporal — Duration is field-wise, not Duration.compare', () => {
   it('treats P1D and PT24H as distinct even though compare() says 0', () => {
     const day = T.Duration.from('P1D');

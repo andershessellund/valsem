@@ -172,3 +172,53 @@ describe('ValueList — hash-consed canonicality across the trunk/tail boundary'
     expect(b).toBe(a);
   });
 });
+
+describe('ValueList — size sweep through three tree levels (> 1,024 elements)', () => {
+  // The trunk grows a level at 32 and at 1,024 trunk elements, and pop must
+  // collapse those levels back down. Walk every size across both boundaries
+  // and compare the push-built and pop-walked instances with from() — the
+  // canonical-form oracle — at each step.
+  const N = 1_024 + 32 * 3 + 5; // two full levels, three more leaves, a partial tail
+
+  it('push-chain === from() at every size up to N', () => {
+    let list = ValueList.empty<number>();
+    for (let n = 1; n <= N; n++) {
+      list = list.push(n);
+      expect(list.length).toBe(n);
+      expect(list).toBe(ValueList.from(Array.from({ length: n }, (_, i) => i + 1)));
+    }
+  });
+
+  it('pop walks back down through the level collapses onto the same instances', () => {
+    const items = Array.from({ length: N }, (_, i) => i + 1);
+    let list = ValueList.from(items);
+    for (let n = N; n > 0; n--) {
+      list = list.pop();
+      expect(list.length).toBe(n - 1);
+      expect(list).toBe(ValueList.from(items.slice(0, n - 1)));
+    }
+    expect(list).toBe(ValueList.empty());
+  });
+
+  it('get()/iteration agree with a plain array across both boundaries', () => {
+    const items = Array.from({ length: N }, (_, i) => i * 3);
+    const list = ValueList.from(items);
+    for (let i = 0; i < N; i++) expect(list.get(i)).toBe(items[i]);
+    expect([...list]).toEqual(items);
+    expect(list.get(N)).toBeUndefined();
+  });
+
+  it('set() deep in the trunk at level 2 detours and returns', () => {
+    const items = Array.from({ length: N }, (_, i) => i);
+    const list = ValueList.from(items);
+    for (const i of [0, 31, 32, 1_023, 1_024, 1_040, N - 1]) {
+      const changed = list.set(i, -1);
+      expect(changed).not.toBe(list);
+      expect(changed.get(i)).toBe(-1);
+      expect(changed.set(i, i)).toBe(list);
+      const mirror = items.slice();
+      mirror[i] = -1;
+      expect(changed).toBe(ValueList.from(mirror));
+    }
+  });
+});

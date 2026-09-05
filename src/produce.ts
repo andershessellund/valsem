@@ -41,7 +41,7 @@
 import { intern, internHash, _hashCacheHas, _accOf, _internPrehashed } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _powP } from './deep-hash.js';
-import { interned as internedMarker } from './deep-equal.js';
+import { interned as internedMarker, _defineRecordField } from './deep-equal.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { ValueList } from './value-list.js';
@@ -219,6 +219,18 @@ function same(a: unknown, b: unknown): boolean {
   return a === b || (a !== a && b !== b);
 }
 
+// Records are keyed by OWN properties only. Every membership test on a base
+// or copy goes through this rather than `in`, which walks the prototype
+// chain: `'toString' in {}` is true, and treating Object.prototype's
+// members as base keys hands functions to the hasher and misreports
+// deletions/inverse patches for every hostile or merely unlucky key name.
+const hasOwn = (o: object, k: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+/** `rec[key]` for an OWN key, `undefined` otherwise (never the prototype's). */
+function ownValue(rec: Record<string, unknown>, key: string): unknown {
+  return hasOwn(rec, key) ? rec[key] : undefined;
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   if (v === null || typeof v !== 'object') return false;
   const proto = Object.getPrototypeOf(v);
@@ -321,23 +333,25 @@ const objectTraps: ProxyHandler<object> = {
     if (typeof prop === 'symbol') {
       throw new TypeError('valsem: records take string keys only');
     }
-    const current = latestObj(state)[prop];
+    const current = ownValue(latestObj(state), prop);
     const currentState = stateOf(current);
     if (currentState !== undefined && currentState.base === value) {
       // Assigning the original back over its own draft — not a change.
       prepareObjCopy(state);
-      state.copy![prop] = value;
+      _defineRecordField(state.copy!, prop, value);
       state.assigned!.set(prop, false);
       return true;
     }
-    if (same(value, current) && (value !== undefined || prop in latestObj(state))) {
+    if (same(value, current) && (value !== undefined || hasOwn(latestObj(state), prop))) {
       return true; // no-op write
     }
     assertAssignable(value, state);
     prepareObjCopy(state);
     markChanged(state);
     if (state.assigned!.get(prop) === false) state.orderBroken = true; // deleted, now re-set
-    state.copy![prop] = value;
+    // Define semantics, as intern does: a `__proto__` key must become an own
+    // data property, not fire Object.prototype's setter.
+    _defineRecordField(state.copy!, prop, value);
     state.assigned!.set(prop, true);
     return true;
   },
@@ -346,7 +360,7 @@ const objectTraps: ProxyHandler<object> = {
     assertUnrevoked(state);
     if (typeof prop === 'symbol') return true;
     prepareObjCopy(state);
-    if (prop in state.base) {
+    if (hasOwn(state.base, prop)) {
       state.assigned!.set(prop, false);
       markChanged(state);
     } else {
@@ -1175,8 +1189,9 @@ function adopt(value: unknown): unknown {
   }
   // Same decode-boundary depth cap as intern: adopt recurses over foreign
   // material a recipe grafted in, which can be hostile or cyclic.
-  if (++adoptDepth > _maxDepth()) throw _depthError('produce');
+  adoptDepth++; // inside the try's reach: the cap throw must unwind it too
   try {
+    if (adoptDepth > _maxDepth()) throw _depthError('produce');
     return adoptUncached(value);
   } finally {
     adoptDepth--;
@@ -1191,7 +1206,7 @@ function adoptUncached(value: object): unknown {
       const child = value[key];
       const resolved = resolve(child, null, undefined);
       if (resolved !== child) changed = true;
-      if (resolved !== undefined) out[key] = resolved;
+      if (resolved !== undefined) _defineRecordField(out, key, resolved);
       else if (child !== undefined) changed = true; // record semantics drop undefined
     }
     return intern(changed ? out : value);
@@ -1389,8 +1404,8 @@ function finalizeObject(
   let n = accInfo !== undefined ? accInfo.n : 0;
 
   for (const key of touched) {
-    const hadBefore = key in base && base[key] !== undefined;
-    if (!Object.prototype.hasOwnProperty.call(copy, key)) {
+    const hadBefore = hasOwn(base, key) && base[key] !== undefined;
+    if (!hasOwn(copy, key)) {
       // Deleted via delete — the copy already lacks it.
       if (fast && hadBefore) {
         acc = (acc - _entryTerm(key, internHash(base[key]))) >>> 0;
@@ -1429,12 +1444,10 @@ function finalizeObject(
 
   if (emitting) {
     for (const [key, wasSet] of state.assigned!) {
-      const hadBefore = key in base && base[key] !== undefined;
-      const before = base[key];
+      const hadBefore = hasOwn(base, key) && base[key] !== undefined;
+      const before = ownValue(base, key);
       if (wasSet) {
-        const after = Object.prototype.hasOwnProperty.call(copy, key)
-          ? copy[key]
-          : undefined;
+        const after = ownValue(copy, key);
         if (after === undefined) {
           if (hadBefore) {
             recorder.patches.push({ kind: 'record.delete', path: path!, key });
@@ -1929,55 +1942,68 @@ export function produceWithPatches<T>(
  * canonical result. Implemented on top of produce.
  */
 export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
+  // Patches apply strictly in sequence. A root `replace` ends the current
+  // run of draft edits (they must land on the value as it was BEFORE the
+  // replacement) and starts the next run on the replacement value.
   let current: unknown = base;
-  const rest: Patch[] = [];
+  let run: Patch[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    const batch = run;
+    run = [];
+    current = produce(current, (draft) => applyRun(draft, batch));
+  };
   for (const p of patches) {
     if (p.kind === 'replace') {
       if (p.path.length !== 0) {
         throw new Error('valsem: replace patches must target the root');
       }
+      flush();
       current = p.value;
     } else {
-      rest.push(p);
+      run.push(p);
     }
   }
-  if (rest.length === 0) return intern(current) as T;
-  return produce(current, (draft) => {
-    for (const p of rest) {
-      const target = navigate(draft, p.path);
-      switch (p.kind) {
-        case 'record.set':
-          (target as Record<string, unknown>)[p.key] = p.value;
-          break;
-        case 'record.delete':
-          delete (target as Record<string, unknown>)[p.key];
-          break;
-        case 'list.set':
-          if (target instanceof DraftList) target.set(p.index, p.value);
-          else (target as unknown[])[p.index] = p.value;
-          break;
-        case 'list.splice':
-          if (target instanceof DraftList) {
-            target.splice(p.index, p.remove, ...(p.insert as unknown[]));
-          } else {
-            (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
-          }
-          break;
-        case 'map.set':
-          (target as DraftMap<unknown, unknown>).set(p.key, p.value);
-          break;
-        case 'map.delete':
-          (target as DraftMap<unknown, unknown>).delete(p.key);
-          break;
-        case 'set.add':
-          (target as DraftSet<unknown>).add(p.value);
-          break;
-        case 'set.delete':
-          (target as DraftSet<unknown>).delete(p.value);
-          break;
-      }
+  flush();
+  return intern(current) as T;
+}
+
+/** Apply one run of non-replace patches to a draft, in order. */
+function applyRun(draft: unknown, patches: readonly Patch[]): void {
+  for (const p of patches) {
+    const target = navigate(draft, p.path);
+    switch (p.kind) {
+      case 'record.set':
+        (target as Record<string, unknown>)[p.key] = p.value;
+        break;
+      case 'record.delete':
+        delete (target as Record<string, unknown>)[p.key];
+        break;
+      case 'list.set':
+        if (target instanceof DraftList) target.set(p.index, p.value);
+        else (target as unknown[])[p.index] = p.value;
+        break;
+      case 'list.splice':
+        if (target instanceof DraftList) {
+          target.splice(p.index, p.remove, ...(p.insert as unknown[]));
+        } else {
+          (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
+        }
+        break;
+      case 'map.set':
+        (target as DraftMap<unknown, unknown>).set(p.key, p.value);
+        break;
+      case 'map.delete':
+        (target as DraftMap<unknown, unknown>).delete(p.key);
+        break;
+      case 'set.add':
+        (target as DraftSet<unknown>).add(p.value);
+        break;
+      case 'set.delete':
+        (target as DraftSet<unknown>).delete(p.value);
+        break;
     }
-  }) as T;
+  }
 }
 
 function navigate(draft: unknown, path: PatchPath): unknown {

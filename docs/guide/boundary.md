@@ -33,7 +33,10 @@ whose bytes are rewritable through any other view over the same buffer anyway.
 
 ## deepEqual is total — deliberately
 
-`deepEqual` is the one operation that never throws, and not as a concession.
+`deepEqual` is the one operation that never throws on a *type*, and not as a
+concession. (It is total over admitted values; on raw, never-admitted input it
+is an ordinary recursive walk, so cyclic or engine-stack-deep input overflows
+the stack — see the hardening guide.)
 For mutable objects, **reference equality is the correct answer**: equality
 means observational substitutability, and two distinct `Date`s are not
 substitutable — one `setTime()` later they observably diverge. Content

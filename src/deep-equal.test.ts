@@ -245,6 +245,14 @@ describe('deepEqual', () => {
   });
 });
 
+describe('the protocol symbols are global and versioned', () => {
+  it('live in the global registry under v1 keys', () => {
+    expect(Symbol.keyFor(equals)).toBe('valsem.equals.v1');
+    expect(Symbol.keyFor(hashCode)).toBe('valsem.hashCode.v1');
+    expect(Symbol.keyFor(interned)).toBe('valsem.interned.v1');
+  });
+});
+
 describe('deepEqual — undefined is not a value in records', () => {
   it('an undefined-valued key equals an absent key', () => {
     expect(deepEqual({ a: undefined }, {})).toBe(true);

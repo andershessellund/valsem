@@ -10,7 +10,6 @@
 //   4. hashCodeMethods.get(a.constructor) → registry (registered types)
 //   5. Plain object → structural order-independent hash
 //   6. Class without handler → throw
-//   7. Class without handler → throw
 // ---------------------------------------------------------------------------
 
 import { hashCode } from './deep-equal.js';
@@ -194,10 +193,13 @@ export function deepHash(value: unknown): number {
 
   // Decode-boundary depth cap: the recursive walk below is where hostile
   // (or cyclic) input would otherwise exhaust the stack. Cached canonical
-  // material never reaches this counter.
-  // (No manual reset on throw: the finally chain unwinds the counter.)
-  if (++depth > _maxDepth()) throw _depthError('deepHash');
+  // material never reaches this counter. The increment sits INSIDE the
+  // protected region so the cap check's own throw unwinds it too — an
+  // increment before the `try` leaks +1 per rejection, and after enough
+  // rejections every call is over the cap.
+  depth++;
   try {
+    if (depth > _maxDepth()) throw _depthError('deepHash');
     return hashObjectValue(obj);
   } finally {
     depth--;
@@ -237,10 +239,16 @@ function hashObjectValue(obj: object): number {
     throw new TypeError(unhashableMessage(obj));
   }
 
+  // Own enumerable keys only — the same key set deepEqual and intern see. A
+  // `for...in` here would also walk inherited enumerable keys, and under
+  // prototype pollution the hash of an Object.prototype record would then
+  // diverge from an equal null-prototype record's, breaking the invariant.
   const rec = obj as Record<string, unknown>;
+  const keys = Object.keys(rec);
   let acc = 0;
   let keyCount = 0;
-  for (const k in rec) {
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!;
     const v = rec[k];
     if (v === undefined) continue; // undefined-valued key ≡ absent (matches deepEqual)
     acc = (acc + _entryTerm(k, deepHash(v))) >>> 0;
@@ -265,9 +273,11 @@ export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: numb
     return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
   }
   const rec = obj as Record<string, unknown>;
+  const keys = Object.keys(rec); // own keys only — see hashObjectValue
   let acc = 0;
   let n = 0;
-  for (const k in rec) {
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!;
     const v = rec[k];
     if (v === undefined) continue;
     acc = (acc + _entryTerm(k, deepHash(v))) >>> 0;

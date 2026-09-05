@@ -43,8 +43,12 @@ configureLimits({ maxDepth: 2000 }); // if your data is honestly that deep
 ```
 
 Unlike the hasher, the cap is not baked into values — it may be reconfigured
-at any time. `deepEqual` is deliberately **uncapped**: it is a passive, total
-query, and a cap would change verdicts on honestly deep equal structures.
+at any time. `deepEqual` is deliberately **uncapped**: a cap would change
+verdicts on honestly deep equal structures. It is total over admitted values
+(nothing deeper than the cap gets through), but on raw, never-admitted input
+it is an ordinary recursive walk — cyclic input, or nesting deeper than the
+engine's stack, overflows the stack like any recursive comparison. Admit
+untrusted data before comparing it.
 
 Size limits are deliberately absent: admission is O(n) with no amplification,
 and byte budgets belong to the transport layer (a JSON body limit), not the

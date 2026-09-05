@@ -78,6 +78,55 @@ describe('total-collision trie (degenerate hasher)', () => {
     expect(m.has('zzz')).toBe(false);
   });
 
+  it('canonical member order covers every type rank (mixed members converge)', () => {
+    // memberCompare orders collision-node members by type rank, then within a
+    // rank; every branch decides canonical form, so every rank must converge.
+    const members: unknown[] = [
+      undefined, null, true, false,
+      3, -1, 0, NaN, Infinity, -Infinity, 2.5,
+      10n, -2n, 0n,
+      'b', 'a', '', 'ab',
+      intern({ k: 1 }), intern({ k: 2 }), intern([1]),
+    ];
+    const rnd = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const shuffle = (xs: unknown[], r: () => number) => {
+      const a = xs.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(r() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    const canonical = ValueSet.from(members);
+    expect(canonical.size).toBe(members.length);
+    for (let s = 1; s <= 12; s++) {
+      const built = ValueSet.from(shuffle(members, rnd(s)));
+      expect(built).toBe(canonical);
+      let chained = ValueSet.empty<unknown>();
+      for (const m of shuffle(members, rnd(s + 100))) chained = chained.add(m);
+      expect(chained).toBe(canonical);
+    }
+    for (const m of members) expect(canonical.has(m)).toBe(true);
+    expect(canonical.has(-0)).toBe(true); // SameValueZero with the stored 0
+    expect(canonical.has('c')).toBe(false);
+    expect(canonical.has(11n)).toBe(false);
+  });
+
+  it('maps with mixed-rank colliding keys converge and read back', () => {
+    const entries: [unknown, number][] = [
+      [null, 1], [undefined, 2], [true, 3], [NaN, 4], [7, 5], [5n, 6], ['x', 7], [intern({ q: 1 }), 8],
+    ];
+    const a = ValueMap.from(entries);
+    const b = ValueMap.from(entries.slice().reverse());
+    expect(b).toBe(a);
+    for (const [k, v] of entries) expect(a.get(k)).toBe(v);
+    expect(a.get('nope')).toBeUndefined();
+    expect(a.delete('nope')).toBe(a); // collision-node miss on remove
+    let drained = a;
+    for (const [k] of entries) drained = drained.delete(k);
+    expect(drained).toBe(ValueMap.empty());
+  });
+
   it('sets behave and converge under total collision', () => {
     const members = ['a', 'b', 'c', 1, 2, 3];
     const a = ValueSet.from(members);

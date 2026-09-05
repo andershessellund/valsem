@@ -126,8 +126,9 @@ export function intern<T>(value: T): T {
   // the decode boundary where hostile or cyclic input would otherwise
   // exhaust the stack.)
   if (Array.isArray(obj)) {
-    if (++depth > _maxDepth()) throw _depthError('intern');
+    depth++; // inside the try's reach: the cap throw must unwind it too
     try {
+      if (depth > _maxDepth()) throw _depthError('intern');
       const internalized = obj.map(intern);
       return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
     } finally {
@@ -140,8 +141,9 @@ export function intern<T>(value: T): T {
   // absent key in record semantics, and the canonical form makes that literal.
   const proto = Object.getPrototypeOf(obj);
   if (proto === Object.prototype || proto === null) {
-    if (++depth > _maxDepth()) throw _depthError('intern');
+    depth++;
     try {
+      if (depth > _maxDepth()) throw _depthError('intern');
       const rec = obj as Record<string, unknown>;
       const keys = Object.keys(rec).sort();
       const internalized: Record<string, unknown> = {};

@@ -140,3 +140,17 @@ describe('ValueMap — undefined IS a value here, unlike in records', () => {
     expect(m).toBe(ValueMap.fromObject({ a: 1 }));
   });
 });
+
+describe('ValueMap.fromObject — own keys only', () => {
+  it('does not admit inherited enumerable keys (prototype pollution) as entries', () => {
+    (Object.prototype as unknown as Record<string, unknown>)['polluted'] = 7;
+    try {
+      const m = ValueMap.fromObject({ a: 1 });
+      expect(m.size).toBe(1);
+      expect([...m.keys()]).toEqual(['a']);
+      expect(m.has('polluted')).toBe(false);
+    } finally {
+      delete (Object.prototype as unknown as Record<string, unknown>)['polluted'];
+    }
+  });
+});
