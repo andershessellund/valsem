@@ -6,7 +6,7 @@ npm install valsem
 
 ::: info Runtime requirements
 A runtime with `WeakRef` and Web Crypto (`globalThis.crypto`, which seeds the
-flood-resistant hasher) — that is: Node ≥ 19, and all current browsers,
+flood-resistant hasher) and the ES2025 `Set` methods — that is: Node ≥ 22, and all current browsers,
 workers, Deno, and Bun. `FinalizationRegistry` is optional. Ships as ES
 modules with full TypeScript types, dependency-free and tree-shakeable.
 :::

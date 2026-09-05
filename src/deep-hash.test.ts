@@ -256,11 +256,16 @@ describe('deepHash', () => {
 });
 
 describe('deepHash — diagnostic for unregistered Temporal', () => {
-  it('points at the valsem/temporal import', () => {
+  // Native Temporal is a recent-Node feature; on the runtime-floor CI leg
+  // there is no global to build a value from, so this one case skips.
+  it.skipIf(typeof (globalThis as { Temporal?: unknown }).Temporal === 'undefined')(
+    'points at the valsem/temporal import',
+    () => {
     expect(() => deepHash(Temporal.PlainDate.from('2026-08-31'))).toThrow(
       /import 'valsem\/temporal'/,
     );
-  });
+    },
+  );
 
   it('keeps the generic message for other unregistered classes', () => {
     class Whatever {}

@@ -7,9 +7,12 @@ global interning, and immutable value collections.
 npm install valsem
 ```
 
-> Requires a runtime with `WeakRef` and Web Crypto (`globalThis.crypto`,
-> which seeds the flood‑resistant hasher) — that is: Node ≥ 19, and all
-> current browsers, workers, Deno, and Bun. `FinalizationRegistry` is
+> Requires a runtime with `WeakRef`, Web Crypto (`globalThis.crypto`, which
+> seeds the flood‑resistant hasher), and the ES2025 `Set` methods
+> (`union`, `isSubsetOf`, …, which `ValueSet` delegates to) — that is:
+> **Node ≥ 22**, and all current browsers, workers, Deno, and Bun.
+> `valsem/temporal` additionally needs a `Temporal` global: native in recent
+> Node, or a polyfill. `FinalizationRegistry` is
 > optional — when present, valsem uses a single sentinel as a GC‑epoch hint
 > for pool cleanup, never one cell per value. Ships as ES modules with full
 > TypeScript types.

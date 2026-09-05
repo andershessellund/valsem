@@ -22,7 +22,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: latest # the docs demo imports the compiled dist
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build # the docs demo imports the compiled dist

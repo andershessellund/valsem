@@ -59,6 +59,9 @@
     "docs:preview": "vitepress preview docs",
     "prepack": "pnpm build"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@12.3.4",
   "devDependencies": {
     "@types/node": "^22.0.0",

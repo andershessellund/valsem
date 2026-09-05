@@ -1,13 +1,19 @@
 // Temporal value semantics (`valsem/temporal`).
 //
 // Importing the module registers globally, so the import itself is the setup.
+// Native Temporal is a recent-Node feature: without the global the whole
+// file skips (the module throws at import by design — see
+// temporal-missing.test.ts), so a Node-floor CI leg stays green while the
+// latest-Node leg runs these for real.
 import { describe, it, expect } from 'vitest';
-import './temporal.js';
 import { deepEqual, deepHash, intern } from './index.js';
 
-const T = Temporal;
+const HAS_TEMPORAL = typeof (globalThis as { Temporal?: unknown }).Temporal !== 'undefined';
+if (HAS_TEMPORAL) await import('./temporal.js');
+const T = (globalThis as { Temporal?: typeof Temporal }).Temporal!;
+const describeTemporal = describe.skipIf(!HAS_TEMPORAL);
 
-describe('temporal — value semantics', () => {
+describeTemporal('temporal — value semantics', () => {
   it('every kind compares structurally instead of by reference', () => {
     const pairs: [string, unknown, unknown][] = [
       ['PlainDate', T.PlainDate.from('2026-08-31'), T.PlainDate.from('2026-08-31')],
@@ -63,7 +69,7 @@ describe('temporal — value semantics', () => {
   });
 });
 
-describe('temporal — ZonedDateTime is strictly field-wise: time-zone aliases are distinct values', () => {
+describeTemporal('temporal — ZonedDateTime is strictly field-wise: time-zone aliases are distinct values', () => {
   // equals() resolves link names to their primary identifier; the accessors
   // and toString() keep the identifier as supplied. Substitutability sides
   // with the accessors — and does not depend on the runtime's link table.
@@ -140,7 +146,7 @@ describe('temporal — ZonedDateTime is strictly field-wise: time-zone aliases a
   });
 });
 
-describe('temporal — Duration is strictly field-wise, not Duration.compare', () => {
+describeTemporal('temporal — Duration is strictly field-wise, not Duration.compare', () => {
   it('treats P1D and PT24H as distinct even though compare() says 0', () => {
     const day = T.Duration.from('P1D');
     const hours = T.Duration.from('PT24H');
@@ -197,7 +203,7 @@ describe('temporal — Duration is strictly field-wise, not Duration.compare', (
   });
 });
 
-describe('temporal — interning', () => {
+describeTemporal('temporal — interning', () => {
   it('pools Temporal values as canonical instances', () => {
     const a = T.PlainDate.from('2026-08-31');
     const b = T.PlainDate.from('2026-08-31');
