@@ -39,7 +39,7 @@ describe('after skipFreezing()', () => {
     expect(() => fastEquals(a, { x: 1 })).toThrow(/raw object/); // checks are a separate switch
     const m = new HashMap<object, number>();
     m.set(a, 1);
-    expect(m.getCanonical(a)).toBe(1);
+    expect(m.get({ x: [1, { y: 2 }] })).toBe(1);
     expect(memoize((v: { x: unknown[] }) => v.x.length)(a)).toBe(2);
   });
 

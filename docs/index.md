@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: valsem
-  text: Value semantics for JavaScript
-  tagline: 'Equal values are the same object: structural equality, companion hashing, global interning, and canonical collections — so comparison, memoization, and history become pointer operations.'
+  text: JavaScript values the way they should have been.
+  tagline: 'Immutable, with immer''s ergonomics, compared by value — and fast where it counts: equal content is the same object, so comparing state is a pointer check at any size.'
   actions:
     - theme: brand
       text: Get started

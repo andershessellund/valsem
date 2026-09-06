@@ -1,69 +1,75 @@
 # valsem
 
-**Equal values are the same object.**
-
-You know [immer](https://immerjs.github.io/immer/): `produce` gives you a new
-state with structural sharing. valsem's `produce` gives you the same thing —
-and every value it hands back is **canonical**: two states with the same
-content are the same object, wherever and however they were built.
-
-```ts
-import { produce } from 'valsem';
-
-const state = { todos: [{ id: 1, text: 'ship it', done: false }], filter: 'all' };
-
-const a = produce(state, (d) => { d.todos[0].done = true; });
-const b = produce(state, (d) => { d.todos[0].done = true; });
-
-a === b;              // true  — same content, same object
-a.todos === b.todos;  // true  — all the way down
-a === state;          // false — a is a different value
-```
-
-Which means comparison is `===`, and the things you used `===` for start
-working the way you always wished they would:
-
-```ts
-import { intern } from 'valsem';
-
-// Refetch the same data → the same object. React.memo hits. useMemo hits.
-const users = intern(await (await fetch('/api/users')).json());
-users === previousUsers; // true whenever the content is unchanged
-
-// "Did anything change?" / "Is this the state we saved?" — at any size, instantly.
-current === saved;
-```
+**JavaScript values the way they should have been.**
 
 ```bash
 npm install valsem
 ```
 
-## What you get
+**Immutable.** Everything that comes out of `produce`, `intern`, or a
+collection is frozen, all the way down. A stray mutation throws instead of
+corrupting state.
 
-- **A (mostly) drop-in `produce`** — the immer recipe API, whose results are
-  frozen, canonical values. Equal states are `===`; unchanged subtrees are the
-  same objects across *every* version, not just along one ancestry chain.
-- **`HashMap`** — a mutable map keyed by *content*: `{ id: 1, table: 'users' }`
-  and `{ table: 'users', id: 1 }` are the same key. A lookup with an
-  already-canonical key is O(1) — no hashing, no walk — within 2× of a native
-  `Map`.
-- **`ValueMap`, `ValueSet`, `ValueList`** — immutable collections with
-  structural sharing whose *instances* are canonical: equality is a pointer
-  compare, hashing is a property read, iteration outpaces Immutable.js.
-- **`deepEqual`** — structural equality that short-circuits to `===` on
-  canonical values and is competitive with `fast-deep-equal` on raw data.
-- **Extensible** — your own classes and third-party types (Temporal ships)
-  become values with one method or one registration.
-- **Principled** — everything valsem admits as a value is immutable,
-  canonical and compared by content. What it cannot treat as a value —
-  `Date`, `Map`, a class it does not know — is rejected with an error that
-  names the fix, never silently compared by reference.
+```ts
+import { produce } from 'valsem';
 
-The price is up-front: canonicalising a value means hashing it and looking it
-up in a pool, so building and updating costs more than a plain copy. The
-[benchmarks](#benchmarks) below show both sides. It is small, and it
-tree-shakes: `produce` alone is **8 KB gzipped**, `deepEqual` alone 1.4 KB,
-the whole package 15 KB.
+const next = produce(state, (d) => { d.todos[0].done = true; });
+next.todos.push(todo); // TypeError: Cannot add property 1, object is not extensible
+```
+
+**Ergonomic.** The immer API, verbatim: mutate a draft, get a new value, with
+structural sharing. `produceWithPatches`, `applyPatches`, `current`,
+`original`, and the curried form are all there.
+
+```ts
+const next = produce(state, (d) => {
+  d.todos.push({ id: 2, text: 'write docs', done: false });
+  d.filter = 'active';
+});
+```
+
+**Compared by value.** Two values with the same content are *equal*, and the
+collections agree: `ValueMap`, `ValueSet`, `ValueList` are immutable
+collections with structural sharing; `HashMap` and `HashSet` are mutable and
+keyed by content; `memoize` remembers a pure function by its arguments'
+content.
+
+```ts
+import { deepEqual, HashSet, memoize } from 'valsem';
+
+deepEqual({ a: 1, b: [2, 3] }, { b: [2, 3], a: 1 }); // true — key order is not content
+const seen = new HashSet<{ x: number; y: number }>();
+seen.add({ x: 1, y: 2 });
+seen.has({ y: 2, x: 1 });                            // true
+const visible = memoize((todos, filter) => todos.filter(matches(filter)));
+visible(state.todos, { done: false }) === visible(state.todos, { done: false }); // true — same instance
+```
+
+**Fast.** Here is exactly what is fast, and what is not. Every value valsem
+hands back is *canonical*: equal content is the same object. So comparing two
+canonical values is a pointer check — about 20 ns for a three-key record and
+for a three-million-key state alike — and everything built on comparison
+inherits that: `fastEquals`, `FastMap` and `FastSet` (native `Map` and `Set`
+for canonical keys, checked), `memoize` hits, and hashing, which is a cached
+property read. It is also `===`, which is why code that never heard of valsem
+benefits: `React.memo` and `useMemo` hit on refetched data, native `Map` keys
+work, reselect works.
+
+```ts
+import { fastEquals, intern } from 'valsem';
+
+fastEquals(current, saved);        // "unsaved changes?" — 20 ns at any size
+const users = intern(await (await fetch('/api/users')).json());
+users === previousUsers;           // true whenever the content is unchanged → React.memo hits
+```
+
+What is *not* fast is building: every value is hashed and canonicalised when
+it is created, so constructing and updating cost more than a plain copy — an
+edit to a 10k-item array runs 13–19 µs against immer's ~6, and a lookup with
+a raw (uncanonicalised) key walks it. That is the trade: a win for state that
+is compared, memoized, keyed, or kept in history more often than it is built,
+and a loss for state built once and thrown away. The [benchmarks](#benchmarks)
+show both sides.
 
 ## Coming from immer
 
@@ -124,10 +130,10 @@ deepEqual(new Date(0), new Date(0)); // false — reference semantics for mutabl
 
 ## Collections
 
-### `HashMap` and `HashSet` — mutable, keyed by content
+### `HashMap`, `HashSet`, `FastMap`, `FastSet` — mutable, keyed by value
 
 ```ts
-import { HashMap } from 'valsem';
+import { HashMap, FastMap } from 'valsem';
 
 const cache = new HashMap<{ table: string; id: number }, Row>();
 cache.set({ table: 'users', id: 1 }, row);
@@ -135,18 +141,23 @@ cache.get({ id: 1, table: 'users' }); // row — key order irrelevant
 
 // The idiomatic memoised lookup: the factory runs once per distinct key.
 const rows = cache.getOrCreate({ table: 'users', id: 2 }, (key) => loadRow(key));
+
+// Keys that are your state are already canonical — a native Map is a map keyed by value.
+const byState = new FastMap<State, Derived>();
+byState.set(state, derive(state));
+byState.get(produce(state, () => {})); // the same value → the same key, at native-Map speed
 ```
 
-Keys are interned on the way in. If the key you pass is already canonical —
-anything that came out of `produce`, `intern`, or a collection — the lookup is
-**O(1)** regardless of the key's size: no hashing, no structural walk, ~20 ns
-at native-`Map` parity. A raw key is walked and hashed once on the way in
-(~500 ns for a small record); the canonical key it resolves to is what the
-map actually holds. For keys that are new values every call — request
-objects, query params — `new HashMap({ intern: false })` matches by content
-without canonicalising: raw-key hits ~1.7× faster, inserts ~2.3×, nothing
-enters the pool, keys stored as given. `HashSet` is the same thing as a set:
-`seen.add({ x: 1, y: 2 }); seen.has({ y: 2, x: 1 }) // true`.
+`HashMap` and `HashSet` match keys by content — hashed and compared
+structurally — and store them as given: nothing is copied, frozen, or pooled,
+so keys that are fresh values every call (request objects, query params,
+coordinates) cost one hash and one compare (~300 ns for a small record). A
+key mutated after insertion is no longer found, as in any hash map with
+mutable keys. `FastMap` and `FastSet` are the other half: native `Map` and
+`Set` for keys that are canonical, where reference equality already is value
+equality, so lookups run at native speed (~16 ns). While checks are on a raw
+key throws rather than silently missing; after `skipChecks()` the constructor
+hands back a plain `Map`.
 
 ### `memoize` — a pure function, remembered by content
 
@@ -370,7 +381,7 @@ exact narrowing, `applyPatches` support — which is also a test in the repo.
   frozen, all the way down — unless you call `skipFreezing()`, which trades
   that enforcement for unfrozen (faster to iterate) canonical arrays; see
   the hardening guide.
-- **Canonical.** Equal content is the same object — lineage-free: however a
+- **Canonical.** Equal values are the same object — lineage-free: however a
   value was built, it converges on one instance.
 - **Compared by content.** `deepEqual` never throws on a *type* — mutable
   objects simply compare by reference — and on canonical values it is a
@@ -410,7 +421,8 @@ bindings (`valsem/binding`).
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
-| `HashMap`, `HashSet` | mutable map and set keyed by content (`{ intern: false }` for keys that are fresh every call) |
+| `HashMap`, `HashSet` | mutable map and set keyed by content, keys stored as given |
+| `FastMap`, `FastSet` | native `Map`/`Set` for canonical keys, checked |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |

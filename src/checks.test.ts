@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { intern, isCanonical, fastEquals } from './intern.js';
 import { produce } from './produce.js';
-import { HashMap } from './hash-map.js';
+import { FastMap, FastSet } from './fast-collections.js';
 import { ValueList } from './value-list.js';
 import { ValueDate } from './value-date.js';
 
@@ -46,14 +46,30 @@ describe('fastEquals (checks on)', () => {
   });
 });
 
-describe('HashMap.getCanonical (checks on)', () => {
-  it('takes canonical keys and rejects raw ones', () => {
-    const m = new HashMap<{ id: number }, string>();
-    m.set({ id: 1 }, 'v');
-    expect(m.getCanonical(intern({ id: 1 }))).toBe('v');
-    expect(() => m.getCanonical({ id: 1 })).toThrow(/getCanonical\(\) takes a canonical key/);
-    const p = new HashMap<number, string>();
-    p.set(1, 'one');
-    expect(p.getCanonical(1)).toBe('one'); // primitives are canonical
+describe('FastMap and FastSet (checks on)', () => {
+  it('are native Map/Set for canonical keys, and reject raw ones on every access', () => {
+    const m = new FastMap<unknown, string>();
+    const k = intern({ id: 1 });
+    m.set(k, 'v').set(1, 'one').set('s', 'str');
+    expect(m.get(intern({ id: 1 }))).toBe('v'); // canonical: === is value equality
+    expect(m.get(1)).toBe('one');
+    expect(m.has('s')).toBe(true);
+    expect(m).toBeInstanceOf(Map);
+    expect(m).toBeInstanceOf(FastMap);
+    expect(m.size).toBe(3);
+    for (const op of [() => m.get({ id: 1 }), () => m.has({ id: 1 }), () => m.set({ id: 1 }, 'x'), () => m.delete({ id: 1 })]) {
+      expect(op).toThrow(/FastMap takes canonical keys only/);
+    }
+    expect(() => m.get({ id: 1 })).toThrow(/use HashMap to match by content/);
+    expect(m.delete(k)).toBe(true);
+    expect([...new FastMap([[intern({ a: 1 }), 1]]).keys()]).toEqual([intern({ a: 1 })]);
+
+    const s = new FastSet<unknown>([intern({ x: 1 }), 2]);
+    expect(s.has(intern({ x: 1 }))).toBe(true);
+    expect(s.has(2)).toBe(true);
+    expect(() => s.has({ x: 1 })).toThrow(/FastSet takes canonical elements only/);
+    expect(() => s.add([1])).toThrow(/use HashSet to match by content/);
+    expect(s).toBeInstanceOf(Set);
+    expect(s.size).toBe(2);
   });
 });

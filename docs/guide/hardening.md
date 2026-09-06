@@ -75,7 +75,7 @@ repository's `BENCHMARKS.md`.
 valsem enforces two promises its callers make. It **freezes** every plain
 record and array it canonicalises, so the promise "nobody mutates a shared
 value" is kept by the engine (a mutation throws in strict mode). And where
-an API says *canonical only* — `fastEquals(a, b)`, `HashMap.getCanonical` —
+an API says *canonical only* — `fastEquals(a, b)`, `FastMap`, `FastSet` —
 it **checks** that the caller kept that promise, because the alternative is
 a silent wrong answer (`===` on a raw object is `false`, a raw key misses).
 
@@ -88,7 +88,7 @@ at startup, the way Angular's `enableProdMode()` is:
 import { skipChecks, skipFreezing } from 'valsem';
 
 if (process.env.NODE_ENV === 'production') {
-  skipChecks();   // fastEquals / getCanonical trust their arguments
+  skipChecks();   // fastEquals trusts its arguments; new FastMap() is a plain Map
   skipFreezing(); // canonical records and arrays are no longer frozen
 }
 ```
@@ -96,7 +96,8 @@ if (process.env.NODE_ENV === 'production') {
 **What `skipChecks()` gives up.** The checks cost a property read and a
 cache probe, so the reason to skip them is principle, not speed: from then
 on a raw argument at a *canonical only* call site is a silent wrong answer
-instead of a thrown one. Semantics are untouched — non-values are still
+instead of a thrown one — and `new FastMap()`/`new FastSet()` hand back the
+native classes themselves, so those run at exactly native cost. Semantics are untouched — non-values are still
 rejected, results are still canonical.
 
 **What `skipFreezing()` buys, and costs.** Frozen arrays are slow in V8.

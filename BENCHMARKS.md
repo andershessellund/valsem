@@ -97,30 +97,34 @@ where it was ~300, and the raw-record rows above moved from parity to
 it — they short-circuit before any enumeration — and the alternative was the
 silent wrong answer (`deepEqual({ [s]: 1 }, { [s]: 2 })` used to be `true`).
 
-## HashMap: interning keys, or not
+## HashMap and FastMap
 
-`pnpm bench:hashmap`. Two modes, one class. The default interns every key
-and keys a native `Map` by the canonical reference; `{ intern: false }`
-hashes and compares keys by content in a bucket table and stores them as
-given. Hits, ns:
+`pnpm bench:hashmap`. `HashMap` matches keys by content (hash + structural
+compare, keys stored as given, never interned); `FastMap` is a native `Map`
+that only admits canonical keys — reference equality is value equality
+there — checked while checks are on, and literally `Map` after
+`skipChecks()`. Hits, ns:
 
-| key | `intern: true` (default) | `intern: false` |
-| --- | --- | --- |
-| canonical key, `get` | **19** | 49 |
-| canonical key, `getCanonical` | 27 | 57 |
-| primitive key | 27 | 52 |
-| raw 2-key object, `get` | 514 | **303** |
-| raw 50-item payload, `get` | 24,800 | **12,800** |
-| novel raw 2-key object, `set` | 1,073 | **460** |
+| key | `HashMap` | `FastMap`, checks on | native `Map` (= `FastMap` after `skipChecks()`) |
+| --- | --- | --- | --- |
+| canonical object | 46 | 28 | **16** |
+| primitive | 53 | 23 | 24 |
+| raw 2-key object | **303** | throws | misses |
+| raw 50-item payload | 12,600 | throws | misses |
+| novel raw 2-key object, `set` | 432 | throws | — |
 
-The rule follows: keys that are your state (canonical) take the default;
-keys that are fresh values every call — request objects, query params —
-take `intern: false`, which also keeps each novel key out of the pool (no
-copy, no freeze, no `WeakRef`). The bucket table under the second mode is
-the same one `memoize` uses, with memoize supplying its own hash fold and
-`===`-per-argument match — which is why memoize keeps its 49 ns hit rather
-than the 76 ns a generic `HashMap.get` on the argument array would cost
-(`deepHash`'s guard and probe, `deepEqual`'s two canonical probes).
+The rule follows: keys that are your state are canonical and take `FastMap`
+(the check is ~12 ns; after `skipChecks()` the constructor returns a plain
+`Map`, so the cost is exactly native); keys that are fresh values every
+call take `HashMap`, which keeps each novel key out of the pool (no copy, no
+freeze, no `WeakRef`). The interning map this replaced — intern every key,
+then key a `Map` by the canonical — was slower than both on their own
+ground (19 ns on canonical keys, 514 on raw, 1,073 per novel insert). The
+bucket table under `HashMap` is the same one `memoize` uses, with memoize
+supplying its own hash fold and `===`-per-argument match — which is why
+memoize keeps its ~50 ns hit rather than the 76 ns a generic `HashMap.get`
+on the argument array would cost (`deepHash`'s guard and probe,
+`deepEqual`'s two canonical probes).
 
 ## memoize
 
@@ -155,10 +159,9 @@ first argument — the common selector shape. Going through the interning
 `HashMap` costs 2–2.5× on every hit (two canonical arguments: 55 → 133 ns)
 and 3.75× on primitive-argument misses, because `intern(args)` copies the
 tuple, pools it (a WeakRef per novel call), and freezes it; going through
-the non-interning `HashMap.get` still costs 1.7× (45 → 76 ns) for the
-generic hash and equality of the argument array. memoize therefore shares
-the bucket table with the non-interning mode but supplies its own hash fold
-and match.
+`HashMap.get` still costs 1.7× (45 → 76 ns) for the generic hash and
+equality of the argument array. memoize therefore shares `HashMap`'s bucket
+table but supplies its own hash fold and match.
 
 ## Freezing: the state, not the call
 
@@ -455,7 +458,7 @@ update-throughput number shows:
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
 | `pnpm bench:frozen` | what V8 charges for the frozen STATE of an array, per operation and elements kind — the case for `skipFreezing()` |
-| `pnpm bench:hashmap` | `HashMap`'s two modes by key kind: canonical, primitive, raw, novel |
+| `pnpm bench:hashmap` | `HashMap` vs `FastMap` vs native `Map` by key kind: canonical, primitive, raw, novel |
 | `pnpm bench:memoize` | memo hit/miss cost by argument kind: canonical, fresh literal beside canonical, raw, by width |
 | `node --allow-natives-syntax scripts/record-copy-bench.mjs` | dictionary-mode threshold by construction method; spread vs `Object.assign` at a megamorphic copy site |
 | `npx bun@latest scripts/<any>.mjs` | any of the above on JavaScriptCore (`VALSEM_DIST=<dir>` points `collections-bench` at an alternative build) |

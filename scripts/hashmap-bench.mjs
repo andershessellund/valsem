@@ -1,16 +1,17 @@
 // ---------------------------------------------------------------------------
-// hashmap-bench — HashMap's two modes, by key kind.
+// hashmap-bench — the two mutable maps, by key kind.
 //
-// Default mode interns every key and keys a native Map by the canonical
-// reference: a canonical key looks up at Map speed, a raw key pays an intern
-// walk (copy, hash, pool lookup — and on a novel key, a pool entry). With
-// { intern: false } keys are hashed and compared by content in a bucket
-// table and stored as given: for keys that are new values every call.
+// HashMap matches keys by content (hash + structural compare, keys stored as
+// given, never interned). FastMap is a native Map that only admits canonical
+// keys — reference equality is value equality there — checked while checks
+// are on, and literally `Map` after skipChecks().
 //
 // Run: pnpm build && node scripts/hashmap-bench.mjs
 // ---------------------------------------------------------------------------
 import { HashMap } from '../dist/hash-map.js';
+import { FastMap } from '../dist/fast-collections.js';
 import { intern } from '../dist/intern.js';
+import { skipChecks } from '../dist/checks.js';
 
 function t(fn, it = 300000) {
   for (let i = 0; i < 30000; i++) fn(i);
@@ -18,25 +19,31 @@ function t(fn, it = 300000) {
   for (let i = 0; i < it; i++) fn(i);
   return Number(process.hrtime.bigint() - t0) / it;
 }
-const row = (name, a, b) =>
-  console.log(`  ${name.padEnd(40)} ${a.toFixed(0).padStart(6)} ns   ${b.toFixed(0).padStart(6)} ns   ${(b / a).toFixed(2)}×`);
-console.log('\n                                           intern:true  intern:false');
+const ns = (x) => `${x.toFixed(0).padStart(6)} ns`;
 const keys = Array.from({ length: 4096 }, (_, i) => intern({ table: 'users', id: i }));
+const fill = (m) => { for (let i = 0; i < keys.length; i++) m.set(keys[i], i); return m; };
+
+console.log('\ncanonical keys, hit                          HashMap   FastMap(checks on)   native Map');
 {
-  const a = new HashMap(), b = new HashMap({ intern: false });
-  for (const k of keys) { a.set(k, 1); b.set(k, 1); }
-  row('get, canonical key (hit)', t((i) => a.get(keys[i & 4095])), t((i) => b.get(keys[i & 4095])));
-  row('getCanonical, canonical key (hit)', t((i) => a.getCanonical(keys[i & 4095])), t((i) => b.getCanonical(keys[i & 4095])));
-  row('get, raw 2-key object (hit)', t((i) => a.get({ table: 'users', id: i & 4095 })), t((i) => b.get({ table: 'users', id: i & 4095 })));
-  row('get, primitive key (hit)', t((i) => a.get(i & 4095)), t((i) => b.get(i & 4095)));
+  const h = fill(new HashMap()), f = fill(new FastMap()), n = fill(new Map());
+  const row = (name, a, b, c) => console.log(`  ${name.padEnd(40)} ${ns(a)}   ${ns(b)}           ${ns(c)}`);
+  row('get, canonical object key', t((i) => h.get(keys[i & 4095])), t((i) => f.get(keys[i & 4095])), t((i) => n.get(keys[i & 4095])));
+  row('get, primitive key', t((i) => h.get(i & 4095)), t((i) => f.get(i & 4095)), t((i) => n.get(i & 4095)));
 }
+console.log('\nraw keys (HashMap only — FastMap rejects them)');
 {
-  const a = new HashMap(), b = new HashMap({ intern: false });
-  row('set, novel raw 2-key object', t((i) => a.set({ table: 'x', id: i }, 1), 100000), t((i) => b.set({ table: 'x', id: i }, 1), 100000));
-}
-{
+  const h = fill(new HashMap());
+  console.log(`  ${'get, raw 2-key object (hit)'.padEnd(40)} ${ns(t((i) => h.get({ table: 'users', id: i & 4095 })))}`);
   const big = Array.from({ length: 50 }, (_, i) => ({ id: i, v: i }));
-  const a = new HashMap(), b = new HashMap({ intern: false });
-  a.set({ items: big }, 1); b.set({ items: big }, 1);
-  row('get, raw 50-item payload key (hit)', t(() => a.get({ items: big.map((x) => ({ ...x })) }), 20000), t(() => b.get({ items: big.map((x) => ({ ...x })) }), 20000));
+  h.set({ items: big }, 1);
+  console.log(`  ${'get, raw 50-item payload key (hit)'.padEnd(40)} ${ns(t(() => h.get({ items: big.map((x) => ({ ...x })) }), 20000))}`);
+  const s = new HashMap();
+  console.log(`  ${'set, novel raw 2-key object'.padEnd(40)} ${ns(t((i) => s.set({ table: 'x', id: i }, 1), 100000))}`);
+}
+skipChecks();
+console.log('\nafter skipChecks()');
+{
+  const f = fill(new FastMap());
+  console.log(`  new FastMap() is a native Map: ${f.constructor === Map}`);
+  console.log(`  ${'get, canonical object key'.padEnd(40)} ${ns(t((i) => f.get(keys[i & 4095])))}`);
 }

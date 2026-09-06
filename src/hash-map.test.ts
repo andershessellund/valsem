@@ -126,31 +126,22 @@ describe('HashMap', () => {
     expect(map.has({ id: 1 })).toBe(true);
   });
 
-  it('getOrCreate() hands the factory the canonical key', () => {
+  it('getOrCreate() hands the factory the key as given', () => {
     const map = new HashMap<{ id: number }, object>();
     const raw = { id: 7 };
     const seen = map.getOrCreate(raw, (k) => k);
-    expect(seen).not.toBe(raw);
-    expect(seen).toBe(intern(raw));
-    expect(Object.isFrozen(seen)).toBe(true);
+    expect(seen).toBe(raw);
+    expect(Object.isFrozen(raw)).toBe(false);
+    expect(isCanonical(raw)).toBe(false); // never interned, never pooled
   });
 
-  it('getCanonical() hits on a canonical key; a raw key is caught while checks are on', () => {
-    const map = new HashMap<{ id: number }, string>();
-    map.set({ id: 1 }, 'v');
-    expect(map.getCanonical(intern({ id: 1 }))).toBe('v');
-    // No intern call — a raw key would silently miss, so the promise is verified
-    // (skip-checks.test.ts shows the silent miss once skipChecks() is called).
-    expect(() => map.getCanonical({ id: 1 })).toThrow(/takes a canonical key/);
-  });
-
-  it('iteration yields canonical keys, not the caller\'s objects', () => {
+  it('iteration yields the caller\'s own key objects, stored as given', () => {
     const map = new HashMap<{ id: number }, string>();
     const k = { id: 1 };
     map.set(k, 'v');
     const [yielded] = [...map.keys()];
-    expect(yielded).not.toBe(k);
-    expect(yielded).toBe(intern(k));
+    expect(yielded).toBe(k);
+    expect(isCanonical(k)).toBe(false);
   });
 
   it('entries() yields all key-value pairs', () => {
@@ -235,9 +226,9 @@ describe('HashMap', () => {
   });
 });
 
-describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys', () => {
+describe('HashMap — content-matched, keys stored as given', () => {
   it('matches by content, key order included, without interning the key', () => {
-    const m = new HashMap<{ table: string; id: number }, string>({ intern: false });
+    const m = new HashMap<{ table: string; id: number }, string>();
     const k = { table: 'users', id: 1 };
     m.set(k, 'v');
     expect(m.get({ id: 1, table: 'users' })).toBe('v');
@@ -250,7 +241,7 @@ describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys',
   });
 
   it('set on an equal key replaces the value and keeps the stored key; delete works by content', () => {
-    const m = new HashMap<{ id: number }, number>({ intern: false });
+    const m = new HashMap<{ id: number }, number>();
     const first = { id: 1 };
     m.set(first, 1).set({ id: 1 }, 2);
     expect(m.size).toBe(1);
@@ -261,20 +252,18 @@ describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys',
     expect(m.size).toBe(0);
   });
 
-  it('canonical and primitive keys work too; getCanonical keeps its check', () => {
-    const m = new HashMap<unknown, string>({ intern: false });
+  it('canonical and primitive keys work too', () => {
+    const m = new HashMap<unknown, string>();
     const c = intern({ a: [1] });
     m.set(c, 'c').set(7, 'seven').set('s', 'str');
     expect(m.get(intern({ a: [1] }))).toBe('c');
     expect(m.get({ a: [1] })).toBe('c'); // raw spelling of the same value
     expect(m.get(7)).toBe('seven');
-    expect(m.getCanonical(c)).toBe('c');
-    expect(m.getCanonical(7)).toBe('seven');
-    expect(() => m.getCanonical({ a: [1] })).toThrow(/takes a canonical key/);
+    expect(m.get('s')).toBe('str');
   });
 
   it('getOrCreate hands the factory the key as given, caches undefined, and never re-runs', () => {
-    const m = new HashMap<{ q: string }, number | undefined>({ intern: false });
+    const m = new HashMap<{ q: string }, number | undefined>();
     let runs = 0;
     const key = { q: 'x' };
     const fac = (k: { q: string }) => {
@@ -289,7 +278,7 @@ describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys',
   });
 
   it('iterates in insertion order, survives deletes, and clears', () => {
-    const m = new HashMap<number, string>({ intern: false });
+    const m = new HashMap<number, string>();
     for (let i = 0; i < 5; i++) m.set(i, `v${i}`);
     m.delete(2);
     m.set(2, 'again');
@@ -308,7 +297,7 @@ describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys',
   });
 
   it('is correct across many keys (bucket collisions included) and rejects non-values like get() does', () => {
-    const m = new HashMap<{ i: number; s: string }, number>({ intern: false });
+    const m = new HashMap<{ i: number; s: string }, number>();
     for (let i = 0; i < 3000; i++) m.set({ i, s: `k${i}` }, i);
     expect(m.size).toBe(3000);
     for (let i = 0; i < 3000; i++) expect(m.get({ s: `k${i}`, i })).toBe(i);
@@ -319,7 +308,7 @@ describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys',
   });
 
   it('the documented hazard: a stored key mutated afterwards is no longer found', () => {
-    const m = new HashMap<{ id: number }, string>({ intern: false });
+    const m = new HashMap<{ id: number }, string>();
     const k = { id: 1 };
     m.set(k, 'v');
     k.id = 2;
