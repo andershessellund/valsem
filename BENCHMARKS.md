@@ -7,7 +7,7 @@ Every number below is produced by `pnpm bench`, which runs the suites in `bench/
 | | node 26.3.0 (V8) | bun 1.4.2 (JavaScriptCore) |
 | --- | --- | --- |
 | machine | Apple M2 Pro, darwin arm64 | Apple M2 Pro, darwin arm64 |
-| date, commit | 2026-09-06, `7ba9d5a` | 2026-09-06, `7ba9d5a` |
+| date, commit | 2026-09-06, `378feb5` | 2026-09-06, `378feb5` |
 | valsem | 0.0.1 | 0.0.1 |
 | immer / mutative / immutable / fast-deep-equal | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 |
 
@@ -55,28 +55,32 @@ numbers, a boolean), as `JSON.parse` delivers it. Rows per size:
 - **intern, unchanged refetch** — the same content arrives again; every record finds its pool entry and no copy is built.
 - **intern, 10% changed** — a refetch with every tenth record different.
 - **ValueList.from** of the same records — the list structure on top of admission.
+- **RawArray.from + slice(0, 100)** — the way to *not* admit a large response: the view copies the array once and
+  admits only the rows a slice asks for, so the cost is proportional to the window, not the response.
 
 Values are per response; divide by N for the per-record cost. At 100 Mbit with 80% compression, the 1k response
 transfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission runs on it.
 
 |  | per response |
 | --- | --- |
-| 1000 × 10: JSON.parse | 380.7 µs / 356.3 µs |
-| 1000 × 10: structuredClone | 753.1 µs / 454.7 µs |
-| 1000 × 10: immer auto-freeze walk | 183.8 µs / 271.7 µs |
-| 1000 × 10: intern, all new content | 1.46 ms / 936.0 µs |
-| 1000 × 10: intern, unchanged refetch (all pool hits) | 761.5 µs / 942.6 µs |
-| 1000 × 10: intern, refetch with 10% of records changed | 950.5 µs / 913.0 µs |
-| 1000 × 10: ValueList.from, all new content | 1.62 ms / 1.18 ms |
-| 1000 × 10: ValueList.from, canonical records (the list alone) | 130.2 µs / 100.9 µs |
-| 10000 × 10: JSON.parse | 3.66 ms / 3.60 ms |
-| 10000 × 10: structuredClone | 7.50 ms / 4.71 ms |
-| 10000 × 10: immer auto-freeze walk | 1.84 ms / 3.41 ms |
-| 10000 × 10: intern, all new content | 18.33 ms / 12.17 ms |
-| 10000 × 10: intern, unchanged refetch (all pool hits) | 8.74 ms / 8.29 ms |
-| 10000 × 10: intern, refetch with 10% of records changed | 10.59 ms / 10.51 ms |
-| 10000 × 10: ValueList.from, all new content | 25.64 ms / 15.41 ms |
-| 10000 × 10: ValueList.from, canonical records (the list alone) | 845.7 µs / 1.29 ms |
+| 1000 × 10: JSON.parse | 387.2 µs / 372.4 µs |
+| 1000 × 10: structuredClone | 740.6 µs / 453.5 µs |
+| 1000 × 10: immer auto-freeze walk | 172.1 µs / 339.1 µs |
+| 1000 × 10: intern, all new content | 2.06 ms / 907.6 µs |
+| 1000 × 10: intern, unchanged refetch (all pool hits) | 941.5 µs / 615.1 µs |
+| 1000 × 10: intern, refetch with 10% of records changed | 1.04 ms / 877.7 µs |
+| 1000 × 10: ValueList.from, all new content | 1.90 ms / 1.19 ms |
+| 1000 × 10: ValueList.from, canonical records (the list alone) | 84.8 µs / 96.1 µs |
+| 1000 × 10: RawArray.from + slice(0, 100) — admit only the visible window | 238.1 µs / 166.2 µs |
+| 10000 × 10: JSON.parse | 4.25 ms / 3.63 ms |
+| 10000 × 10: structuredClone | 8.27 ms / 4.89 ms |
+| 10000 × 10: immer auto-freeze walk | 1.85 ms / 3.63 ms |
+| 10000 × 10: intern, all new content | 18.97 ms / 14.38 ms |
+| 10000 × 10: intern, unchanged refetch (all pool hits) | 9.31 ms / 8.02 ms |
+| 10000 × 10: intern, refetch with 10% of records changed | 11.10 ms / 14.97 ms |
+| 10000 × 10: ValueList.from, all new content | 21.02 ms / 11.73 ms |
+| 10000 × 10: ValueList.from, canonical records (the list alone) | 743.4 µs / 1.26 ms |
+| 10000 × 10: RawArray.from + slice(0, 100) — admit only the visible window | 163.7 µs / 132.2 µs |
 
 ## deepEqual — against fast-deep-equal
 

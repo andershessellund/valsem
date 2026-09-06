@@ -1,6 +1,7 @@
 import { time, row, isBun } from '../lib.mjs';
 import { intern } from '../../dist/intern.js';
 import { ValueList } from '../../dist/value-list.js';
+import { RawArray } from '../../dist/raw-array.js';
 import { produce as immerProduce, setAutoFreeze } from 'immer';
 
 const F = 10;
@@ -24,6 +25,8 @@ numbers, a boolean), as \`JSON.parse\` delivers it. Rows per size:
 - **intern, unchanged refetch** — the same content arrives again; every record finds its pool entry and no copy is built.
 - **intern, 10% changed** — a refetch with every tenth record different.
 - **ValueList.from** of the same records — the list structure on top of admission.
+- **RawArray.from + slice(0, 100)** — the way to *not* admit a large response: the view copies the array once and
+  admits only the rows a slice asks for, so the cost is proportional to the window, not the response.
 
 Values are per response; divide by N for the per-record cost. At 100 Mbit with 80% compression, the 1k response
 transfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission runs on it.
@@ -62,6 +65,9 @@ transfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission r
       rows.push(row(`${tag}: ValueList.from, all new content`, { 'per response': time(() => ValueList.from(freshL[k++ % it]), it) }));
       const canon = intern(response(0));
       rows.push(row(`${tag}: ValueList.from, canonical records (the list alone)`, { 'per response': time(() => ValueList.from(canon), it) }));
+      const forView = Array.from({ length: it }, () => response(salt++));
+      k = 0;
+      rows.push(row(`${tag}: RawArray.from + slice(0, 100) — admit only the visible window`, { 'per response': time(() => RawArray.from(forView[k++ % it]).slice(0, 100), it) }));
     }
     if (isBun) {
       /* same rows; nothing runtime-specific */

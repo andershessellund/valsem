@@ -268,3 +268,30 @@ not tax the next — the first consolidated run showed list rows 10× off for
 that reason. Every comparison row asserts the contenders agree on the
 answer. `BENCHMARKS.md` is generated from the JSON the suites write, on
 Node and on Bun, and is never edited by hand.
+
+## D21. Interning is never optional; large responses get `RawArray`
+
+Making interning optional throughout (a flag on `produce`, on the
+collections, everywhere; "canonical form without pooling") was considered
+and rejected. It is feasible for `intern` and `produce` at ~1 KB, but not
+for the collections without a second, structural equality implementation,
+and — the real objection — it removes the guarantee rather than an
+enforcement: for the values it touches, `===` on equal content is `false`
+and nothing downstream can tell. The two switches (D16) only ever remove
+enforcement. The pool tax it would save (~0.3–0.5 µs per new node) is not
+substantially reducible either: hashing, a `WeakRef`, a map access and a
+registry cell are what interning is.
+
+The problem that motivated it — fetch 100k rows, show 100 — is solved at
+the boundary instead. `RawArray.from(response)` holds the raw array and
+admits elements on demand: `slice(a, b)` returns the canonical array of
+that range, each element interned once and memoized per slot, so the
+visible window costs 100 interns and a refetch's unchanged rows come back
+`===` because they land on the same pool instances. The view is its own
+value by identity (`[hashCode]` an identity hash, `[equals]` `===`, marked
+`[interned]`), so it sits in canonical state as an opaque leaf; it is not a
+value of its content, and it has no iteration, so every O(n) admission is
+an explicit `slice()`. A Proxy that made it array-like was considered and
+dropped: `Array.isArray` would be true and every walk would materialise it.
+The name says what the contents are — raw, the library's word for "not yet
+a value" — rather than where they came from.

@@ -9,7 +9,7 @@
     "platform": "darwin arm64"
   },
   "date": "2026-09-06",
-  "commit": "7ba9d5a",
+  "commit": "378feb5",
   "valsem": "0.0.1",
   "libraries": {
     "immer": "11.1.18",
@@ -118,7 +118,7 @@
     {
       "id": "boundary",
       "title": "The boundary — admitting raw data",
-      "description": "\nWhat it costs to make an API response canonical: an array of N records with 10 fields each (five strings, four\nnumbers, a boolean), as `JSON.parse` delivers it. Rows per size:\n\n- **JSON.parse** of the same payload — a cost the application pays anyway; the yardstick.\n- **structuredClone** and **immer's auto-freeze walk** (`produce(data, () => {})`) — the cheapest \"make it\n  immutable\" walks a frontend runs today.\n- **intern, all new content** — every record is novel: hashed, copied, pooled, frozen.\n- **intern, unchanged refetch** — the same content arrives again; every record finds its pool entry and no copy is built.\n- **intern, 10% changed** — a refetch with every tenth record different.\n- **ValueList.from** of the same records — the list structure on top of admission.\n\nValues are per response; divide by N for the per-record cost. At 100 Mbit with 80% compression, the 1k response\ntransfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission runs on it.\n",
+      "description": "\nWhat it costs to make an API response canonical: an array of N records with 10 fields each (five strings, four\nnumbers, a boolean), as `JSON.parse` delivers it. Rows per size:\n\n- **JSON.parse** of the same payload — a cost the application pays anyway; the yardstick.\n- **structuredClone** and **immer's auto-freeze walk** (`produce(data, () => {})`) — the cheapest \"make it\n  immutable\" walks a frontend runs today.\n- **intern, all new content** — every record is novel: hashed, copied, pooled, frozen.\n- **intern, unchanged refetch** — the same content arrives again; every record finds its pool entry and no copy is built.\n- **intern, 10% changed** — a refetch with every tenth record different.\n- **ValueList.from** of the same records — the list structure on top of admission.\n- **RawArray.from + slice(0, 100)** — the way to *not* admit a large response: the view copies the array once and\n  admits only the rows a slice asks for, so the cost is proportional to the window, not the response.\n\nValues are per response; divide by N for the per-record cost. At 100 Mbit with 80% compression, the 1k response\ntransfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission runs on it.\n",
       "columns": [
         "per response"
       ],
@@ -128,97 +128,109 @@
         {
           "name": "1000 × 10: JSON.parse",
           "values": {
-            "per response": 356289.81666666665
+            "per response": 372442.1277777778
           }
         },
         {
           "name": "1000 × 10: structuredClone",
           "values": {
-            "per response": 454745.8333333333
+            "per response": 453511.81666666665
           }
         },
         {
           "name": "1000 × 10: immer auto-freeze walk",
           "values": {
-            "per response": 271679.1666666667
+            "per response": 339132.63333333336
           }
         },
         {
           "name": "1000 × 10: intern, all new content",
           "values": {
-            "per response": 935988.9
+            "per response": 907611.8166666667
           }
         },
         {
           "name": "1000 × 10: intern, unchanged refetch (all pool hits)",
           "values": {
-            "per response": 942568.75
+            "per response": 615059.7166666667
           }
         },
         {
           "name": "1000 × 10: intern, refetch with 10% of records changed",
           "values": {
-            "per response": 912960.4166666666
+            "per response": 877663.8833333333
           }
         },
         {
           "name": "1000 × 10: ValueList.from, all new content",
           "values": {
-            "per response": 1177495.8333333333
+            "per response": 1194681.95
           }
         },
         {
           "name": "1000 × 10: ValueList.from, canonical records (the list alone)",
           "values": {
-            "per response": 100932.63333333333
+            "per response": 96137.5
+          }
+        },
+        {
+          "name": "1000 × 10: RawArray.from + slice(0, 100) — admit only the visible window",
+          "values": {
+            "per response": 166170.83333333334
           }
         },
         {
           "name": "10000 × 10: JSON.parse",
           "values": {
-            "per response": 3598548.611111111
+            "per response": 3633878.472222222
           }
         },
         {
           "name": "10000 × 10: structuredClone",
           "values": {
-            "per response": 4708104.166666667
+            "per response": 4893770.833333333
           }
         },
         {
           "name": "10000 × 10: immer auto-freeze walk",
           "values": {
-            "per response": 3412472.1666666665
+            "per response": 3633413.1666666665
           }
         },
         {
           "name": "10000 × 10: intern, all new content",
           "values": {
-            "per response": 12171965.25
+            "per response": 14382173.583333334
           }
         },
         {
           "name": "10000 × 10: intern, unchanged refetch (all pool hits)",
           "values": {
-            "per response": 8286965.25
+            "per response": 8023131.916666667
           }
         },
         {
           "name": "10000 × 10: intern, refetch with 10% of records changed",
           "values": {
-            "per response": 10514875
+            "per response": 14968947.916666666
           }
         },
         {
           "name": "10000 × 10: ValueList.from, all new content",
           "values": {
-            "per response": 15412055.583333334
+            "per response": 11728607.666666666
           }
         },
         {
           "name": "10000 × 10: ValueList.from, canonical records (the list alone)",
           "values": {
-            "per response": 1291697.9166666667
+            "per response": 1255576.4166666667
+          }
+        },
+        {
+          "name": "10000 × 10: RawArray.from + slice(0, 100) — admit only the visible window",
+          "values": {
+            "per response": 132180.58333333334
           }
         }
       ]

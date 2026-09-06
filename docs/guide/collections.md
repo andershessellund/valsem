@@ -67,6 +67,11 @@ amortised rebuild anywhere. `InternedString` *does* expose its datum —
 is a primitive. The rule: the representation is public exactly where the
 runtime can actually protect it.
 
+## Things you are unlikely to need — but if you do
+
+Two tools for the ends of the scale, each solving one problem the core
+deliberately does not.
+
 `InternedString` is the large-string tool. A string is hashed by walking it
 (~1 ns per character), and valsem hashes a string value every time the
 record holding it is hashed from raw — at the boundary, and on raw-key
@@ -79,6 +84,27 @@ strings; the round trip back is `InternedString.for` at the boundary. The
 price is an object where a primitive was: reads go through `.value`, and
 `typeof` says `'object'`. Ids, names and short strings do not need it —
 hashing them costs less than the wrapper.
+
+`RawArray` is the large-response tool. Admitting a response costs ~1.8 µs
+per 10-field record, paid for every record whether or not anything looks
+at it, and a 100k-row response is admitted to show 100 rows. A `RawArray`
+holds the response as received and admits on demand: `slice(a, b)` returns
+the canonical array of that range, each element interned once and memoized
+per slot, so the visible window costs 100 interns, the same row is the same
+object across slices, and a refetch's unchanged rows land on the same pool
+instances and come back `===`. It is not a value of its content — two views
+over equal JSON are two values, by identity — so it sits inside canonical
+state as an opaque leaf that `intern` and `produce` pass through.
+`slice()` with no arguments admits everything, and `get(i)` reads one row;
+there is deliberately no iteration, so the O(n) step is always spelled out.
+
+```ts
+import { RawArray } from 'valsem';
+
+const rows = RawArray.from(await (await fetch('/api/rows')).json()); // 100k rows, nothing admitted
+const visible = rows.slice(first, first + 100);                       // 100 interns; a canonical array
+visible[0] === previousVisible[0];                                     // true when that row's content is unchanged
+```
 
 ## `HashMap` and `HashSet` — mutable, keyed by content
 

@@ -27,6 +27,7 @@ export { ValueMap } from './value-map.js';
 export { ValueSet } from './value-set.js';
 export { InternedString } from './interned-string.js';
 export { ValueDate } from './value-date.js';
+export { RawArray } from './raw-array.js';
 export { createInternPool } from './intern-pool.js';
 export type { InternPool } from './intern-pool.js';
 export { configureHasher, createMarvin32Hasher, getHashSeed } from './hasher.js';
