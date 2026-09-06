@@ -403,7 +403,10 @@ export class ValueList<T> implements Iterable<T> {
   static from<T>(items: Iterable<T> | ArrayLike<T>): ValueList<T> {
     const arr = Array.isArray(items) ? items : Array.from(items as Iterable<T>);
     const head = new Array<unknown>(arr.length);
-    for (let i = 0; i < arr.length; i++) head[i] = intern(arr[i]);
+    // Own slots only: a hole would read through to Array.prototype.
+    for (let i = 0; i < arr.length; i++) {
+      head[i] = Object.prototype.hasOwnProperty.call(arr, i) ? intern(arr[i]) : undefined;
+    }
     return ValueList.#fromFull<T>(merge([], head, null));
   }
 

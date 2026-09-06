@@ -4,7 +4,7 @@
 
 | Symbol | Kind | Summary |
 | --- | --- | --- |
-| `deepEqual` | function | Structural equality; `.register(type, eq, hash, opts?)` adds a handler pair. |
+| `deepEqual` | function | Structural equality; `.register(type, eq, hash, opts?)` adds a handler pair. Total over admitted values and uncapped: a pair of distinct cyclic raw objects recurses until the engine throws a `RangeError`. |
 | `deepHash` | function | Companion structural hash (`equal ⟹ same hash`). |
 | `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds, unless `skipFreezing()` was called). |
 | `isCanonical(value)` | function | Whether `value` is a primitive or an object valsem canonicalised — the form in which `===` is value equality. The probe behind every canonical short-circuit. |

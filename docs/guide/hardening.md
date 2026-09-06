@@ -119,3 +119,29 @@ through an unfrozen canonical rather than write into it.
 object valsem canonicalised — exposed for assertions and comparators of your
 own; it is not affected by either switch.
 
+
+## Prototype pollution
+
+Two promises, both tested against hostile inputs in `src/hardening.test.ts`:
+
+- **Records are their own keys.** Every walk — equality, hashing, interning,
+  drafting, snapshots — enumerates own enumerable keys and reads them with
+  `hasOwn`, never `in` or `for…in`, so a polluted `Object.prototype` never
+  leaks into a value, and a `__proto__` key in JSON becomes an own data
+  property of the canonical record, never a prototype change. Holes in an
+  input array canonicalise to `undefined` rather than reading through to
+  `Array.prototype`. Registry dispatch keys on the prototype's constructor,
+  not the instance's shadowable `constructor` property.
+- **Patches are validated, not trusted.** `applyPatches` follows a path only
+  through own keys of records, in-range integer indices of arrays, and a
+  draftable kind's own `childAt`; a segment such as `__proto__`,
+  `constructor`, or a missing key is a bad path and throws. Patch keys and
+  indices are type-checked, and a `record.set` with key `__proto__` defines
+  an own property. Patches can come off a wire safely — their *values* are
+  interned on application, so a value that is not a value (a function, a
+  mutable built-in) is rejected as it would be anywhere.
+
+`deepEqual` is total over admitted values and deliberately uncapped; a pair
+of distinct cyclic raw objects recurses until the engine throws a
+`RangeError` rather than looping. Admitting paths (`intern`, `deepHash`,
+`produce`, `current`) are depth-capped and throw a teaching error instead.

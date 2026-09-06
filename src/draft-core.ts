@@ -351,7 +351,10 @@ let snapshotDepth = 0;
 /** Foreign material assigned into a draft may embed drafts: rebuild it with those snapshotted. */
 function snapshotForeign(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
-  if ((value as Record<symbol, unknown>)[internedMarker] === true || _hashCacheHas(value)) {
+  if (
+    _hashCacheHas(value) ||
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))
+  ) {
     return value; // canonical: cannot contain a draft
   }
   snapshotDepth++;
@@ -393,7 +396,10 @@ export function adopt(value: unknown): unknown {
   // O(1) recognition of canonical material: the [interned] marker covers the
   // collections and pooled value types; the hash cache covers canonical
   // plain data.
-  if ((value as Record<symbol, unknown>)[internedMarker] === true || _hashCacheHas(value)) {
+  if (
+    _hashCacheHas(value) ||
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))
+  ) {
     return value;
   }
   // Same decode-boundary depth cap as intern: adopt recurses over foreign

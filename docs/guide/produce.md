@@ -44,7 +44,10 @@ applyPatches(next2, inverse) === state;   // true
 ```
 
 A recipe whose edits net out to the base emits **no patches at all** — patch
-streams are as canonical as results.
+streams are as canonical as results. `applyPatches` validates what it is
+given: a path is followed only through own keys and in-range indices (a
+segment like `__proto__` throws), keys and indices are type-checked, and
+patch values are interned on application — so patches can come off a wire.
 
 Record patches carry the key as written, so a symbol-keyed edit yields a
 patch with a symbol `key` (or a symbol in its `path`). Those apply and invert

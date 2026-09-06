@@ -62,6 +62,7 @@ import {
   isImmutable,
   _runInScope,
   _setCoreDraftFactories,
+  isPlainObject,
   type DraftState,
   type Patch,
   type PatchPath,
@@ -1087,15 +1088,24 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
     }
     switch (p.kind) {
       case 'record.set':
-        (target as Rec)[p.key] = p.value;
+        // Define semantics on raw targets too: a `__proto__` key must become an
+        // own property, never a prototype change. (A draft's set trap does the same.)
+        if (typeof p.key !== 'string' && typeof p.key !== 'symbol') throw badPatch(p.kind, 'a string or symbol key');
+        if (state !== undefined) (target as Rec)[p.key] = p.value;
+        else _defineRecordField(target as Rec, p.key, p.value);
         break;
       case 'record.delete':
+        if (typeof p.key !== 'string' && typeof p.key !== 'symbol') throw badPatch(p.kind, 'a string or symbol key');
         delete (target as Rec)[p.key];
         break;
       case 'list.set':
+        if (!Number.isInteger(p.index) || p.index < 0) throw badPatch(p.kind, 'an integer index');
         (target as unknown[])[p.index] = p.value;
         break;
       case 'list.splice':
+        if (!Number.isInteger(p.index) || p.index < 0 || !Number.isInteger(p.remove) || p.remove < 0 || !Array.isArray(p.insert)) {
+          throw badPatch(p.kind, 'integer index and remove counts and an insert array');
+        }
         (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
         break;
       default:
@@ -1124,19 +1134,53 @@ export function _snapshotCore(state: DraftState): unknown {
   return out;
 }
 
+function badPatch(kind: string, expected: string): Error {
+  return new Error(`valsem: malformed '${kind}' patch — expected ${expected}`);
+}
+
 function describe(target: unknown): string {
   const state = stateOf(target);
   return state !== undefined ? `${state.kind} draft` : Array.isArray(target) ? 'plain array' : typeof target;
 }
 
+/**
+ * Walk a patch path. Patches may come from anywhere (a wire, a store), so
+ * every segment is validated against the thing it addresses: a record
+ * segment must be an OWN key of the record (never a prototype read — the
+ * route to `Object.prototype` through `__proto__` or `constructor`), an
+ * array segment an integer index in range, and a draftable kind routes
+ * through its own `childAt`. Anything else is a bad path, not a lookup.
+ */
 function navigate(draft: unknown, path: PatchPath): unknown {
   let cur = draft;
   for (const seg of path) {
     const state = stateOf(cur);
-    cur =
-      state !== undefined && state.childAt !== undefined
-        ? state.childAt(state, seg)
-        : (cur as Record<PropertyKey, unknown>)[seg as PropertyKey];
+    if (state !== undefined && state.childAt !== undefined) {
+      cur = state.childAt(state, seg);
+      continue;
+    }
+    if (state !== undefined && state.kind === 'array') {
+      const len = arrLen(state as ArrayState);
+      if (!Number.isInteger(seg) || (seg as number) < 0 || (seg as number) >= len) throw badPath(seg);
+      cur = (cur as unknown[])[seg as number];
+    } else if (state !== undefined && state.kind === 'object') {
+      if ((typeof seg !== 'string' && typeof seg !== 'symbol') || !hasOwn(latestObj(state as ObjectState), seg)) {
+        throw badPath(seg);
+      }
+      cur = (cur as Rec)[seg];
+    } else if (Array.isArray(cur)) {
+      if (!Number.isInteger(seg) || (seg as number) < 0 || (seg as number) >= cur.length) throw badPath(seg);
+      cur = cur[seg as number];
+    } else if (isPlainObject(cur)) {
+      if ((typeof seg !== 'string' && typeof seg !== 'symbol') || !hasOwn(cur, seg)) throw badPath(seg);
+      cur = (cur as Rec)[seg];
+    } else {
+      throw badPath(seg);
+    }
   }
   return cur;
+}
+
+function badPath(seg: unknown): Error {
+  return new Error(`valsem: patch path segment ${String(seg)} does not address an own key or index of the value`);
 }

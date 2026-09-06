@@ -12,7 +12,7 @@
 //   6. Class without handler → throw
 // ---------------------------------------------------------------------------
 
-import { hashCode, _recordKeys } from './deep-equal.js';
+import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason } from './deep-equal.js';
 import { hashString, hashNumber } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
@@ -177,7 +177,7 @@ const TEMPORAL_KINDS = new Set([
  * (which interns by default) is the most likely way to hit it.
  */
 function unhashableMessage(obj: object): string {
-  const ctor = obj.constructor as Function | undefined;
+  const ctor = _ctorOf(obj);
   const name = ctor?.name ?? 'unknown';
 
   const reason = _mutableBuiltinReason(ctor);
@@ -281,23 +281,24 @@ function hashObjectValue(obj: object): number {
     return _arrayHashOf(obj.length, acc);
   }
 
-  // [hashCode] symbol — class-defined hash (takes priority over registry).
-  // Accepts either a property (number) or a legacy method form.
-  if (hashCode in (obj as any)) {
-    const hc = (obj as any)[hashCode];
-    if (typeof hc === 'number') return hc >>> 0;
-    if (typeof hc === 'function') return hc.call(obj) >>> 0;
-  }
-
-  // Registry lookup by constructor
-  const handler = _hashCodeMethods.get(obj.constructor as Function);
-  if (handler) return handler(obj);
-
-  // Plain object — key-order-independent
   const proto = Object.getPrototypeOf(obj);
   if (proto !== Object.prototype && proto !== null) {
+    // A class instance: the [hashCode] protocol (a property or a legacy
+    // method), else the registry by the PROTOTYPE's constructor. Neither is
+    // consulted on a plain record, where a protocol symbol is an ordinary
+    // key — so a record cannot forge its hash with an own [hashCode].
+    if (hashCode in (obj as any)) {
+      const hc = (obj as any)[hashCode];
+      if (typeof hc === 'number') return hc >>> 0;
+      if (typeof hc === 'function') return hc.call(obj) >>> 0;
+    }
+    const ctor = _ctorOf(obj);
+    const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
+    if (handler) return handler(obj);
     throw new TypeError(unhashableMessage(obj));
   }
+
+  // Plain object — key-order-independent
 
   // Own enumerable keys only — the same key set deepEqual and intern see. A
   // `for...in` here would also walk inherited enumerable keys, and under

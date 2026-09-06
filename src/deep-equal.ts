@@ -261,9 +261,12 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   //
   // Together these terminate mixed-tree comparisons in O(1) at every
   // canonical boundary.
+  // (The marker counts on class instances only: on a plain record a
+  // protocol symbol is an ordinary key, so an own `[interned]: true` on a
+  // record cannot forge canonicality.)
   if (
-    (a as Record<symbol, unknown>)[interned] === true ||
-    (b as Record<symbol, unknown>)[interned] === true
+    ((a as Record<symbol, unknown>)[interned] === true && !_isPlainRecord(a)) ||
+    ((b as Record<symbol, unknown>)[interned] === true && !_isPlainRecord(b))
   ) {
     return false;
   }
@@ -280,10 +283,16 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     return true;
   }
 
+  const protoA = Object.getPrototypeOf(a);
+  const plainA = protoA === Object.prototype || protoA === null;
+  const protoB = Object.getPrototypeOf(b);
+  const plainB = protoB === Object.prototype || protoB === null;
+
   // [equals] symbol — class-defined value semantics (takes priority over registry).
   // The [equals] reference is also the kind discriminator: two objects with
-  // mismatched [equals] references are never considered equal.
-  if (equals in (a as any)) {
+  // mismatched [equals] references are never considered equal. Only class
+  // instances carry the protocol; on a plain record the symbol is a key.
+  if (!plainA && equals in (a as any)) {
     const eq = (a as any)[equals];
     if (typeof eq !== 'function') return false;
     if ((b as any)[equals] !== eq) return false;
@@ -299,12 +308,15 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // Mirror of the branch above: `b` declares [equals] and `a` does not, so
   // the pair is cross-kind. Without this, the answer would depend on argument
   // order (a's structural walk cannot see b's symbol key).
-  if (equals in (b as any)) return false;
+  if (!plainB && equals in (b as any)) return false;
 
-  // Registry lookup by constructor
-  if (a.constructor === b.constructor) {
-    const handler = equalsMethods.get(a.constructor as Function);
-    if (handler) return handler(a, b);
+  // Registry lookup by constructor (the prototype's, never a shadowing own property)
+  if (!plainA && !plainB) {
+    const ctor = _ctorOf(a);
+    if (ctor !== undefined && ctor === _ctorOf(b)) {
+      const handler = equalsMethods.get(ctor);
+      if (handler) return handler(a, b);
+    }
   }
 
   // Plain object — structural recursive.
@@ -317,18 +329,17 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // it either. Model "present but empty" with `null`. (`ValueMap` is the
   // opposite by design: storing `undefined` there is intentional, and IS
   // distinct from absence.)
-  const protoA = Object.getPrototypeOf(a);
-  if (protoA !== Object.prototype && protoA !== null) {
+  if (!plainA) {
     // Cold fallthrough: same-type mutable-builtin pairs get the development
     // expectation warning (distinct instances, correct-but-surprising false).
-    if (a.constructor === b.constructor) {
-      const reason = MUTABLE_BUILTINS.get(a.constructor as Function);
-      if (reason !== undefined) warnMutableComparison(a.constructor as Function, reason);
+    const ctor = _ctorOf(a);
+    if (ctor !== undefined && ctor === _ctorOf(b)) {
+      const reason = MUTABLE_BUILTINS.get(ctor);
+      if (reason !== undefined) warnMutableComparison(ctor, reason);
     }
     return false;
   }
-  const protoB = Object.getPrototypeOf(b);
-  if (protoB !== Object.prototype && protoB !== null) return false;
+  if (!plainB) return false;
 
   const ra = a as Record<string | symbol, unknown>;
   const rb = b as Record<string | symbol, unknown>;
@@ -467,6 +478,23 @@ export function _recordKeys(obj: object): (string | symbol)[] {
     if (Object.prototype.propertyIsEnumerable.call(obj, s)) keys.push(s);
   }
   return keys;
+}
+
+/**
+ * @internal The constructor an object's PROTOTYPE names — never the
+ * instance's own `constructor` property, which any object (or JSON) can
+ * shadow. This is the identity the registries are keyed by.
+ */
+export function _ctorOf(obj: object): Function | undefined {
+  const proto = Object.getPrototypeOf(obj) as { constructor?: unknown } | null;
+  const c = proto === null ? undefined : proto.constructor;
+  return typeof c === 'function' ? c : undefined;
+}
+
+/** @internal Plain record: prototype is Object.prototype or null. Protocol symbols on such an object are ordinary keys. */
+export function _isPlainRecord(obj: object): boolean {
+  const proto = Object.getPrototypeOf(obj);
+  return proto === Object.prototype || proto === null;
 }
 
 /** @internal — exposed for deepHash to read the shared registry. */

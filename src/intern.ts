@@ -26,7 +26,7 @@ import {
   _equalsMethods,
   _immutableTypes,
   _mutableBuiltinReason,
-  _setCanonicalProbe, _recordKeys, _defineRecordField } from './deep-equal.js';
+  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
@@ -62,14 +62,17 @@ const pool = createInternPool<object>();
  */
 export function isCanonical(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return typeof value !== 'function';
-  return (value as Record<symbol, unknown>)[internedSym] === true || _metaOf(value) !== undefined;
+  return (
+    _metaOf(value) !== undefined ||
+    ((value as Record<symbol, unknown>)[internedSym] === true && !_isPlainRecord(value))
+  );
 }
 
 function describeNonCanonical(value: unknown): string {
   if (typeof value === 'function') return 'a function';
   if (Array.isArray(value)) return 'a raw array';
-  const ctor = (value as object).constructor as { name?: string } | undefined;
-  return ctor === undefined || ctor === Object ? 'a raw object' : `an instance of ${ctor.name ?? 'an unregistered class'}`;
+  const ctor = _ctorOf(value as object);
+  return ctor === undefined || ctor === Object ? 'a raw object' : `an instance of ${ctor.name || 'an unregistered class'}`;
 }
 
 /**
@@ -149,8 +152,9 @@ export function intern<T>(value: T): T {
 
   const obj = value as object;
 
-  // Persistent collections / opt-in classes mark themselves canonical.
-  if ((obj as any)[internedSym] === true) return value;
+  // Persistent collections / opt-in classes mark themselves canonical —
+  // class instances only; on a plain record the symbol is an ordinary key.
+  if ((obj as any)[internedSym] === true && !_isPlainRecord(obj)) return value;
 
   // Already interned via the legacy WeakMap path — fast path.
   if (_metaOf(obj) !== undefined) return value;
@@ -162,7 +166,12 @@ export function intern<T>(value: T): T {
     depth++; // inside the try's reach: the cap throw must unwind it too
     try {
       if (depth > _maxDepth()) throw _depthError('intern');
-      const internalized = obj.map(intern);
+      // Index by index, own slots only: `map` would preserve holes, and a hole
+      // reads through to Array.prototype (a polluted one would leak in).
+      const internalized = new Array<unknown>(obj.length);
+      for (let i = 0; i < obj.length; i++) {
+        internalized[i] = Object.prototype.hasOwnProperty.call(obj, i) ? intern(obj[i]) : undefined;
+      }
       return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
     } finally {
       depth--;
@@ -190,7 +199,7 @@ export function intern<T>(value: T): T {
       // unchanged data — the copy would be thrown away. The pool candidate is
       // matched by key against the interned children.
       const n0 = keys.length;
-      const vals = new Array<unknown>(n0);
+      const vals = new Array<unknown>(n0).fill(undefined); // no holes: a hole reads Array.prototype
       let acc = 0;
       let n = 0;
       for (let i = 0; i < n0; i++) {
@@ -217,12 +226,12 @@ export function intern<T>(value: T): T {
   // They are NOT frozen: they are already immutable by contract, and freezing a
   // foreign type can break it (freezing a RegExp makes `lastIndex` read-only,
   // which makes `.exec()` throw on a global pattern).
-  const ctor = obj.constructor as Function | undefined;
+  const ctor = _ctorOf(obj);
   if (ctor !== undefined && _immutableTypes.has(ctor)) {
     const eq = _equalsMethods.get(ctor)!;
     return lookupOrStore(
       obj,
-      (candidate) => candidate.constructor === ctor && eq(candidate, obj),
+      (candidate) => _ctorOf(candidate) === ctor && eq(candidate, obj),
       false,
     ) as T;
   }
