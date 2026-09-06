@@ -47,13 +47,21 @@ function mix(seed: number, hash: number): number {
 export class ValueDate {
   /** Milliseconds since the Unix epoch — the whole value. */
   readonly epochMs: number;
-  readonly [hashCodeSym]: number;
-  readonly [internedSym]: true = true;
+  readonly #hash: number;
 
   private constructor(epochMs: number) {
     this.epochMs = epochMs;
-    this[hashCodeSym] = mix(0xda7e, hashNumber(epochMs));
+    this.#hash = mix(0xda7e, hashNumber(epochMs));
     Object.freeze(this);
+  }
+
+  /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
+  get [hashCodeSym](): number {
+    return this.#hash;
+  }
+  /** The canonical-type marker: every instance is canonical by construction. */
+  get [internedSym](): true {
+    return true;
   }
 
   /**

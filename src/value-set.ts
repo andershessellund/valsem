@@ -52,14 +52,22 @@ const wrappers = new WeakMap<HNode, ValueSet<unknown>>();
 export class ValueSet<T> implements ReadonlySet<T> {
   readonly #root: HNode;
   readonly #size: number;
-  readonly [hashCodeSym]: number;
-  readonly [internedSym]: true = true;
+  readonly #hash: number;
 
   private constructor(root: HNode, size: number) {
     this.#root = root;
     this.#size = size;
-    this[hashCodeSym] = root.h;
-    Object.freeze(this); // protects the cached [hashCode] too
+    this.#hash = root.h;
+    Object.freeze(this);
+  }
+
+  /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
+  get [hashCodeSym](): number {
+    return this.#hash;
+  }
+  /** The canonical-type marker: every instance is canonical by construction. */
+  get [internedSym](): true {
+    return true;
   }
 
   static #for<T>(root: HNode, size: number): ValueSet<T> {

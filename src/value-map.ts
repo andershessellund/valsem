@@ -65,16 +65,22 @@ const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
 export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   readonly #root: HNode;
   readonly #size: number;
-  readonly [hashCodeSym]: number;
-  readonly [internedSym]: true = true;
+  readonly #hash: number;
 
   private constructor(root: HNode, size: number) {
     this.#root = root;
     this.#size = size;
-    this[hashCodeSym] = root.h;
-    // The instance is frozen: reassigning a public field like the cached
-    // [hashCode] would silently corrupt canonical identity.
+    this.#hash = root.h;
     Object.freeze(this);
+  }
+
+  /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
+  get [hashCodeSym](): number {
+    return this.#hash;
+  }
+  /** The canonical-type marker: every instance is canonical by construction. */
+  get [internedSym](): true {
+    return true;
   }
 
   static #for<K, V>(root: HNode, size: number): ValueMap<K, V> {

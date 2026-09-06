@@ -22,17 +22,30 @@ const pool = createInternPool<InternedString>();
 export class InternedString {
   /** The canonical JavaScript string (primitive-equal to the constructor input). */
   readonly value: string;
-  readonly [hashCodeSym]: number;
-  readonly [internedSym]: true = true;
+  readonly #hash: number;
 
   private constructor(value: string, hash: number) {
     this.value = value;
-    this[hashCodeSym] = hash;
+    this.#hash = hash;
     Object.freeze(this);
+  }
+
+  /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
+  get [hashCodeSym](): number {
+    return this.#hash;
+  }
+  /** The canonical-type marker: every instance is canonical by construction. */
+  get [internedSym](): true {
+    return true;
   }
 
   /** Return the underlying {@link value}. */
   toString(): string {
+    return this.value;
+  }
+
+  /** The wrapped string — so a state holding InternedStrings stringifies exactly as one holding strings. */
+  toJSON(): string {
     return this.value;
   }
 

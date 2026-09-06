@@ -122,7 +122,7 @@ built on it agrees on one definition of what each kind of thing *is*:
 | array / `ValueList` | the length and the **ordered** element sequence |
 | `ValueMap` | the **unordered** set of `(key, value)` entries (canonical values — interned on entry) |
 | `ValueSet` | the **unordered** set of elements (canonical values — interned on entry) |
-| `InternedString` | the wrapped string |
+| `InternedString` | the wrapped string (the large-string tool: hash paid once per distinct text) |
 | class with `[equals]` / registered type | whatever its handlers say |
 
 ### Iteration order is not part of the value

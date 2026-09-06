@@ -59,8 +59,18 @@ frozen snapshot with `toArray()` — explicitly O(n), weakly memoized, with
 is a primitive. The rule: the representation is public exactly where the
 runtime can actually protect it.
 
-`InternedString` wraps a string and precomputes its hash once, turning
-repeated `deepHash`/key lookups on the same string into O(1) reads.
+`InternedString` is the large-string tool. A string is hashed by walking it
+(~1 ns per character), and valsem hashes a string value every time the
+record holding it is hashed from raw — at the boundary, and on raw-key
+lookups. Wrap a long text field once, at the boundary, with
+`InternedString.for(text)`: the hash is paid once per distinct text for the
+life of the value, equal texts are one `===` instance, and every later hash
+of the record reaches it through a cached lookup. It stringifies as the text
+(`toJSON`), so a state holding one serialises exactly as one holding
+strings; the round trip back is `InternedString.for` at the boundary. The
+price is an object where a primitive was: reads go through `.value`, and
+`typeof` says `'object'`. Ids, names and short strings do not need it —
+hashing them costs less than the wrapper.
 
 ## `HashMap` and `HashSet` — mutable, keyed by content
 

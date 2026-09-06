@@ -265,16 +265,24 @@ export class ValueList<T> {
   /** The last 1..32 elements (a consed leaf node; empty only for the empty list). */
   readonly #tail: VNode;
   readonly #length: number;
-  readonly [hashCodeSym]: number;
-  readonly [internedSym]: true = true;
+  readonly #hash: number;
 
   private constructor(root: VNode | null, shift: number, tail: VNode, length: number) {
     this.#root = root;
     this.#shift = shift;
     this.#tail = tail;
     this.#length = length;
-    this[hashCodeSym] = mix(mix(0x11f7, root === null ? 0 : root.h), tail.h);
-    Object.freeze(this); // protects the cached [hashCode] too
+    this.#hash = mix(mix(0x11f7, root === null ? 0 : root.h), tail.h);
+    Object.freeze(this);
+  }
+
+  /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
+  get [hashCodeSym](): number {
+    return this.#hash;
+  }
+  /** The canonical-type marker: every instance is canonical by construction. */
+  get [internedSym](): true {
+    return true;
   }
 
   static #of<T>(root: VNode | null, shift: number, tail: VNode, length: number): ValueList<T> {
