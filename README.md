@@ -86,8 +86,10 @@ derived.get(state);                    // a native Map lookup — the key is can
 
 What is *not* fast is building: every value is hashed and canonicalised when
 it is created, so constructing and updating cost more than a plain copy — an
-edit to a 10k-item array runs 13–19 µs against immer's ~6, and a lookup with
-a raw (uncanonicalised) key walks it. That is the trade: a win for state that
+edit to a 10k-item array runs 13–19 µs against immer's ~6, admitting a
+1,000-record API response with `intern` costs ~2 ms (5× parsing it; an
+unchanged refetch ~0.8 ms), and a
+lookup with a raw (uncanonicalised) key walks it. That is the trade: a win for state that
 is compared, memoized, keyed, or kept in history more often than it is built,
 and a loss for state built once and thrown away. The [benchmarks](#benchmarks)
 show both sides.

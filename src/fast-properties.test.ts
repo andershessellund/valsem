@@ -24,7 +24,7 @@ const wide = (n: number, v = 1): Record<string, number> =>
 
 describe.skipIf(hasFastProperties === undefined)('canonical records keep fast properties', () => {
   it('intern() builds fast-mode records at every width', () => {
-    for (const n of [5, 20, 50, 200, 1000]) {
+    for (const n of [5, 16, 17, 20, 50, 200, 1000]) {
       expect(hasFastProperties!(intern(wide(n, n))), `${n} keys`).toBe(true);
     }
   });

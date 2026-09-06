@@ -134,9 +134,11 @@ or which canonical instance you get. On `ValueMap`/`ValueSet` the order is
 driven by the per-process, seeded hashes of the contents — stable within a
 process, different across runs, and never meaningful. Treat it as arbitrary.
 
-Interned records are the deterministic exception: `intern` rewrites plain
-objects with **sorted keys**, so canonical records always iterate
-alphabetically — a property of the canonical form, not of your input.
+Interned records follow the same rule: the canonical record's key order is
+that of the **first spelling** interned in this process — stable within a
+process (equal records are one object), possibly different across runs, and
+never meaningful. If you need identical bytes for equal values across
+processes, sort at serialisation.
 
 If order carries meaning, put it in the value: use an array / `ValueList` (of
 `[key, value]` pairs, for a map).

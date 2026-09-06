@@ -91,11 +91,6 @@ interface ObjectState extends DraftState<Rec> {
   copy: Rec | null;
   /** true = set, false = deleted; absent key = only child-drafted. */
   assigned: Map<string | symbol, boolean> | null;
-  /**
-   * True once a deleted key was re-set: it re-enters the copy at the END,
-   * breaking canonical key order — finalize must take the sorting slow path.
-   */
-  orderBroken: boolean;
   /** Keys whose base value was child-drafted on read. */
   drafted: Set<string | symbol> | null;
   draft: object;
@@ -225,7 +220,6 @@ const objectTraps: ProxyHandler<object> = {
     assertAssignable(value, state);
     prepareObjCopy(state);
     markChanged(state);
-    if (state.assigned!.get(prop) === false) state.orderBroken = true; // deleted, now re-set
     // Define semantics, as intern does: a `__proto__` key must become an own
     // data property, not fire Object.prototype's setter.
     _defineRecordField(state.copy!, prop, value);
@@ -293,7 +287,6 @@ function createObjectDraft(base: Rec, parent?: DraftState): ObjectState {
     base,
     copy: null,
     assigned: null,
-    orderBroken: false,
     drafted: null,
     draft: null as unknown as object,
     revoke: null as unknown as () => void,
@@ -668,11 +661,11 @@ function finalizeObject(
   const touched = new Set<string | symbol>(state.assigned!.keys());
   if (state.drafted !== null) for (const k of state.drafted) touched.add(k);
 
-  // Fast path: canonical base with a cached accumulator, and no ADDED keys
-  // (an addition lands unsorted at the end of the copy, breaking the
-  // canonical key order — those take the sorting slow path).
+  // Fast path: canonical base with a cached accumulator. Key order is not
+  // part of the value, so an added key (which lands at the end of the copy)
+  // is just one more accumulator term.
   const accInfo = _accOf(base);
-  let fast = accInfo !== undefined && !state.orderBroken;
+  const fast = accInfo !== undefined;
   let acc = accInfo !== undefined ? accInfo.a : 0;
   let n = accInfo !== undefined ? accInfo.n : 0;
 
@@ -700,7 +693,8 @@ function finalizeObject(
     copy[key] = resolved;
     if (fast) {
       if (!hadBefore) {
-        fast = false;
+        acc = (acc + _entryTerm(key, internHash(resolved))) >>> 0;
+        n++;
       } else {
         acc =
           (acc -

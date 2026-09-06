@@ -32,6 +32,57 @@ machinery. Two structural facts set the floor:
   **5.5 µs** — inside the unfrozen libraries' band, with canonical `===`
   results. The 10k-array row is the migration story's "before".
 
+## The boundary: admitting raw data
+
+`pnpm bench:boundary`. Everything above assumes canonical inputs; this is
+what it costs to make them so. A 1,000-record × 10-field API response (164
+KB of JSON) — a generous upper bound for what a well-designed frontend
+processes in one tick — admitted with `intern()`:
+
+| | per response | per record | of a 16 ms frame |
+| --- | --- | --- | --- |
+| `JSON.parse` (paid anyway) | 392 µs | 392 ns | 2.4% |
+| `structuredClone` | 732 µs | 732 ns | 4.6% |
+| immer auto-freeze walk | 186 µs | 186 ns | 1.2% |
+| `intern`, all new content | **1.77 ms** | 1.77 µs | **11%** |
+| `intern`, refetch of unchanged content (all pool hits) | **0.82 ms** | 0.82 µs | 5% |
+| `intern`, refetch with 10% of records changed | 1.04 ms | 1.04 µs | 6.5% |
+
+This is the honest price of the premise: 5× the parse for new data, ~2× for
+a refetch, paid once per admitted node. What remains is hashing every leaf
+(the seeded string hash), the canonical copy per new record, a `WeakRef` +
+`FinalizationRegistry` registration per new node, and the GC those
+allocations cause. It started at 2.9 ms fresh / 1.7 ms refetch; three cuts
+got it here, each measured on this bench:
+
+- **No sorted key order** (2.9 → 2.4 ms). Key order is not part of the
+  value, so the canonical layout is the first spelling's, which also let
+  `produce`'s incremental fast path keep working when a recipe adds a key.
+- **Look up before copying** (refetch 1.5 → 0.84 ms). The record hash is
+  folded from the interned children and the pool candidate is matched by
+  key, so on a hit no copy is built at all; the canonical object is built
+  only on a miss, by assignment for records up to 16 keys (which also shares
+  the raw object's hidden class) and by `Object.fromEntries` above that.
+- **One meta object per canonical** instead of a hash entry and an
+  accumulator entry in two `WeakMap`s (fresh 1.95 → 1.77 ms). With a lesson
+  attached: the first version gave every meta a `self` back-reference to
+  its owner, and the GC-bound held arena doubled (15 → 27 µs). A `WeakMap`
+  value that points at its own key is an ephemeron chain V8's marker must
+  resolve iteratively, per entry, on every major GC. The back-reference now
+  exists only on the on-value placement, where it is the owner check.
+- **Rejected: the meta on the value.** Storing it as a non-enumerable,
+  non-writable `hashCode` property instead of a `WeakMap` entry skips the
+  identity-hash install a `WeakMap` key costs on a fresh object: measured
+  at 1.77 → 1.68 ms fresh and 0.82 → 0.79 on a refetch, 5%, with a probe
+  cost of 6 ns against 7. For that it makes every canonical value carry a
+  property visible to `Reflect.ownKeys`, descriptor-based copiers, and
+  DevTools, needs an owner back-reference so a copied or proxied property is
+  not mistaken for canonical, and adds a second storage mode. Not worth it. What it buys is everything above it: after
+admission, comparing, memoizing, keying and hashing that response is O(1)
+for as long as it lives, and an unchanged refetch collapses onto the very
+same objects. Admit at the boundary, once, and off the hot path where you
+can; do not intern per render.
+
 ## Where valsem wins
 
 | arena | valsem | immer (default) | mutative | notes |
@@ -458,6 +509,7 @@ update-throughput number shows:
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
 | `pnpm bench:frozen` | what V8 charges for the frozen STATE of an array, per operation and elements kind — the case for `skipFreezing()` |
+| `pnpm bench:boundary` | admitting a 1k-record API response with `intern`: fresh, unchanged refetch, partly changed, vs `JSON.parse`/`structuredClone`/immer freeze |
 | `pnpm bench:hashmap` | `HashMap` vs `FastMap` vs native `Map` by key kind: canonical, primitive, raw, novel |
 | `pnpm bench:memoize` | memo hit/miss cost by argument kind: canonical, fresh literal beside canonical, raw, by width |
 | `node --allow-natives-syntax scripts/record-copy-bench.mjs` | dictionary-mode threshold by construction method; spread vs `Object.assign` at a megamorphic copy site |

@@ -25,6 +25,13 @@ describe('isCanonical', () => {
   });
 });
 
+describe('the hash lives beside the value, not on it', () => {
+  it('canonical values carry no extra own keys', () => {
+    expect(Reflect.ownKeys(intern({ a: 1, b: [2] }))).toEqual(['a', 'b']);
+    expect(Reflect.ownKeys(intern([1, 2]))).toEqual(['0', '1', 'length']);
+  });
+});
+
 describe('fastEquals (checks on)', () => {
   it('is === on canonical values and primitives', () => {
     const a = intern({ x: [1, 2] });

@@ -20,13 +20,13 @@
 // `encode` reject them, naming the immutable replacement.
 // ---------------------------------------------------------------------------
 
-import { deepHash, _deepHashWithAcc, _compareSymbols, _hashCache as hashCache } from './deep-hash.js';
+import { deepHash, _deepHashWithAcc, _metaOf, _setMeta, _entryTerm, _recordHashOf } from './deep-hash.js';
 import {
   interned as internedSym,
   _equalsMethods,
   _immutableTypes,
   _mutableBuiltinReason,
-  _setCanonicals, _recordKeys } from './deep-equal.js';
+  _setCanonicalProbe, _recordKeys, _defineRecordField } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
@@ -35,20 +35,12 @@ import { _checking, _freeze } from './checks.js';
 // Shared precomputed hash cache
 // ---------------------------------------------------------------------------
 
-// The hash cache (interned object → its precomputed deepHash) is the hasher's
-// own `_hashCache`, imported above: one map for canonical objects and unique
-// symbols alike.
-
-/**
- * WeakMap from canonical plain record/array → its raw hash accumulator and
- * defined-entry count (see deep-hash's accumulator contract). Lets produce's
- * finalize compute a successor's hash in O(changes) instead of O(width).
- */
-const accCache = new WeakMap<object, { a: number; n: number }>();
+// The canonical meta store (hash + accumulator per canonical object) is the
+// hasher's — see deep-hash's `_metaOf`/`_setMeta`.
 
 // Wire it into deepHash so internalized children are hashed in O(1), and into
 // deepEqual as the canonicality probe (distinct canonicals are unequal in O(1)).
-_setCanonicals(hashCache);
+_setCanonicalProbe((obj) => _metaOf(obj) !== undefined);
 
 // ---------------------------------------------------------------------------
 // Pool — the global weak pool
@@ -70,7 +62,7 @@ const pool = createInternPool<object>();
  */
 export function isCanonical(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return typeof value !== 'function';
-  return (value as Record<symbol, unknown>)[internedSym] === true || hashCache.has(value);
+  return (value as Record<symbol, unknown>)[internedSym] === true || _metaOf(value) !== undefined;
 }
 
 function describeNonCanonical(value: unknown): string {
@@ -114,8 +106,8 @@ export function internHash(value: unknown): number {
   if (value === null || value === undefined || typeof value !== 'object') {
     return deepHash(value);
   }
-  const cached = hashCache.get(value as object);
-  if (cached !== undefined) return cached;
+  const meta = _metaOf(value as object);
+  if (meta !== undefined) return meta.h;
   return deepHash(value);
 }
 
@@ -135,7 +127,7 @@ export function internHash(value: unknown): number {
  *
  * - Primitives are returned as-is.
  * - Arrays: elements are internalized first, then the array itself.
- * - Plain objects: values are internalized first (keys sorted for canonical
+ * - Plain objects: values are internalized first (keys kept in the order
  *   ordering), then the object itself.
  * - Already-interned objects (present in the hash cache) are returned
  *   immediately.
@@ -161,7 +153,7 @@ export function intern<T>(value: T): T {
   if ((obj as any)[internedSym] === true) return value;
 
   // Already interned via the legacy WeakMap path — fast path.
-  if (hashCache.has(obj)) return value;
+  if (_metaOf(obj) !== undefined) return value;
 
   // Array — internalize elements first. (Depth-capped: this recursion is
   // the decode boundary where hostile or cyclic input would otherwise
@@ -177,7 +169,7 @@ export function intern<T>(value: T): T {
     }
   }
 
-  // Plain object — internalize values, sorted keys for canonical layout.
+  // Plain object — internalize values; the layout is the incoming key order.
   // Keys mapped to `undefined` are dropped: an undefined-valued key IS an
   // absent key in record semantics, and the canonical form makes that literal.
   const proto = Object.getPrototypeOf(obj);
@@ -186,29 +178,36 @@ export function intern<T>(value: T): T {
     try {
       if (depth > _maxDepth()) throw _depthError('intern');
       const rec = obj as Record<string | symbol, unknown>;
-      // Canonical layout: string keys sorted, then symbol keys in their
-      // total order (registered by name, unique by hash). Only this frozen
-      // copy's property order depends on it — the hash and equality do not.
-      const keys: (string | symbol)[] = Object.keys(rec).sort();
-      const syms = Object.getOwnPropertySymbols(rec).filter((s) =>
-        Object.prototype.propertyIsEnumerable.call(rec, s),
-      );
-      if (syms.length !== 0) keys.push(...syms.sort(_compareSymbols));
-      // Built with Object.fromEntries, not key-by-key assignment into `{}`:
-      // V8 flips an object that grows one property at a time into dictionary
-      // mode at ~20 keys, and a canonical record is read (and spread by every
-      // produce) for the rest of its life — 6× slower reads, 60–150× slower
-      // copies. fromEntries yields a fast-mode object at any width, and it
-      // defines `__proto__` as an own data property, which is the record
-      // semantics we want.
-      const entries: [string | symbol, unknown][] = [];
-      for (const k of keys) {
-        const v = rec[k];
-        if (v === undefined) continue;
-        entries.push([k, intern(v)]);
+      // Layout: the incoming key order (string keys, then symbol keys). Key
+      // order is not part of the value — equality and the hash ignore it, and
+      // the pool matches by key — so the first spelling seen sets the frozen
+      // copy's property order, and a copy built in the raw object's own order
+      // shares its hidden class. Sorting would cost ~280 ns per record and
+      // force produce onto a slow path whenever a recipe adds a key.
+      const keys = _recordKeys(rec);
+      // Intern the children and fold the record hash from (key, child) pairs
+      // WITHOUT building the canonical copy: on a pool hit — every refetch of
+      // unchanged data — the copy would be thrown away. The pool candidate is
+      // matched by key against the interned children.
+      const n0 = keys.length;
+      const vals = new Array<unknown>(n0);
+      let acc = 0;
+      let n = 0;
+      for (let i = 0; i < n0; i++) {
+        const v = rec[keys[i]!];
+        if (v === undefined) continue; // absent in record semantics
+        const c = intern(v);
+        vals[i] = c;
+        acc = (acc + _entryTerm(keys[i]!, internHash(c))) >>> 0;
+        n++;
       }
-      const internalized = Object.fromEntries(entries);
-      return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
+      const h = _recordHashOf(n, acc);
+      const existing = pool.lookup(h, (c) => matchesRecord(c, keys, vals, n));
+      if (existing !== undefined) return existing as T;
+      const internalized = buildRecord(keys, vals, n);
+      _setMeta(internalized, h, acc, n);
+      _freeze(internalized);
+      return pool.register(internalized, h) as T;
     } finally {
       depth--;
     }
@@ -245,6 +244,56 @@ export function intern<T>(value: T): T {
   return value;
 }
 
+/** Widest record built by assignment: V8 keeps such objects in fast mode well past this (measured: dictionary mode at 20). */
+const ASSIGN_MAX_KEYS = 16;
+
+/**
+ * The canonical copy of a record from its keys and already-interned children
+ * (`vals[i]` undefined = absent). Narrow records are built by assignment —
+ * ~10 ns per key, and the copy shares the raw object's hidden class when the
+ * key order matches; wide ones by Object.fromEntries, which stays in fast
+ * mode at any width (assignment flips to dictionary mode at ~20 keys). Both
+ * define `__proto__` as an own data property, the record semantics we want.
+ */
+function buildRecord(
+  keys: (string | symbol)[],
+  vals: unknown[],
+  n: number,
+): Record<string | symbol, unknown> {
+  if (n <= ASSIGN_MAX_KEYS) {
+    const out: Record<string | symbol, unknown> = {};
+    for (let i = 0; i < keys.length; i++) {
+      if (vals[i] !== undefined) _defineRecordField(out, keys[i]!, vals[i]);
+    }
+    return out;
+  }
+  const entries: [string | symbol, unknown][] = [];
+  for (let i = 0; i < keys.length; i++) {
+    if (vals[i] !== undefined) entries.push([keys[i]!, vals[i]]);
+  }
+  return Object.fromEntries(entries);
+}
+
+/**
+ * Does pool candidate `c` hold exactly these (key, canonical child) pairs?
+ * Children are canonical, so identity decides — SameValueZero, because a
+ * NaN child is canonical too and `NaN !== NaN`.
+ */
+function matchesRecord(c: object, keys: (string | symbol)[], vals: unknown[], n: number): boolean {
+  const meta = _metaOf(c);
+  if (meta === undefined || meta.n !== n) return false;
+  const proto = Object.getPrototypeOf(c);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const rc = c as Record<string | symbol, unknown>;
+  for (let i = 0; i < keys.length; i++) {
+    const v = vals[i];
+    if (v === undefined) continue;
+    const w = rc[keys[i]!];
+    if (w !== v && !(w !== w && v !== v)) return false;
+  }
+  return true;
+}
+
 /**
  * Find the canonical instance matching `obj` in the weak pool, or adopt `obj`
  * as canonical.
@@ -267,15 +316,14 @@ function lookupOrStore(
     const { h, acc, n } = _deepHashWithAcc(obj);
     const existing = pool.lookup(h, matches);
     if (existing !== undefined) return existing;
-    hashCache.set(obj, h);
-    accCache.set(obj, { a: acc, n });
+    _setMeta(obj, h, acc, n);
     _freeze(obj);
     return pool.register(obj, h);
   }
   const h = deepHash(obj);
   const existing = pool.lookup(h, matches);
   if (existing !== undefined) return existing;
-  hashCache.set(obj, h);
+  _setMeta(obj, h, 0, -1);
   return pool.register(obj, h);
 }
 
@@ -316,14 +364,16 @@ function shallowRefEqual(a: object, b: object): boolean {
   const protoB = Object.getPrototypeOf(b);
   if (protoA !== protoB) return false;
 
+  // By key, not by index: canonical layouts follow whichever spelling came
+  // first, so two equal records may order their keys differently.
   const ra = a as Record<string | symbol, unknown>;
   const rb = b as Record<string | symbol, unknown>;
   const keysA = _recordKeys(ra);
-  const keysB = _recordKeys(rb);
-  if (keysA.length !== keysB.length) return false;
+  if (keysA.length !== _recordKeys(rb).length) return false;
   for (let i = 0; i < keysA.length; i++) {
-    if (keysA[i] !== keysB[i]) return false;
-    if (!childEqual(ra[keysA[i]!], rb[keysA[i]!])) return false;
+    const k = keysA[i]!;
+    if (!Object.prototype.hasOwnProperty.call(rb, k)) return false;
+    if (!childEqual(ra[k], rb[k])) return false;
   }
   return true;
 }
@@ -339,26 +389,26 @@ export function _internPoolSize(): number {
 
 /** @internal O(1) probe: is this object canonical plain data (hash cached)? */
 export function _hashCacheHas(obj: object): boolean {
-  return hashCache.has(obj);
+  return _metaOf(obj) !== undefined;
 }
 
 /** @internal The cached accumulator of a canonical plain record/array. */
 export function _accOf(obj: object): { a: number; n: number } | undefined {
-  return accCache.get(obj);
+  const m = _metaOf(obj);
+  return m !== undefined && m.n >= 0 ? m : undefined;
 }
 
 /**
  * @internal Canonicalize plain data whose hash and accumulator were computed
  * incrementally (produce's finalize fast path). The caller guarantees: `obj`
- * is in canonical form (records: sorted keys, no undefined values; children
+ * is in canonical form (records: no undefined values, any key order; children
  * all canonical) and `h`/`acc`/`n` are exactly what `_deepHashWithAcc(obj)`
  * would return.
  */
 export function _internPrehashed(obj: object, h: number, acc: number, n: number): object {
   const existing = pool.lookup(h, (c) => shallowRefEqual(c, obj));
   if (existing !== undefined) return existing;
-  hashCache.set(obj, h);
-  accCache.set(obj, { a: acc, n });
+  _setMeta(obj, h, acc, n);
   _freeze(obj);
   return pool.register(obj, h);
 }

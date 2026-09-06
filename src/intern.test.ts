@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest';
+import { deepEqual } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 
 describe('intern', () => {
@@ -74,6 +75,16 @@ describe('intern — canonical form drops undefined-valued keys', () => {
     const c = intern({ a: undefined, b: 1 });
     expect('a' in c).toBe(false);
     expect(Object.keys(c)).toEqual(['b']);
+  });
+});
+
+describe('intern — key order is layout, not value', () => {
+  it('the first spelling seen sets the canonical layout; every spelling is the same object', () => {
+    const first = intern({ zeta: 1, alpha: 2, mid: 3 });
+    expect(intern({ alpha: 2, mid: 3, zeta: 1 })).toBe(first);
+    expect(intern({ mid: 3, zeta: 1, alpha: 2 })).toBe(first);
+    expect(new Set(Object.keys(first))).toEqual(new Set(['zeta', 'alpha', 'mid']));
+    expect(deepEqual(first, { alpha: 2, mid: 3, zeta: 1 })).toBe(true);
   });
 });
 

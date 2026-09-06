@@ -25,7 +25,35 @@ import { _depthError, _maxDepth } from './limits.js';
  * symbols even when nothing is ever interned. deepEqual reads the same map
  * as its canonicality probe.
  */
-export const _hashCache = new WeakMap<WeakKey, number>();
+export const _hashCache = new WeakMap<WeakKey, number | CanonicalMeta>();
+
+/**
+ * @internal What a canonical object carries: its hash, and for plain
+ * records/arrays the raw accumulator and defined-entry count (`n` is -1 for
+ * pooled value types), so produce's finalize can hash a successor
+ * incrementally. The object is the WeakMap key and the meta never refers
+ * back to it: a WeakMap value that points at its own key is an ephemeron
+ * chain V8's marker has to resolve iteratively, measured at ~2× on the
+ * GC-bound produce arenas (BENCHMARKS.md). Storing the meta ON the value as
+ * a hidden property was measured too — 5% cheaper admission — and rejected
+ * for what it makes observable.
+ */
+export interface CanonicalMeta {
+  readonly h: number;
+  readonly a: number;
+  readonly n: number;
+}
+
+/** @internal The meta of a canonical object, or undefined for anything else. */
+export function _metaOf(obj: object): CanonicalMeta | undefined {
+  const m = _hashCache.get(obj);
+  return typeof m === 'object' ? m : undefined;
+}
+
+/** @internal Record `obj` as canonical with hash `h` (and accumulator `a`/`n`; `n` -1 when not plain data). */
+export function _setMeta(obj: object, h: number, a: number, n: number): void {
+  _hashCache.set(obj, { h, a, n });
+}
 
 // Type tags — mixed into hash to distinguish types with similar content
 const TAG_NULL = 0x4e4c;
@@ -105,26 +133,12 @@ let uniqueSymbolCount = 0;
 export function _symbolHash(s: symbol): number {
   const key = Symbol.keyFor(s);
   if (key !== undefined) return mix(TAG_SYMBOL, hashString(key));
-  let h = _hashCache.get(s);
+  let h = _hashCache.get(s) as number | undefined;
   if (h === undefined) {
     h = mix(TAG_UNIQUE_SYMBOL, hashNumber(++uniqueSymbolCount));
     _hashCache.set(s, h);
   }
   return h;
-}
-
-/**
- * @internal A total order on symbol keys for the canonical record layout:
- * registered symbols first, by name; then unique symbols by their (distinct)
- * hash. Only the frozen copy's property order depends on it — equality and
- * the record hash are order-independent.
- */
-export function _compareSymbols(a: symbol, b: symbol): number {
-  const ka = Symbol.keyFor(a);
-  const kb = Symbol.keyFor(b);
-  if (ka !== undefined) return kb !== undefined ? (ka < kb ? -1 : ka > kb ? 1 : 0) : -1;
-  if (kb !== undefined) return 1;
-  return _symbolHash(a) - _symbolHash(b);
 }
 
 /** @internal One record entry's accumulator term. */
@@ -233,9 +247,9 @@ export function deepHash(value: unknown): number {
 
   const obj = value as object;
 
-  // Canonical objects carry their hash (the interner fills the cache).
-  const cached = _hashCache.get(obj);
-  if (cached !== undefined) return cached;
+  // Canonical objects carry their hash (the interner fills the meta store).
+  const meta = _metaOf(obj);
+  if (meta !== undefined) return meta.h;
 
   // Decode-boundary depth cap: the recursive walk below is where hostile
   // (or cyclic) input would otherwise exhaust the stack. Cached canonical

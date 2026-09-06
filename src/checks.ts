@@ -18,6 +18,7 @@
 let checks = true;
 let freezing = true;
 
+
 /**
  * Stop verifying the promises callers make where an API says "canonical
  * only" — `fastEquals`, `FastMap` and `FastSet` then trust their

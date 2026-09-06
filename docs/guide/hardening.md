@@ -118,3 +118,4 @@ through an unfrozen canonical rather than write into it.
 `isCanonical(value)` is the probe behind the checks — a primitive, or an
 object valsem canonicalised — exposed for assertions and comparators of your
 own; it is not affected by either switch.
+

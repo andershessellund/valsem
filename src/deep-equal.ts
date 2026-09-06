@@ -104,11 +104,11 @@ const hashCodeMethods = new Map<Function, (a: any) => number>();
 // membership means "canonical plain data" — a strictly stronger fact than a
 // cached hash value, since canonical + `!==` proves structural inequality
 // even when two hashes collide.
-let _canonicals: WeakMap<WeakKey, number> | null = null;
+let _canonicalProbe: ((obj: object) => boolean) | null = null;
 
 /** @internal Wire the interner's hash cache in as the canonicality probe. */
-export function _setCanonicals(map: WeakMap<WeakKey, number>): void {
-  _canonicals = map;
+export function _setCanonicalProbe(probe: (obj: object) => boolean): void {
+  _canonicalProbe = probe;
 }
 
 /**
@@ -267,7 +267,7 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   ) {
     return false;
   }
-  if (_canonicals !== null && _canonicals.has(a) && _canonicals.has(b)) {
+  if (_canonicalProbe !== null && _canonicalProbe(a) && _canonicalProbe(b)) {
     return false;
   }
 
