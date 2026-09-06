@@ -16,7 +16,7 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
-import { intern, _hashCacheHas } from './intern.js';
+import { intern, _hashCacheHas, isCanonical } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys } from './deep-equal.js';
 
@@ -228,6 +228,16 @@ export function _setCoreDraftFactories(
 ): void {
   coreObject = object;
   coreArray = array;
+}
+
+/**
+ * Whether an object may NOT be mutated in place by a draft: frozen (a
+ * canonical, or the caller's own frozen material), or canonical but unfrozen
+ * because the user skipped freezing. Drafts copy-on-write through such
+ * values instead of writing into them.
+ */
+export function isImmutable(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && (Object.isFrozen(value) || isCanonical(value));
 }
 
 /** Whether produce would hand `v` out as a draft: a plain object, an array, or a `[toDraft]` implementer. */

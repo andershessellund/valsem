@@ -132,6 +132,42 @@ bytes gzipped and costs 2–2.5× on every hit (two canonical arguments: 55 →
 copies the tuple, pools it (a WeakRef per novel call), and freezes it, where
 a hash fold over the arguments allocates nothing.
 
+## Freezing: the state, not the call
+
+valsem freezes the plain records and arrays it canonicalises. The
+`Object.freeze` call is a map transition — 30 ns on a small record, under
+0.1 µs on a 10k-item array — and the produce arenas do not move with it
+stubbed out. The cost is the frozen **state**: V8 has fast paths for frozen
+elements in some builtins and not in others, and the JIT's keyed loads are
+among the losers. `pnpm bench:frozen`, 10k elements, µs per op, unfrozen →
+frozen, monomorphic call sites:
+
+| operation | ints | doubles | objects |
+| --- | --- | --- | --- |
+| indexed loop read | 4.9 → 58.8 (12×) | 66 → 64 | 61 → 67 |
+| `for…of` | 7.8 → 67.3 (8.6×) | 75 → 64 | 68 → 67 |
+| `forEach` | 27 → 231 (8.7×) | 82 → 241 (2.9×) | 79 → 242 (3.1×) |
+| `filter` | 79 → 260 (3.3×) | 196 → 398 (2.0×) | 197 → 433 (2.2×) |
+| `indexOf` / `includes` (miss) | 2.0 → 4.5 / 5.2 | 1.9 → 5.9 | 6.1 → 6.0 |
+| `slice()` | 1.6 → 233 (146×) | 1.8 → 238 (132×) | 1.5 → 225 (152×) |
+| `concat` | 3.1 → 28 (9×) | 1.9 → 29 (15×) | 3.2 → 29 (9×) |
+| `JSON.stringify` | 44 → 206 (4.7×) | 148 → 311 (2.1×) | 227 → 546 (2.4×) |
+| `at()` ×1000 | 0.9 → 20 (23×) | 3.7 → 21 (5.5×) | 3.6 → 21 (5.8×) |
+| destructure `[x, y]` ×1000 | 1.5 → 15 (10×) | 16 → 15 | 18 → 17 |
+| `map`, `reduce`, spread, `Array.from` | unchanged | unchanged | unchanged |
+
+Records are unaffected: a frozen fast-mode object reads at full speed.
+`ValueList` never pays this — its leaves are unfrozen arrays inside a frozen
+wrapper — which is a real argument for it over plain arrays in hot canonical
+state. The library itself routes around the one penalty it hits (`copyArr`
+spreads frozen bases instead of slicing them).
+
+This is what `skipFreezing()` buys back, in the user's own loops, at the
+price of undetected mutation of shared values (the hardening guide has the
+trade). It is a separate switch from `skipChecks()` on purpose: both enforce
+a promise the caller made, but a skipped equality check yields one wrong
+boolean, while a skipped freeze lets one mutation corrupt every holder.
+
 ## The value collections vs Immutable.js
 
 Immutable.js is the closest structural comparison — its `Map`/`Set` are
@@ -390,6 +426,7 @@ update-throughput number shows:
 | `node scripts/big-array-bench.mjs` | the arena of record: results held in a ring, one contender × scheduling mode per process |
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
+| `pnpm bench:frozen` | what V8 charges for the frozen STATE of an array, per operation and elements kind — the case for `skipFreezing()` |
 | `pnpm bench:memoize` | memo hit/miss cost by argument kind: canonical, fresh literal beside canonical, raw, by width |
 | `node --allow-natives-syntax scripts/record-copy-bench.mjs` | dictionary-mode threshold by construction method; spread vs `Object.assign` at a megamorphic copy site |
 | `npx bun@latest scripts/<any>.mjs` | any of the above on JavaScriptCore (`VALSEM_DIST=<dir>` points `collections-bench` at an alternative build) |

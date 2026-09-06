@@ -19,6 +19,7 @@ import {
   createChildDraft,
   resolve,
   snapshotOf,
+  isImmutable,
   type DraftState,
   type Patch,
   type PatchPath,
@@ -87,7 +88,7 @@ export class DraftMap<K, V> {
         !s.finalized &&
         isDraftable(edited) &&
         stateOf(edited) === undefined &&
-        Object.isFrozen(edited)
+        isImmutable(edited)
       ) {
         const child = createChildDraft(edited, s);
         s.edits.set(k, child); // stays assigned — resolves at finalize

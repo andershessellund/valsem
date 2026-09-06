@@ -29,6 +29,7 @@ import {
   _setCanonicals, _recordKeys } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { _depthError, _maxDepth } from './limits.js';
+import { _checking, _freeze } from './checks.js';
 
 // ---------------------------------------------------------------------------
 // Shared precomputed hash cache
@@ -58,6 +59,49 @@ const pool = createInternPool<object>();
 // ---------------------------------------------------------------------------
 // Public lookup helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Whether `value` is in canonical form — the form in which `===` IS value
+ * equality: a primitive (symbols included; functions are not values), or an
+ * object valsem canonicalised (the collections and pooled value types by
+ * their marker, plain data by the hash cache). This is the probe every walk
+ * uses to stop at a canonical boundary, exposed for boundary assertions and
+ * comparators of your own.
+ */
+export function isCanonical(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return typeof value !== 'function';
+  return (value as Record<symbol, unknown>)[internedSym] === true || hashCache.has(value);
+}
+
+function describeNonCanonical(value: unknown): string {
+  if (typeof value === 'function') return 'a function';
+  if (Array.isArray(value)) return 'a raw array';
+  const ctor = (value as object).constructor as { name?: string } | undefined;
+  return ctor === undefined || ctor === Object ? 'a raw object' : `an instance of ${ctor.name ?? 'an unregistered class'}`;
+}
+
+/**
+ * Equality by identity, for canonical values — `a === b`, which is value
+ * equality once both sides are canonical. Unlike `deepEqual`, it never
+ * walks: the promise that both arguments are canonical (or primitive) is
+ * yours, and while checks are on it is verified, throwing on a raw object
+ * (whose `===` would be a silent `false`). `skipChecks()` turns the check
+ * off; the comparison is then a bare `===`.
+ */
+export function fastEquals(a: unknown, b: unknown): boolean {
+  if (_checking()) {
+    if (!isCanonical(a)) throw nonCanonical('first', a);
+    if (!isCanonical(b)) throw nonCanonical('second', b);
+  }
+  return a === b;
+}
+
+function nonCanonical(which: string, value: unknown): TypeError {
+  return new TypeError(
+    `valsem: fastEquals() compares canonical values by identity, but its ${which} argument is ${describeNonCanonical(value)}. ` +
+      'Intern it first (intern(), produce(), or a collection), or use deepEqual(). skipChecks() disables this check.',
+  );
+}
 
 /**
  * Structural hash of `value`, reusing the intern cache when possible.
@@ -225,7 +269,7 @@ function lookupOrStore(
     if (existing !== undefined) return existing;
     hashCache.set(obj, h);
     accCache.set(obj, { a: acc, n });
-    Object.freeze(obj);
+    _freeze(obj);
     return pool.register(obj, h);
   }
   const h = deepHash(obj);
@@ -315,6 +359,6 @@ export function _internPrehashed(obj: object, h: number, acc: number, n: number)
   if (existing !== undefined) return existing;
   hashCache.set(obj, h);
   accCache.set(obj, { a: acc, n });
-  Object.freeze(obj);
+  _freeze(obj);
   return pool.register(obj, h);
 }

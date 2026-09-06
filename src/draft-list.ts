@@ -18,6 +18,7 @@ import {
   createChildDraft,
   resolve,
   snapshotOf,
+  isImmutable,
   emitSeqOps,
   retractSeqPatches,
   seqTailProfile,
@@ -108,7 +109,7 @@ export class DraftList<T> {
       isDraftable(value) &&
       !s.finalized &&
       stateOf(value) === undefined &&
-      (value === s.base.get(index) || Object.isFrozen(value))
+      (value === s.base.get(index) || isImmutable(value))
     ) {
       const child = createChildDraft(value, s);
       s.drafted.add(index);

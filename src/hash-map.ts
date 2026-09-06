@@ -8,7 +8,8 @@
 // custom bucketing needed.
 // ---------------------------------------------------------------------------
 
-import { intern } from './intern.js';
+import { intern, isCanonical } from './intern.js';
+import { _checking } from './checks.js';
 
 /**
  * Hash map with structural key equality.
@@ -70,8 +71,18 @@ export class HashMap<K, V> {
     return value;
   }
 
-  /** Get the value for a key that is already known to be canonical (no intern call). */
+  /**
+   * Get the value for a key that is already canonical — no intern call, a
+   * bare `Map.get`. The promise is yours; while checks are on it is verified
+   * (a raw key would silently miss). `skipChecks()` turns the check off.
+   */
   getCanonical(key: K): V | undefined {
+    if (_checking() && !isCanonical(key)) {
+      throw new TypeError(
+        'valsem: HashMap.getCanonical() takes a canonical key — a raw key would silently miss. ' +
+          'Use get() (which interns), or intern the key first. skipChecks() disables this check.',
+      );
+    }
     return this.#map.get(key);
   }
 

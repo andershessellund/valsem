@@ -363,7 +363,9 @@ exact narrowing, `applyPatches` support — which is also a test in the repo.
 ## Guarantees
 
 - **Immutable.** Everything `produce`, `intern` and the collections return is
-  frozen, all the way down.
+  frozen, all the way down — unless you call `skipFreezing()`, which trades
+  that enforcement for unfrozen (faster to iterate) canonical arrays; see
+  the hardening guide.
 - **Canonical.** Equal content is the same object — lineage-free: however a
   value was built, it converges on one instance.
 - **Compared by content.** `deepEqual` never throws on a *type* — mutable
@@ -403,13 +405,14 @@ bindings (`valsem/binding`).
 | --- | --- |
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
+| `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
 | `HashMap` | mutable map keyed by content |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
 | `toDraft`, `valsem/draft` | making types draftable — the protocol `produce` uses for everything but plain objects and arrays |
-| `configureHasher`, `configureLimits` | hardening knobs |
+| `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches you own |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |
 
 Runs on Node ≥ 22 and current browsers. `ValueSet`'s set-algebra methods

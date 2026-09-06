@@ -135,11 +135,13 @@ describe('HashMap', () => {
     expect(Object.isFrozen(seen)).toBe(true);
   });
 
-  it('getCanonical() hits on a canonical key and misses (silently) on a raw one', () => {
+  it('getCanonical() hits on a canonical key; a raw key is caught while checks are on', () => {
     const map = new HashMap<{ id: number }, string>();
     map.set({ id: 1 }, 'v');
     expect(map.getCanonical(intern({ id: 1 }))).toBe('v');
-    expect(map.getCanonical({ id: 1 })).toBeUndefined(); // documented: no intern call
+    // No intern call — a raw key would silently miss, so the promise is verified
+    // (skip-checks.test.ts shows the silent miss once skipChecks() is called).
+    expect(() => map.getCanonical({ id: 1 })).toThrow(/takes a canonical key/);
   });
 
   it('iteration yields canonical keys, not the caller\'s objects', () => {

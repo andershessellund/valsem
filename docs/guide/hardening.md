@@ -69,3 +69,51 @@ parked stack is bounded (100k); past that, deaths are reclaimed inline until
 idle time catches up. The measurements behind this choice — frame-loop,
 pool-churn and collection benchmarks on V8 and JavaScriptCore — are in the
 repository's `BENCHMARKS.md`.
+
+## The two switches you own: `skipChecks()` and `skipFreezing()`
+
+valsem enforces two promises its callers make. It **freezes** every plain
+record and array it canonicalises, so the promise "nobody mutates a shared
+value" is kept by the engine (a mutation throws in strict mode). And where
+an API says *canonical only* — `fastEquals(a, b)`, `HashMap.getCanonical` —
+it **checks** that the caller kept that promise, because the alternative is
+a silent wrong answer (`===` on a raw object is `false`, a raw key misses).
+
+Both are on by default, everywhere, and neither consults the environment:
+a bundler's idea of "production" is not evidence that your answers are
+right. Turning either off is a one-way, explicit, per-process decision, made
+at startup, the way Angular's `enableProdMode()` is:
+
+```ts
+import { skipChecks, skipFreezing } from 'valsem';
+
+if (process.env.NODE_ENV === 'production') {
+  skipChecks();   // fastEquals / getCanonical trust their arguments
+  skipFreezing(); // canonical records and arrays are no longer frozen
+}
+```
+
+**What `skipChecks()` gives up.** The checks cost a property read and a
+cache probe, so the reason to skip them is principle, not speed: from then
+on a raw argument at a *canonical only* call site is a silent wrong answer
+instead of a thrown one. Semantics are untouched — non-values are still
+rejected, results are still canonical.
+
+**What `skipFreezing()` buys, and costs.** Frozen arrays are slow in V8.
+The freeze call itself is free (a map transition, ~0.1 µs at any size), but
+the frozen *state* is not: indexed reads run 5–12× slower, `forEach` 8×,
+`filter` 2–3×, `slice` and `concat` 10–150×, `JSON.stringify` 2–5×, and
+that cost lands in your own loops over canonical state (`pnpm bench:frozen`;
+the table is in the repository's `BENCHMARKS.md`). Records are unaffected,
+and `ValueList` never pays it — its leaves are unfrozen inside a frozen
+wrapper. What you give up: a mutation of a canonical value goes undetected
+and corrupts every holder of that value, its cached hash, and the pool. The
+immer deal applies: freeze in development and test, where a stray mutation
+throws, and skip in production if plain canonical arrays sit on a hot path.
+Collections and value types keep freezing their own instances (objects, at
+no cost, protecting their cached hash), and drafts still copy-on-write
+through an unfrozen canonical rather than write into it.
+
+`isCanonical(value)` is the probe behind the checks — a primitive, or an
+object valsem canonicalised — exposed for assertions and comparators of your
+own; it is not affected by either switch.

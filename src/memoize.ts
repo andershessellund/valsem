@@ -24,8 +24,8 @@
 // strongly, so a size-N cache pins N argument graphs — choose N knowingly.
 // ---------------------------------------------------------------------------
 
-import { deepEqual, interned as internedSym } from './deep-equal.js';
-import { intern, internHash, _hashCacheHas } from './intern.js';
+import { deepEqual } from './deep-equal.js';
+import { intern, internHash, isCanonical } from './intern.js';
 
 export interface MemoizeOptions {
   /** Entries to keep, evicted least-recently-used. Default 1; `Infinity` keeps everything. */
@@ -47,12 +47,6 @@ interface Entry {
   result: unknown;
   newer: Entry | null; // toward the most recently used
   older: Entry | null;
-}
-
-/** Whether `intern` handed back something canonical — a value — rather than passing a non-value through. */
-function isValue(v: unknown): boolean {
-  if (v === null || typeof v !== 'object') return typeof v !== 'function';
-  return (v as Record<symbol, unknown>)[internedSym] === true || _hashCacheHas(v);
 }
 
 /**
@@ -141,7 +135,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
 
     const raw = fn.apply(this, args as never[]);
     const result = intern(raw);
-    if (!isValue(result)) {
+    if (!isCanonical(result)) {
       const what =
         typeof raw === 'function'
           ? 'a function'

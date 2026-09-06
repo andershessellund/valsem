@@ -59,6 +59,7 @@ import {
   retractSeqPatches,
   seqTailProfile,
   snapshotOf,
+  isImmutable,
   _runInScope,
   _setCoreDraftFactories,
   type DraftState,
@@ -191,7 +192,7 @@ const objectTraps: ProxyHandler<object> = {
     // (mutative's #18 family).
     if (
       value === state.base[prop] ||
-      (stateOf(value) === undefined && Object.isFrozen(value))
+      (stateOf(value) === undefined && isImmutable(value))
     ) {
       prepareObjCopy(state);
       (state.drafted ??= new Set()).add(prop);
@@ -482,7 +483,7 @@ const arrayTraps: ProxyHandler<object> = {
     if (
       value === state.base[index] ||
       (stateOf(value) === undefined &&
-        (Object.isFrozen(value) || (state.opaqued && isBaseMember(state, value))))
+        (isImmutable(value) || (state.opaqued && isBaseMember(state, value))))
     ) {
       (state.drafted ??= new Set()).add(index);
       const child = createChildDraft(value, state);

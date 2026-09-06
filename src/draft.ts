@@ -36,6 +36,7 @@ export {
   createChildDraft,
   resolve,
   snapshotOf,
+  isImmutable,
   restoreValue,
   same,
   emitSeqOps,
