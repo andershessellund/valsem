@@ -87,6 +87,28 @@ they can only contain values, while `HashMap` stores its values uninterned and
 can therefore index **live** objects — DOM nodes, subscriptions, open
 connections — by structural key.
 
+### `{ intern: false }` — keys that are new values every call
+
+By default a key is interned on the way in: a canonical key looks up at
+native-`Map` speed (~20 ns), and the map holds canonical keys. That is the
+right default when keys are your state. It is the wrong one when every key
+is a fresh value that nothing else will ever look up — request objects,
+query parameters, event payloads — because each novel key is then copied,
+frozen, and given a pool entry for nobody's benefit.
+
+```ts
+const byRequest = new HashMap<Request, Response>({ intern: false });
+byRequest.set({ path: '/users', page: 2 }, res);
+byRequest.get({ page: 2, path: '/users' }); // → res — still by content, field order irrelevant
+```
+
+In this mode keys are hashed and compared by content without being
+canonicalised: a raw-key hit runs ~1.7× faster and a novel-key insert ~2.3×,
+and the pool is untouched. Two consequences: keys are stored **as given**,
+so mutating one afterwards corrupts the map (the rule of every hash map with
+mutable keys), and on canonical keys this mode is *slower* (49 ns against
+19), so keep the default for state. `memoize` is built on the same table.
+
 ::: tip There is deliberately no HashSet
 A set's elements are its keys, all interned, so it would hold nothing a native
 `Set` fed interned elements doesn't already. For a mutable visited-set, write

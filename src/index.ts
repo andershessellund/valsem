@@ -17,6 +17,7 @@ export { deepEqual, equals, hashCode, interned } from './deep-equal.js';
 export type { RegisterOptions } from './deep-equal.js';
 export { deepHash } from './deep-hash.js';
 export { HashMap } from './hash-map.js';
+export type { HashMapOptions } from './hash-map.js';
 export { intern, createInterner, internHash, isCanonical, fastEquals } from './intern.js';
 export { skipChecks, skipFreezing } from './checks.js';
 export { ValueList } from './value-list.js';

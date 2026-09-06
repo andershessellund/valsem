@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { HashMap } from './hash-map.js';
-import { intern } from './intern.js';
+import { intern, isCanonical } from './intern.js';
 
 describe('HashMap', () => {
   // --- Basic CRUD ---
@@ -232,5 +232,98 @@ describe('HashMap', () => {
     expect(map.get([1, 2, 3])).toBe('a');
     expect(map.get([4, 5, 6])).toBe('b');
     expect(map.get([1, 2])).toBeUndefined();
+  });
+});
+
+describe('HashMap({ intern: false }) — content-matched, uncanonicalised keys', () => {
+  it('matches by content, key order included, without interning the key', () => {
+    const m = new HashMap<{ table: string; id: number }, string>({ intern: false });
+    const k = { table: 'users', id: 1 };
+    m.set(k, 'v');
+    expect(m.get({ id: 1, table: 'users' })).toBe('v');
+    expect(m.has({ table: 'users', id: 1 })).toBe(true);
+    expect(m.get({ table: 'users', id: 2 })).toBeUndefined();
+    expect(Object.isFrozen(k)).toBe(false); // stored as given
+    expect(isCanonical(k)).toBe(false); // never pooled
+    const [stored] = [...m.keys()];
+    expect(stored).toBe(k); // the caller's object, not a copy
+  });
+
+  it('set on an equal key replaces the value and keeps the stored key; delete works by content', () => {
+    const m = new HashMap<{ id: number }, number>({ intern: false });
+    const first = { id: 1 };
+    m.set(first, 1).set({ id: 1 }, 2);
+    expect(m.size).toBe(1);
+    expect(m.get({ id: 1 })).toBe(2);
+    expect([...m.keys()][0]).toBe(first);
+    expect(m.delete({ id: 1 })).toBe(true);
+    expect(m.delete({ id: 1 })).toBe(false);
+    expect(m.size).toBe(0);
+  });
+
+  it('canonical and primitive keys work too; getCanonical keeps its check', () => {
+    const m = new HashMap<unknown, string>({ intern: false });
+    const c = intern({ a: [1] });
+    m.set(c, 'c').set(7, 'seven').set('s', 'str');
+    expect(m.get(intern({ a: [1] }))).toBe('c');
+    expect(m.get({ a: [1] })).toBe('c'); // raw spelling of the same value
+    expect(m.get(7)).toBe('seven');
+    expect(m.getCanonical(c)).toBe('c');
+    expect(m.getCanonical(7)).toBe('seven');
+    expect(() => m.getCanonical({ a: [1] })).toThrow(/takes a canonical key/);
+  });
+
+  it('getOrCreate hands the factory the key as given, caches undefined, and never re-runs', () => {
+    const m = new HashMap<{ q: string }, number | undefined>({ intern: false });
+    let runs = 0;
+    const key = { q: 'x' };
+    const fac = (k: { q: string }) => {
+      runs++;
+      expect(k).toBe(key);
+      return undefined;
+    };
+    expect(m.getOrCreate(key, fac)).toBeUndefined();
+    expect(m.getOrCreate({ q: 'x' }, fac)).toBeUndefined();
+    expect(runs).toBe(1);
+    expect(m.has({ q: 'x' })).toBe(true);
+  });
+
+  it('iterates in insertion order, survives deletes, and clears', () => {
+    const m = new HashMap<number, string>({ intern: false });
+    for (let i = 0; i < 5; i++) m.set(i, `v${i}`);
+    m.delete(2);
+    m.set(2, 'again');
+    expect([...m.keys()]).toEqual([0, 1, 3, 4, 2]);
+    expect([...m.values()]).toEqual(['v0', 'v1', 'v3', 'v4', 'again']);
+    expect([...m]).toEqual([...m.entries()]);
+    const seen: number[] = [];
+    m.forEach((_v, k, map) => {
+      expect(map).toBe(m);
+      seen.push(k);
+    });
+    expect(seen).toEqual([0, 1, 3, 4, 2]);
+    m.clear();
+    expect(m.size).toBe(0);
+    expect([...m]).toEqual([]);
+  });
+
+  it('is correct across many keys (bucket collisions included) and rejects non-values like get() does', () => {
+    const m = new HashMap<{ i: number; s: string }, number>({ intern: false });
+    for (let i = 0; i < 3000; i++) m.set({ i, s: `k${i}` }, i);
+    expect(m.size).toBe(3000);
+    for (let i = 0; i < 3000; i++) expect(m.get({ s: `k${i}`, i })).toBe(i);
+    for (let i = 0; i < 3000; i += 2) expect(m.delete({ i, s: `k${i}` })).toBe(true);
+    expect(m.size).toBe(1500);
+    for (let i = 1; i < 3000; i += 2) expect(m.get({ i, s: `k${i}` })).toBe(i);
+    expect(() => m.get(new Date() as never)).toThrow();
+  });
+
+  it('the documented hazard: a stored key mutated afterwards is no longer found', () => {
+    const m = new HashMap<{ id: number }, string>({ intern: false });
+    const k = { id: 1 };
+    m.set(k, 'v');
+    k.id = 2;
+    expect(m.get({ id: 1 })).toBeUndefined();
+    expect(m.get({ id: 2 })).toBeUndefined(); // hashed under the old content
   });
 });

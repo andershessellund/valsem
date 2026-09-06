@@ -1,15 +1,37 @@
 // ---------------------------------------------------------------------------
-// HashMap — hash map with structural key equality via interning
+// HashMap — a mutable map keyed by content.
 //
-// Every key is automatically internalized via the global {@link intern}
-// pool, so structurally equal keys collapse to the same canonical object.
-// Because interning guarantees structural equality ↔ reference equality,
-// a plain Map<K, V> keyed by canonical references is sufficient — no
-// custom bucketing needed.
+// Two modes, one class. By default every key is interned on the way in, so
+// structurally equal keys collapse to one canonical object and a plain
+// `Map<K, V>` keyed by reference does the rest: a canonical key looks up at
+// native-Map speed, and the map holds canonical keys. With `{ intern: false }`
+// keys are matched by content WITHOUT being canonicalised — hashed and
+// compared in a bucket table — for the case where keys are fresh values
+// every call (request objects, query params): no copy, no freeze, no pool
+// entry per novel key, and a raw-key hit ~1.7× faster. On canonical keys the
+// default mode is faster. Keys are then stored as given; mutating one
+// afterwards corrupts the map, as in any hash map with mutable keys.
 // ---------------------------------------------------------------------------
 
-import { intern, isCanonical } from './intern.js';
+import { intern, internHash, isCanonical } from './intern.js';
+import { deepEqual } from './deep-equal.js';
 import { _checking } from './checks.js';
+import { HashTable, type TableEntry } from './hash-table.js';
+
+export interface HashMapOptions {
+  /**
+   * Intern keys on the way in (default `true`): lookups on canonical keys
+   * run at native-`Map` speed and the map holds canonical keys. `false`
+   * matches keys by content without canonicalising them — for keys that are
+   * new values every call; they are stored as given, so do not mutate them.
+   */
+  intern?: boolean;
+}
+
+interface Entry<K, V> extends TableEntry {
+  readonly key: K;
+  value: V;
+}
 
 /**
  * Hash map with structural key equality.
@@ -25,32 +47,57 @@ import { _checking } from './checks.js';
  * ```
  */
 export class HashMap<K, V> {
-  readonly #map = new Map<K, V>();
+  /** Interning mode: canonical key → value. */
+  readonly #map: Map<K, V> | null;
+  /** Non-interning mode: content-matched entries. */
+  readonly #table: HashTable<Entry<K, V>> | null;
+
+  constructor(options: HashMapOptions = {}) {
+    if (options.intern ?? true) {
+      this.#map = new Map();
+      this.#table = null;
+    } else {
+      this.#map = null;
+      this.#table = new HashTable(true);
+    }
+  }
+
+  #find(key: K): Entry<K, V> | undefined {
+    return this.#table!.find(internHash(key), (e) => e.key === key || deepEqual(e.key, key));
+  }
 
   /** Number of entries in the map. */
   get size(): number {
-    return this.#map.size;
+    return this.#map !== null ? this.#map.size : this.#table!.size;
   }
 
   /** Check whether a structurally equal key exists. */
   has(key: K): boolean {
-    return this.#map.has(intern(key));
+    return this.#map !== null ? this.#map.has(intern(key)) : this.#find(key) !== undefined;
   }
 
   /** Get the value for a structurally equal key, or `undefined`. */
   get(key: K): V | undefined {
-    return this.#map.get(intern(key));
+    return this.#map !== null ? this.#map.get(intern(key)) : this.#find(key)?.value;
   }
 
-  /** Set a key-value pair. Overwrites if a structurally equal key exists. */
+  /** Set a key-value pair. Overwrites if a structurally equal key exists (keeping the stored key). */
   set(key: K, value: V): this {
-    this.#map.set(intern(key), value);
+    if (this.#map !== null) {
+      this.#map.set(intern(key), value);
+      return this;
+    }
+    const e = this.#find(key);
+    if (e !== undefined) e.value = value;
+    else this.#table!.add({ hash: internHash(key), key, value });
     return this;
   }
 
   /** Delete an entry by structural key. Returns `true` if found. */
   delete(key: K): boolean {
-    return this.#map.delete(intern(key));
+    if (this.#map !== null) return this.#map.delete(intern(key));
+    const e = this.#find(key);
+    return e !== undefined && this.#table!.remove(e);
   }
 
   /**
@@ -58,16 +105,23 @@ export class HashMap<K, V> {
    *
    * Avoids the double-lookup pattern of `if (!has) set(create())`.
    * The `factory` is only called when the key is not found, and receives the
-   * canonical (interned) key. A factory result of `undefined` is stored and
-   * cached like any other value.
+   * key as the map will hold it (canonical in the default mode). A factory
+   * result of `undefined` is stored and cached like any other value.
    */
   getOrCreate(key: K, factory: (key: K) => V): V {
-    const ik = intern(key);
-    // Presence, not `!== undefined`: a stored `undefined` is a cached result
-    // too, and must not re-run the factory.
-    if (this.#map.has(ik)) return this.#map.get(ik) as V;
-    const value = factory(ik);
-    this.#map.set(ik, value);
+    if (this.#map !== null) {
+      const ik = intern(key);
+      // Presence, not `!== undefined`: a stored `undefined` is a cached result
+      // too, and must not re-run the factory.
+      if (this.#map.has(ik)) return this.#map.get(ik) as V;
+      const value = factory(ik);
+      this.#map.set(ik, value);
+      return value;
+    }
+    const e = this.#find(key);
+    if (e !== undefined) return e.value;
+    const value = factory(key);
+    this.#table!.add({ hash: internHash(key), key, value });
     return value;
   }
 
@@ -83,36 +137,39 @@ export class HashMap<K, V> {
           'Use get() (which interns), or intern the key first. skipChecks() disables this check.',
       );
     }
-    return this.#map.get(key);
+    return this.#map !== null ? this.#map.get(key) : this.#find(key)?.value;
   }
 
   /** Remove all entries. */
   clear(): void {
-    this.#map.clear();
+    if (this.#map !== null) this.#map.clear();
+    else this.#table!.clear();
   }
 
   /** Iterate over all entries, calling `fn` for each. */
   forEach(fn: (value: V, key: K, map: HashMap<K, V>) => void): void {
-    this.#map.forEach((value, key) => fn(value, key, this));
+    for (const [k, v] of this.entries()) fn(v, k, this);
   }
 
-  /** Yield all `[key, value]` pairs. */
+  /** Yield all `[key, value]` pairs, in insertion order. */
   entries(): IterableIterator<[K, V]> {
-    return this.#map.entries();
+    if (this.#map !== null) return this.#map.entries();
+    return this.#table!.entries().map((e) => [e.key, e.value] as [K, V]);
   }
 
   /** Yield all keys. */
   keys(): IterableIterator<K> {
-    return this.#map.keys();
+    if (this.#map !== null) return this.#map.keys();
+    return this.#table!.entries().map((e) => e.key);
   }
 
   /** Yield all values. */
   values(): IterableIterator<V> {
-    return this.#map.values();
+    if (this.#map !== null) return this.#map.values();
+    return this.#table!.entries().map((e) => e.value);
   }
 
   [Symbol.iterator](): IterableIterator<[K, V]> {
-    return this.#map.entries();
+    return this.entries();
   }
 }
-

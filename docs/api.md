@@ -10,7 +10,7 @@
 | `isCanonical(value)` | function | Whether `value` is a primitive or an object valsem canonicalised — the form in which `===` is value equality. The probe behind every canonical short-circuit. |
 | `fastEquals(a, b)` | function | `a === b` for canonical values, never a walk. While checks are on, a raw argument throws instead of yielding a silent `false`. |
 | `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
-| `HashMap` | class | Mutable map with structural (interned) keys. |
+| `HashMap` | class | Mutable map with structural keys: interned by default (canonical keys look up at native-`Map` speed), or `{ intern: false }` to match by content without canonicalising — for keys that are new values every call; keys are then stored as given. |
 | `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
 | `ValueDate` | class | An immutable, canonical timestamp — the value a `Date` stands for. `ValueDate.of(x)` takes what `new Date(x)` takes; `toDate()` returns a fresh mutable `Date`; `valueOf()` is the epoch; `toJSON()` matches `Date`. |
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |

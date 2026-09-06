@@ -139,10 +139,13 @@ const rows = cache.getOrCreate({ table: 'users', id: 2 }, (key) => loadRow(key))
 
 Keys are interned on the way in. If the key you pass is already canonical —
 anything that came out of `produce`, `intern`, or a collection — the lookup is
-**O(1)** regardless of the key's size: no hashing, no structural walk, ~40 ns
-(`getCanonical` skips even the check, at native-`Map` parity). A raw key is
-walked and hashed once on the way in (~350 ns for a small record); the
-canonical key it resolves to is what the map actually holds.
+**O(1)** regardless of the key's size: no hashing, no structural walk, ~20 ns
+at native-`Map` parity. A raw key is walked and hashed once on the way in
+(~500 ns for a small record); the canonical key it resolves to is what the
+map actually holds. For keys that are new values every call — request
+objects, query params — `new HashMap({ intern: false })` matches by content
+without canonicalising: raw-key hits ~1.7× faster, inserts ~2.3×, nothing
+enters the pool, keys stored as given.
 
 ### `memoize` — a pure function, remembered by content
 
@@ -406,7 +409,7 @@ bindings (`valsem/binding`).
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
-| `HashMap` | mutable map keyed by content |
+| `HashMap` | mutable map keyed by content (`{ intern: false }` for keys that are fresh every call) |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |

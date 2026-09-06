@@ -61,6 +61,7 @@
     "bench:collections": "node scripts/collections-bench.mjs",
     "bench:memoize": "node scripts/memoize-bench.mjs",
     "bench:frozen": "node scripts/frozen-array-bench.mjs",
+    "bench:hashmap": "node scripts/hashmap-bench.mjs",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",

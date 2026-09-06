@@ -26,6 +26,7 @@
 
 import { deepEqual } from './deep-equal.js';
 import { intern, internHash, isCanonical } from './intern.js';
+import { HashTable, type TableEntry } from './hash-table.js';
 
 export interface MemoizeOptions {
   /** Entries to keep, evicted least-recently-used. Default 1; `Infinity` keeps everything. */
@@ -41,8 +42,8 @@ export interface Memoized<F extends (...args: never[]) => unknown> {
   readonly size: number;
 }
 
-interface Entry {
-  hash: number;
+interface Entry extends TableEntry {
+  readonly hash: number;
   args: unknown[];
   result: unknown;
   newer: Entry | null; // toward the most recently used
@@ -75,7 +76,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
   }
   const name = fn.name || 'the function';
 
-  const buckets = new Map<number, Entry | Entry[]>();
+  const table = new HashTable<Entry>(false); // recency lives in the list below, not in the table
   let newest: Entry | null = null;
   let oldest: Entry | null = null;
   let size = 0;
@@ -112,25 +113,13 @@ export function memoize<F extends (...args: never[]) => unknown>(
       );
     }
 
-    const bucket = buckets.get(h);
-    if (bucket !== undefined) {
-      if (Array.isArray(bucket)) {
-        for (const e of bucket) {
-          if (sameArgs(e.args, args)) {
-            if (e !== newest) {
-              unlink(e);
-              pushNewest(e);
-            }
-            return e.result;
-          }
-        }
-      } else if (sameArgs(bucket.args, args)) {
-        if (bucket !== newest) {
-          unlink(bucket);
-          pushNewest(bucket);
-        }
-        return bucket.result;
+    const hit = table.find(h, (e) => sameArgs(e.args, args));
+    if (hit !== undefined) {
+      if (hit !== newest) {
+        unlink(hit);
+        pushNewest(hit);
       }
+      return hit.result;
     }
 
     const raw = fn.apply(this, args as never[]);
@@ -147,23 +136,15 @@ export function memoize<F extends (...args: never[]) => unknown>(
     }
 
     const e: Entry = { hash: h, args: args.map(intern), result, newer: null, older: null };
-    if (bucket === undefined) buckets.set(h, e);
-    else if (Array.isArray(bucket)) bucket.push(e);
-    else buckets.set(h, [bucket, e]);
+    table.add(e);
     pushNewest(e);
     size++;
 
     if (size > maxSize) {
       const victim = oldest!;
       unlink(victim);
+      table.remove(victim);
       size--;
-      const vb = buckets.get(victim.hash)!;
-      if (Array.isArray(vb)) {
-        const rest = vb.filter((x) => x !== victim);
-        buckets.set(victim.hash, rest.length === 1 ? rest[0]! : rest);
-      } else {
-        buckets.delete(victim.hash);
-      }
     }
     return result;
   } as unknown as Memoized<F>;
@@ -171,7 +152,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
   Object.defineProperties(memoized, {
     clear: {
       value: (): void => {
-        buckets.clear();
+        table.clear();
         newest = oldest = null;
         size = 0;
       },

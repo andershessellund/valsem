@@ -97,6 +97,31 @@ where it was ~300, and the raw-record rows above moved from parity to
 it — they short-circuit before any enumeration — and the alternative was the
 silent wrong answer (`deepEqual({ [s]: 1 }, { [s]: 2 })` used to be `true`).
 
+## HashMap: interning keys, or not
+
+`pnpm bench:hashmap`. Two modes, one class. The default interns every key
+and keys a native `Map` by the canonical reference; `{ intern: false }`
+hashes and compares keys by content in a bucket table and stores them as
+given. Hits, ns:
+
+| key | `intern: true` (default) | `intern: false` |
+| --- | --- | --- |
+| canonical key, `get` | **19** | 49 |
+| canonical key, `getCanonical` | 27 | 57 |
+| primitive key | 27 | 52 |
+| raw 2-key object, `get` | 514 | **303** |
+| raw 50-item payload, `get` | 24,800 | **12,800** |
+| novel raw 2-key object, `set` | 1,073 | **460** |
+
+The rule follows: keys that are your state (canonical) take the default;
+keys that are fresh values every call — request objects, query params —
+take `intern: false`, which also keeps each novel key out of the pool (no
+copy, no freeze, no `WeakRef`). The bucket table under the second mode is
+the same one `memoize` uses, with memoize supplying its own hash fold and
+`===`-per-argument match — which is why memoize keeps its 49 ns hit rather
+than the 76 ns a generic `HashMap.get` on the argument array would cost
+(`deepHash`'s guard and probe, `deepEqual`'s two canonical probes).
+
 ## memoize
 
 `pnpm bench:memoize`. memoize is built on valsem's premise — state is
@@ -126,11 +151,14 @@ question does not arise.
 Two designs were measured and rejected. Keying an identity `Map` on the
 first argument (lodash's 13 ns path, correct here because canonical `===`
 is value equality) degrades to a linear scan whenever many entries share a
-first argument — the common selector shape. Building on `HashMap` saves 300
-bytes gzipped and costs 2–2.5× on every hit (two canonical arguments: 55 →
-133 ns) and 3.75× on primitive-argument misses, because `intern(args)`
-copies the tuple, pools it (a WeakRef per novel call), and freezes it, where
-a hash fold over the arguments allocates nothing.
+first argument — the common selector shape. Going through the interning
+`HashMap` costs 2–2.5× on every hit (two canonical arguments: 55 → 133 ns)
+and 3.75× on primitive-argument misses, because `intern(args)` copies the
+tuple, pools it (a WeakRef per novel call), and freezes it; going through
+the non-interning `HashMap.get` still costs 1.7× (45 → 76 ns) for the
+generic hash and equality of the argument array. memoize therefore shares
+the bucket table with the non-interning mode but supplies its own hash fold
+and match.
 
 ## Freezing: the state, not the call
 
@@ -427,6 +455,7 @@ update-throughput number shows:
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
 | `pnpm bench:frozen` | what V8 charges for the frozen STATE of an array, per operation and elements kind — the case for `skipFreezing()` |
+| `pnpm bench:hashmap` | `HashMap`'s two modes by key kind: canonical, primitive, raw, novel |
 | `pnpm bench:memoize` | memo hit/miss cost by argument kind: canonical, fresh literal beside canonical, raw, by width |
 | `node --allow-natives-syntax scripts/record-copy-bench.mjs` | dictionary-mode threshold by construction method; spread vs `Object.assign` at a megamorphic copy site |
 | `npx bun@latest scripts/<any>.mjs` | any of the above on JavaScriptCore (`VALSEM_DIST=<dir>` points `collections-bench` at an alternative build) |
