@@ -62,6 +62,13 @@ export class HashMap<K, V> {
     }
   }
 
+  /** A map holding `entries`. */
+  static from<K, V>(entries: Iterable<readonly [K, V]>, options?: HashMapOptions): HashMap<K, V> {
+    const m = new HashMap<K, V>(options);
+    for (const [k, v] of entries) m.set(k, v);
+    return m;
+  }
+
   #find(key: K): Entry<K, V> | undefined {
     return this.#table!.find(internHash(key), (e) => e.key === key || deepEqual(e.key, key));
   }

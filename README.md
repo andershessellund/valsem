@@ -124,7 +124,7 @@ deepEqual(new Date(0), new Date(0)); // false — reference semantics for mutabl
 
 ## Collections
 
-### `HashMap` — a mutable map keyed by content
+### `HashMap` and `HashSet` — mutable, keyed by content
 
 ```ts
 import { HashMap } from 'valsem';
@@ -145,7 +145,8 @@ at native-`Map` parity. A raw key is walked and hashed once on the way in
 map actually holds. For keys that are new values every call — request
 objects, query params — `new HashMap({ intern: false })` matches by content
 without canonicalising: raw-key hits ~1.7× faster, inserts ~2.3×, nothing
-enters the pool, keys stored as given.
+enters the pool, keys stored as given. `HashSet` is the same thing as a set:
+`seen.add({ x: 1, y: 2 }); seen.has({ y: 2, x: 1 }) // true`.
 
 ### `memoize` — a pure function, remembered by content
 
@@ -409,7 +410,7 @@ bindings (`valsem/binding`).
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
-| `HashMap` | mutable map keyed by content (`{ intern: false }` for keys that are fresh every call) |
+| `HashMap`, `HashSet` | mutable map and set keyed by content (`{ intern: false }` for keys that are fresh every call) |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |

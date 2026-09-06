@@ -18,6 +18,8 @@ export type { RegisterOptions } from './deep-equal.js';
 export { deepHash } from './deep-hash.js';
 export { HashMap } from './hash-map.js';
 export type { HashMapOptions } from './hash-map.js';
+export { HashSet } from './hash-set.js';
+export type { HashSetOptions } from './hash-set.js';
 export { intern, createInterner, internHash, isCanonical, fastEquals } from './intern.js';
 export { skipChecks, skipFreezing } from './checks.js';
 export { ValueList } from './value-list.js';

@@ -109,9 +109,23 @@ so mutating one afterwards corrupts the map (the rule of every hash map with
 mutable keys), and on canonical keys this mode is *slower* (49 ns against
 19), so keep the default for state. `memoize` is built on the same table.
 
-::: tip There is deliberately no HashSet
-A set's elements are its keys, all interned, so it would hold nothing a native
-`Set` fed interned elements doesn't already. For a mutable visited-set, write
-`seen.add(intern(pos))` — canonical values have reference identity, so native
-`Set` semantics are already correct.
-:::
+## `HashSet` — a Set with structural members
+
+`HashMap`'s twin: a mutable set whose membership is by content, with the
+same two modes. In the default mode an element is interned on the way in
+and a native `Set` of canonical references does the rest, so a mutable
+visited-set over positions, coordinates, or identifiers just works:
+
+```ts
+import { HashSet } from 'valsem';
+
+const seen = new HashSet<{ x: number; y: number }>();
+seen.add({ x: 1, y: 2 });
+seen.has({ y: 2, x: 1 }); // true — field order irrelevant
+HashSet.from(points).size; // duplicates by content collapse
+```
+
+`{ intern: false }` matches members by content without canonicalising
+them, for elements that are new values every call, stored as given.
+`hasCanonical` is the checked identity test, like `HashMap.getCanonical`.
+Both classes also take `from(iterable, options?)`.
