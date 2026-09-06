@@ -25,6 +25,8 @@ features:
     details: ValueMap, ValueSet, and ValueList are hash-consed — equal content converges on the same tree nodes process-wide, however it was built. HashMap keys any cache by structure.
   - title: History for free
     details: Held versions share unchanged subtrees across the whole version graph, and revisited states are pointers to existing objects. An undo tree costs its unique content, not its edit count.
+  - title: Extensible
+    details: Your own classes become values with one method ([equals] + [hashCode]) or one registration; Temporal ships behind valsem/temporal. What cannot be a value — Date, Map, an unknown class — is rejected with an error that names the fix.
   - title: Hashing that respects equality
     details: deepHash is deepEqual's companion — equal implies same hash — seeded per process against hash flooding, cached on every canonical value.
   - title: Honest performance

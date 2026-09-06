@@ -28,39 +28,60 @@ const next = produce(state, (d) => {
 });
 ```
 
-**Compared by value.** Two values with the same content are *equal*, and the
-collections agree: `ValueMap`, `ValueSet`, `ValueList` are immutable
-collections with structural sharing; `HashMap` and `HashSet` are mutable and
-keyed by content; `memoize` remembers a pure function by its arguments'
-content.
+**Compared by value.** Two values with the same content are equal, and since
+every value valsem hands back is canonical, equal means `===`. That is the
+property a React app is built around, and it stops paying for what did not
+change:
+
+- **No rerender for unchanged data.** Refetch, re-derive, or reload the same
+  content and you get the same object, so `React.memo`, `useMemo`, and effect
+  dependencies see nothing new.
+- **No recomputing selectors.** A memoized selector — valsem's `memoize` or
+  reselect's — hits on equal inputs, not just identical references.
+- **No refetch for an equal query.** A cache keyed by content (`HashMap` on
+  the request parameters) hits when the parameters are equal, however the
+  object was built.
+- **"Unsaved changes?" is one compare.** `fastEquals(current, saved)`, at any
+  size.
 
 ```ts
-import { deepEqual, HashSet, memoize } from 'valsem';
+import { intern, memoize, HashMap } from 'valsem';
 
-deepEqual({ a: 1, b: [2, 3] }, { b: [2, 3], a: 1 }); // true — key order is not content
-const seen = new HashSet<{ x: number; y: number }>();
-seen.add({ x: 1, y: 2 });
-seen.has({ y: 2, x: 1 });                            // true
+const users = intern(await (await fetch('/api/users')).json());
+users === previousUsers;                       // true whenever the content is unchanged → React.memo hits
+
 const visible = memoize((todos, filter) => todos.filter(matches(filter)));
-visible(state.todos, { done: false }) === visible(state.todos, { done: false }); // true — same instance
+visible(state.todos, { done: false });         // a fresh filter literal still hits: same value, same result
+
+const cache = new HashMap<Query, Response>();
+cache.get({ page: 2, path: '/users' });        // hits the entry stored under { path: '/users', page: 2 }
 ```
 
-**Fast.** Here is exactly what is fast, and what is not. Every value valsem
-hands back is *canonical*: equal content is the same object. So comparing two
+The collections agree with all of this: `ValueMap`, `ValueSet`, `ValueList`
+are immutable collections with structural sharing; `HashMap` and `HashSet`
+are mutable and keyed by content.
+
+**Extensible.** Your own classes become values with one method — `[equals]`
+with a companion `[hashCode]` — or one registration, `deepEqual.register`,
+and then compare, hash, intern, and key a map like anything else. Third-party
+types work the same way; Temporal ships ready-made behind `valsem/temporal`.
+Anything valsem cannot treat as a value — a `Date`, a native `Map`, a class it
+does not know — is rejected with an error that names the fix, never silently
+compared by reference. See [Extending](#extending).
+
+**Fast.** Here is exactly what is fast, and what is not. Comparing two
 canonical values is a pointer check — about 20 ns for a three-key record and
 for a three-million-key state alike — and everything built on comparison
 inherits that: `fastEquals`, `FastMap` and `FastSet` (native `Map` and `Set`
 for canonical keys, checked), `memoize` hits, and hashing, which is a cached
-property read. It is also `===`, which is why code that never heard of valsem
-benefits: `React.memo` and `useMemo` hit on refetched data, native `Map` keys
-work, reselect works.
+property read.
 
 ```ts
-import { fastEquals, intern } from 'valsem';
+import { fastEquals, FastMap } from 'valsem';
 
-fastEquals(current, saved);        // "unsaved changes?" — 20 ns at any size
-const users = intern(await (await fetch('/api/users')).json());
-users === previousUsers;           // true whenever the content is unchanged → React.memo hits
+fastEquals(current, saved);            // 20 ns at any size
+const derived = new FastMap<State, Derived>();
+derived.get(state);                    // a native Map lookup — the key is canonical, so === is value equality
 ```
 
 What is *not* fast is building: every value is hashed and canonicalised when
