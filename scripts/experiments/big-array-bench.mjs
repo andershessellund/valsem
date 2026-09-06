@@ -18,8 +18,8 @@
 //   for c in valsem immer mutative; do for m in sync micro macro; do
 //     node scripts/big-array-bench.mjs $c $m; done; done
 // ---------------------------------------------------------------------------
-import { produce as vProduce } from '../dist/produce.js';
-import { intern } from '../dist/intern.js';
+import { produce as vProduce } from '../../dist/produce.js';
+import { intern } from '../../dist/intern.js';
 import { produce as iProduce, setAutoFreeze } from 'immer';
 import { create as mCreate } from 'mutative';
 setAutoFreeze(false); // immer's best case

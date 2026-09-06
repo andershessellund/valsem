@@ -104,8 +104,11 @@ rejected, results are still canonical.
 The freeze call itself is free (a map transition, ~0.1 µs at any size), but
 the frozen *state* is not: indexed reads run 5–12× slower, `forEach` 8×,
 `filter` 2–3×, `slice` and `concat` 10–150×, `JSON.stringify` 2–5×, and
-that cost lands in your own loops over canonical state (`pnpm bench:frozen`;
-the table is in the repository's `BENCHMARKS.md`). Records are unaffected,
+that cost lands in your own loops over canonical state (the frozen-array
+suite in the repository's `BENCHMARKS.md`). On JavaScriptCore (Safari, Bun)
+the freeze *call* is O(n) as well — ~1.7 ms for a 10,000-element array
+against 0.3 µs on V8 — so there `skipFreezing()` is the difference between
+microseconds and milliseconds per edit of a large array. Records are unaffected,
 and `ValueList` never pays it — its leaves are unfrozen inside a frozen
 wrapper. What you give up: a mutation of a canonical value goes undetected
 and corrupts every holder of that value, its cached hash, and the pool. The

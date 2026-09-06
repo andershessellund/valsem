@@ -1,0 +1,1545 @@
+{
+  "runtime": {
+    "name": "node",
+    "version": "26.3.0",
+    "engine": "V8"
+  },
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "platform": "darwin arm64"
+  },
+  "date": "2026-09-06",
+  "commit": "7ba9d5a",
+  "valsem": "0.0.1",
+  "libraries": {
+    "immer": "11.1.18",
+    "mutative": "1.3.0",
+    "immutable": "5.1.9",
+    "fast-deep-equal": "3.1.3"
+  },
+  "suites": [
+    {
+      "id": "produce",
+      "title": "produce — against immer and mutative",
+      "description": "\nThe update API, against the two libraries it is shaped after, at their shipped defaults plus immer with\nauto-freeze off. Every iteration produces a **novel** state (the value written is the iteration counter),\nexcept the recurrent row. Arenas:\n\n- **big-array**: `{ arr: [10,000 records] }`, one record's field edited. *Synchronous* runs the produces back to\n  back in one job — the regime that pays valsem's in-job WeakRef retention. *Held + macrotask* retains each result in\n  a ring of 50 and runs one produce per macrotask, the regime a UI actually runs.\n- **wide-record**: a 1,000-key record (built with `Object.fromEntries`, so the fixture is in fast-properties mode),\n  one value edited. Every library's copy site is megamorphic by the time this arena runs, which is the honest state\n  of a copy site in an application.\n- **value-map / value-list**: a 10,000-entry `ValueMap` / 10,000-element `ValueList` edited through its draft\n  (immer and mutative draft a native `Map` / array), and the same edit as a direct persistent operation.\n- **small-churn**: a 3-key record, one field — the per-op floor.\n- **recurrent**: the big-array arena cycling through 10 configurations, results held — the arena where a successor\n  is a pure function of (canonical base, exact delta) and comes back pointer-identical.\n",
+      "columns": [
+        "valsem",
+        "immer (autofreeze on)",
+        "immer (autofreeze off)",
+        "mutative"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "big-array 10k, one edit, synchronous loop",
+          "values": {
+            "valsem": 19750.875,
+            "immer (autofreeze on)": 629788.1966666667,
+            "immer (autofreeze off)": 3136.0415,
+            "mutative": 3017.854
+          }
+        },
+        {
+          "name": "big-array 10k, one edit, held + one per macrotask",
+          "values": {
+            "valsem": 9930.9165,
+            "immer (autofreeze on)": null,
+            "immer (autofreeze off)": 6642.896000000001,
+            "mutative": 6635.166499999999
+          }
+        },
+        {
+          "name": "wide-record 1000 keys, one edit",
+          "values": {
+            "valsem": 2701.6875,
+            "immer (autofreeze on)": 238397.479,
+            "immer (autofreeze off)": 125442.146,
+            "mutative": 253797.5
+          }
+        },
+        {
+          "name": "value-map 10k, one set, through the draft",
+          "values": {
+            "valsem": 6510.6665,
+            "immer (autofreeze on)": 467844.44666666666,
+            "immer (autofreeze off)": null,
+            "mutative": 402518.3333333333
+          }
+        },
+        {
+          "name": "value-map 10k, one set, direct persistent op",
+          "values": {
+            "valsem": 1263.6045,
+            "immer (autofreeze on)": null,
+            "immer (autofreeze off)": null,
+            "mutative": null
+          }
+        },
+        {
+          "name": "value-list 10k, set + push, through the draft",
+          "values": {
+            "valsem": 11723.042,
+            "immer (autofreeze on)": null,
+            "immer (autofreeze off)": 9303,
+            "mutative": 8973.4585
+          }
+        },
+        {
+          "name": "value-list 10k, set + push, direct persistent ops",
+          "values": {
+            "valsem": 3271.9375,
+            "immer (autofreeze on)": null,
+            "immer (autofreeze off)": null,
+            "mutative": null
+          }
+        },
+        {
+          "name": "small-churn 3-key record, one field",
+          "values": {
+            "valsem": 1209.30354,
+            "immer (autofreeze on)": 574.87979,
+            "immer (autofreeze off)": 418.747915,
+            "mutative": 465.500415
+          }
+        },
+        {
+          "name": "recurrent: big-array cycling 10 configurations, held",
+          "values": {
+            "valsem": 1647.625,
+            "immer (autofreeze on)": 535702.78,
+            "immer (autofreeze off)": 2775.8335,
+            "mutative": 2912.5205
+          },
+          "note": "valsem returns 10 pooled instances; equality afterwards is ==="
+        }
+      ]
+    },
+    {
+      "id": "boundary",
+      "title": "The boundary — admitting raw data",
+      "description": "\nWhat it costs to make an API response canonical: an array of N records with 10 fields each (five strings, four\nnumbers, a boolean), as `JSON.parse` delivers it. Rows per size:\n\n- **JSON.parse** of the same payload — a cost the application pays anyway; the yardstick.\n- **structuredClone** and **immer's auto-freeze walk** (`produce(data, () => {})`) — the cheapest \"make it\n  immutable\" walks a frontend runs today.\n- **intern, all new content** — every record is novel: hashed, copied, pooled, frozen.\n- **intern, unchanged refetch** — the same content arrives again; every record finds its pool entry and no copy is built.\n- **intern, 10% changed** — a refetch with every tenth record different.\n- **ValueList.from** of the same records — the list structure on top of admission.\n\nValues are per response; divide by N for the per-record cost. At 100 Mbit with 80% compression, the 1k response\ntransfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission runs on it.\n",
+      "columns": [
+        "per response"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "1000 × 10: JSON.parse",
+          "values": {
+            "per response": 380725
+          }
+        },
+        {
+          "name": "1000 × 10: structuredClone",
+          "values": {
+            "per response": 753107.6333333333
+          }
+        },
+        {
+          "name": "1000 × 10: immer auto-freeze walk",
+          "values": {
+            "per response": 183787.5
+          }
+        },
+        {
+          "name": "1000 × 10: intern, all new content",
+          "values": {
+            "per response": 1460317.3666666667
+          }
+        },
+        {
+          "name": "1000 × 10: intern, unchanged refetch (all pool hits)",
+          "values": {
+            "per response": 761475
+          }
+        },
+        {
+          "name": "1000 × 10: intern, refetch with 10% of records changed",
+          "values": {
+            "per response": 950460.4166666666
+          }
+        },
+        {
+          "name": "1000 × 10: ValueList.from, all new content",
+          "values": {
+            "per response": 1621819.45
+          }
+        },
+        {
+          "name": "1000 × 10: ValueList.from, canonical records (the list alone)",
+          "values": {
+            "per response": 130205.56666666667
+          }
+        },
+        {
+          "name": "10000 × 10: JSON.parse",
+          "values": {
+            "per response": 3660244.222222222
+          }
+        },
+        {
+          "name": "10000 × 10: structuredClone",
+          "values": {
+            "per response": 7499562.5
+          }
+        },
+        {
+          "name": "10000 × 10: immer auto-freeze walk",
+          "values": {
+            "per response": 1838916.6666666667
+          }
+        },
+        {
+          "name": "10000 × 10: intern, all new content",
+          "values": {
+            "per response": 18325864.583333332
+          }
+        },
+        {
+          "name": "10000 × 10: intern, unchanged refetch (all pool hits)",
+          "values": {
+            "per response": 8735590.25
+          }
+        },
+        {
+          "name": "10000 × 10: intern, refetch with 10% of records changed",
+          "values": {
+            "per response": 10589743.083333334
+          }
+        },
+        {
+          "name": "10000 × 10: ValueList.from, all new content",
+          "values": {
+            "per response": 25637899.333333332
+          }
+        },
+        {
+          "name": "10000 × 10: ValueList.from, canonical records (the list alone)",
+          "values": {
+            "per response": 845736.1666666666
+          }
+        }
+      ]
+    },
+    {
+      "id": "equality",
+      "title": "deepEqual — against fast-deep-equal",
+      "description": "\nStructural equality on raw data (the pure walk, fast-deep-equal's arena) and on canonical data (valsem's O(1)\nshort-circuit, which fast-deep-equal must still walk — over frozen objects, as its users would meet valsem values).\nEvery pair asserts that both libraries return the same verdict; the corpus avoids the two inputs on which their\nsemantics differ (`NaN` and undefined-valued keys). Rows:\n\n- **raw =**: two independently built equal structures — the full walk.\n- **raw ≠**: a difference planted in the middle.\n- **canonical ≠**: two distinct canonical values — valsem answers from the canonicality probe without looking inside.\n- **boundary**: raw wrappers around a shared canonical 100-item subtree — valsem terminates at the boundary.\n",
+      "columns": [
+        "valsem",
+        "fast-deep-equal"
+      ],
+      "unit": "ns",
+      "ratio": [
+        "valsem",
+        "fast-deep-equal"
+      ],
+      "rows": [
+        {
+          "name": "record 10 keys: raw =",
+          "values": {
+            "valsem": 335.73917,
+            "fast-deep-equal": 248.370625
+          }
+        },
+        {
+          "name": "record 10 keys: raw ≠",
+          "values": {
+            "valsem": 210.764585,
+            "fast-deep-equal": 164.17125
+          }
+        },
+        {
+          "name": "record 10 keys: canonical ≠",
+          "values": {
+            "valsem": 26.684375,
+            "fast-deep-equal": 169.33771
+          }
+        },
+        {
+          "name": "record 100 keys: raw =",
+          "values": {
+            "valsem": 4887.0729,
+            "fast-deep-equal": 4592.66665
+          }
+        },
+        {
+          "name": "record 100 keys: raw ≠",
+          "values": {
+            "valsem": 2349.1125,
+            "fast-deep-equal": 2730.475
+          }
+        },
+        {
+          "name": "record 100 keys: canonical ≠",
+          "values": {
+            "valsem": 36.75205,
+            "fast-deep-equal": 2817.58125
+          }
+        },
+        {
+          "name": "record 1000 keys: raw =",
+          "values": {
+            "valsem": 234616.708,
+            "fast-deep-equal": 230950.333
+          }
+        },
+        {
+          "name": "record 1000 keys: raw ≠",
+          "values": {
+            "valsem": 90563.7915,
+            "fast-deep-equal": 134534.0835
+          }
+        },
+        {
+          "name": "record 1000 keys: canonical ≠",
+          "values": {
+            "valsem": 68.0625,
+            "fast-deep-equal": 132801.979
+          }
+        },
+        {
+          "name": "number array 10: raw =",
+          "values": {
+            "valsem": 80.0944775,
+            "fast-deep-equal": 67.6266675
+          }
+        },
+        {
+          "name": "number array 10: raw ≠",
+          "values": {
+            "valsem": 55.27927,
+            "fast-deep-equal": 41.31573
+          }
+        },
+        {
+          "name": "number array 10: canonical ≠",
+          "values": {
+            "valsem": 29.3304175,
+            "fast-deep-equal": 76.151665
+          }
+        },
+        {
+          "name": "number array 100: raw =",
+          "values": {
+            "valsem": 487.61355,
+            "fast-deep-equal": 1313.971875
+          }
+        },
+        {
+          "name": "number array 100: raw ≠",
+          "values": {
+            "valsem": 264.3698,
+            "fast-deep-equal": 671.70625
+          }
+        },
+        {
+          "name": "number array 100: canonical ≠",
+          "values": {
+            "valsem": 28.93125,
+            "fast-deep-equal": 580.952075
+          }
+        },
+        {
+          "name": "number array 1000: raw =",
+          "values": {
+            "valsem": 4578.9375,
+            "fast-deep-equal": 13074.40625
+          }
+        },
+        {
+          "name": "number array 1000: raw ≠",
+          "values": {
+            "valsem": 2272,
+            "fast-deep-equal": 6402.85425
+          }
+        },
+        {
+          "name": "number array 1000: canonical ≠",
+          "values": {
+            "valsem": 28.15625,
+            "fast-deep-equal": 5578.78125
+          }
+        },
+        {
+          "name": "array of 100 records: raw =",
+          "values": {
+            "valsem": 16576.2927,
+            "fast-deep-equal": 11293.0448
+          }
+        },
+        {
+          "name": "array of 100 records: raw ≠",
+          "values": {
+            "valsem": 8373.113525,
+            "fast-deep-equal": 5638.521875
+          }
+        },
+        {
+          "name": "array of 100 records: canonical ≠",
+          "values": {
+            "valsem": 29.542725,
+            "fast-deep-equal": 672.340625
+          }
+        },
+        {
+          "name": "boundary: raw wrappers, shared canonical payload =",
+          "values": {
+            "valsem": 139.0286475,
+            "fast-deep-equal": 71.981875
+          }
+        },
+        {
+          "name": "boundary: raw wrappers, distinct canonical payloads ≠",
+          "values": {
+            "valsem": 141.669895,
+            "fast-deep-equal": 788.235625
+          }
+        }
+      ]
+    },
+    {
+      "id": "collections",
+      "title": "ValueMap, ValueSet, ValueList — against Immutable.js",
+      "description": "\nThe closest structural comparison: Immutable's `Map`/`Set` are HAMTs like valsem's; its `List` is a 32-way\nradix vector, which valsem's `ValueList` was until it became a content-chunked tree. Primitive keys and values, so\nintern-on-entry is a no-op and the trie work is what is timed; every row asserts both libraries agree. Per structure,\nat N = 100 and N = 10,000:\n\n- **build**, **get / has** (hit and miss), **set / add** (an existing key with a novel value, and a new key),\n  **delete**, **iterate**.\n- **update then hash**: one persistent update, then the hash of the successor — valsem pays hashing inside the update\n  (consing), Immutable lazily on the first `hashCode()`.\n- **equals =**: two independently built equal collections (shuffled insertion; for lists, `from` vs a push chain) —\n  valsem's `deepEqual` is the `[interned]` short-circuit, Immutable's `is()` walks.\n- **equals ≠**: equal but for one entry — cold, and again with Immutable's per-instance hash cache warmed, where\n  `is()` short-circuits on differing cached hashes (an *equal* pair must still walk).\n\nThe last rows use record values, where the semantics differ by design: valsem canonicalises and freezes each record\n(equal-content records are one instance and equal maps are the same object); Immutable stores references.\n",
+      "columns": [
+        "valsem",
+        "Immutable"
+      ],
+      "unit": "ns",
+      "ratio": [
+        "valsem",
+        "Immutable"
+      ],
+      "rows": [
+        {
+          "name": "Map 100: build from entries",
+          "values": {
+            "valsem": 63116.98975,
+            "Immutable": 6489.052
+          }
+        },
+        {
+          "name": "Map 100: get (hit)",
+          "values": {
+            "valsem": 43.910132414317694,
+            "Immutable": 21.2191525350219
+          }
+        },
+        {
+          "name": "Map 100: has (miss)",
+          "values": {
+            "valsem": 41.78301934003023,
+            "Immutable": 24.532292879519318
+          }
+        },
+        {
+          "name": "Map 100: set existing key → novel value",
+          "values": {
+            "valsem": 1853.2551169176056,
+            "Immutable": 145.00115766611842
+          }
+        },
+        {
+          "name": "Map 100: set new key",
+          "values": {
+            "valsem": 2531.138412829743,
+            "Immutable": 140.69994428523293
+          }
+        },
+        {
+          "name": "Map 100: delete existing",
+          "values": {
+            "valsem": 566.8992863839114,
+            "Immutable": 113.38191305160122
+          }
+        },
+        {
+          "name": "Map 100: iterate entries",
+          "values": {
+            "valsem": 1152.03125,
+            "Immutable": 1312.3855
+          }
+        },
+        {
+          "name": "Map 100: set one key, then hash",
+          "values": {
+            "valsem": 1957.5625,
+            "Immutable": 3063.4375
+          }
+        },
+        {
+          "name": "Map 100: equals = (independent builds)",
+          "values": {
+            "valsem": 7.0260625,
+            "Immutable": 3426.138
+          }
+        },
+        {
+          "name": "Map 100: equals ≠ (one entry differs), cold",
+          "values": {
+            "valsem": 30.046875,
+            "Immutable": 463.9635625
+          }
+        },
+        {
+          "name": "Map 100: equals ≠, Immutable hashes warmed",
+          "values": {
+            "valsem": 26.667466245858925,
+            "Immutable": 23.626787793461688
+          }
+        },
+        {
+          "name": "Map 10000: build from entries",
+          "values": {
+            "valsem": 11913026.66,
+            "Immutable": 943914.18
+          }
+        },
+        {
+          "name": "Map 10000: get (hit)",
+          "values": {
+            "valsem": 74.20199718294887,
+            "Immutable": 65.4551929414266
+          }
+        },
+        {
+          "name": "Map 10000: has (miss)",
+          "values": {
+            "valsem": 66.04207637929201,
+            "Immutable": 63.36261560540024
+          }
+        },
+        {
+          "name": "Map 10000: set existing key → novel value",
+          "values": {
+            "valsem": 4153.975543478261,
+            "Immutable": 252.03278808334218
+          }
+        },
+        {
+          "name": "Map 10000: set new key",
+          "values": {
+            "valsem": 5240.809981928352,
+            "Immutable": 216.91875066439886
+          }
+        },
+        {
+          "name": "Map 10000: delete existing",
+          "values": {
+            "valsem": 1513.3438994897417,
+            "Immutable": 211.53130647390242
+          }
+        },
+        {
+          "name": "Map 10000: iterate entries",
+          "values": {
+            "valsem": 146724.16,
+            "Immutable": 179510
+          }
+        },
+        {
+          "name": "Map 10000: set one key, then hash",
+          "values": {
+            "valsem": 7052.5,
+            "Immutable": 352593.34
+          }
+        },
+        {
+          "name": "Map 10000: equals = (independent builds)",
+          "values": {
+            "valsem": 11.45625,
+            "Immutable": 626598.69375
+          }
+        },
+        {
+          "name": "Map 10000: equals ≠ (one entry differs), cold",
+          "values": {
+            "valsem": 40.8875,
+            "Immutable": 101258.3375
+          }
+        },
+        {
+          "name": "Map 10000: equals ≠, Immutable hashes warmed",
+          "values": {
+            "valsem": 29.141922238758372,
+            "Immutable": 33.77443658977357
+          }
+        },
+        {
+          "name": "Set 100: build from members",
+          "values": {
+            "valsem": 41791.53125,
+            "Immutable": 6916.15625
+          }
+        },
+        {
+          "name": "Set 100: has (hit)",
+          "values": {
+            "valsem": 37.034890121805155,
+            "Immutable": 26.656206524966553
+          }
+        },
+        {
+          "name": "Set 100: add new member",
+          "values": {
+            "valsem": 2206.961176482363,
+            "Immutable": 140.7832095042053
+          }
+        },
+        {
+          "name": "Set 100: delete existing",
+          "values": {
+            "valsem": 461.65189280078465,
+            "Immutable": 121.23327806339474
+          }
+        },
+        {
+          "name": "Set 100: iterate members",
+          "values": {
+            "valsem": 973.54175,
+            "Immutable": 1289.677
+          }
+        },
+        {
+          "name": "Set 100: add one member, then hash",
+          "values": {
+            "valsem": 1591.896,
+            "Immutable": 3132.0415
+          }
+        },
+        {
+          "name": "Set 100: equals = (independent builds)",
+          "values": {
+            "valsem": 7.0625,
+            "Immutable": 4320.513
+          }
+        },
+        {
+          "name": "Set 100: equals ≠ (one member differs), cold",
+          "values": {
+            "valsem": 28.1328125,
+            "Immutable": 3404.4296875
+          }
+        },
+        {
+          "name": "Set 100: equals ≠, Immutable hashes warmed",
+          "values": {
+            "valsem": 27.03111352801252,
+            "Immutable": 34.13822266556794
+          }
+        },
+        {
+          "name": "Set 10000: build from members",
+          "values": {
+            "valsem": 10784067.5,
+            "Immutable": 938275
+          }
+        },
+        {
+          "name": "Set 10000: has (hit)",
+          "values": {
+            "valsem": 72.14042734134155,
+            "Immutable": 69.53293425108961
+          }
+        },
+        {
+          "name": "Set 10000: add new member",
+          "values": {
+            "valsem": 4217.820114010843,
+            "Immutable": 238.78245588391624
+          }
+        },
+        {
+          "name": "Set 10000: delete existing",
+          "values": {
+            "valsem": 1483.6931606782184,
+            "Immutable": 219.2327987137238
+          }
+        },
+        {
+          "name": "Set 10000: iterate members",
+          "values": {
+            "valsem": 108823.34,
+            "Immutable": 153605
+          }
+        },
+        {
+          "name": "Set 10000: add one member, then hash",
+          "values": {
+            "valsem": 2833.34,
+            "Immutable": 349408.34
+          }
+        },
+        {
+          "name": "Set 10000: equals = (independent builds)",
+          "values": {
+            "valsem": 7.8125,
+            "Immutable": 640427.8625
+          }
+        },
+        {
+          "name": "Set 10000: equals ≠ (one member differs), cold",
+          "values": {
+            "valsem": 30.46875,
+            "Immutable": 486458.075
+          }
+        },
+        {
+          "name": "Set 10000: equals ≠, Immutable hashes warmed",
+          "values": {
+            "valsem": 28.33384713511215,
+            "Immutable": 57.44060274263846
+          }
+        },
+        {
+          "name": "List 100: build from array",
+          "values": {
+            "valsem": 4094.1145,
+            "Immutable": 3077.698
+          }
+        },
+        {
+          "name": "List 100: get (mid index)",
+          "values": {
+            "valsem": 12.074731184589362,
+            "Immutable": 10.651278937482694
+          }
+        },
+        {
+          "name": "List 100: set (mid) → novel value",
+          "values": {
+            "valsem": 3716.793551766358,
+            "Immutable": 99.8695540483284
+          }
+        },
+        {
+          "name": "List 100: push",
+          "values": {
+            "valsem": 1238.6338005144441,
+            "Immutable": 925.1669207749356
+          }
+        },
+        {
+          "name": "List 100: pop",
+          "values": {
+            "valsem": 256.7858584578019,
+            "Immutable": 53.72986011256385
+          }
+        },
+        {
+          "name": "List 100: iterate elements",
+          "values": {
+            "valsem": 700.22925,
+            "Immutable": 1741.5105
+          }
+        },
+        {
+          "name": "List 100: push one, then hash",
+          "values": {
+            "valsem": 711.7915,
+            "Immutable": 2370.5835
+          }
+        },
+        {
+          "name": "List 100: equals = (from vs push chain)",
+          "values": {
+            "valsem": 7.0703125,
+            "Immutable": 4242.8828125
+          }
+        },
+        {
+          "name": "List 100: equals ≠ (one element differs), cold",
+          "values": {
+            "valsem": 31.6745,
+            "Immutable": 2157.578125
+          }
+        },
+        {
+          "name": "List 100: equals ≠, Immutable hashes warmed",
+          "values": {
+            "valsem": 28.19920531392102,
+            "Immutable": 41.87073173172839
+          }
+        },
+        {
+          "name": "List 10000: build from array",
+          "values": {
+            "valsem": 398635.82,
+            "Immutable": 367974.18
+          }
+        },
+        {
+          "name": "List 10000: get (mid index)",
+          "values": {
+            "valsem": 16.868814446688635,
+            "Immutable": 12.951625119591794
+          }
+        },
+        {
+          "name": "List 10000: set (mid) → novel value",
+          "values": {
+            "valsem": 6585.215796747103,
+            "Immutable": 140.43122143084938
+          }
+        },
+        {
+          "name": "List 10000: push",
+          "values": {
+            "valsem": 1842.973204794302,
+            "Immutable": 134.0671042840438
+          }
+        },
+        {
+          "name": "List 10000: pop",
+          "values": {
+            "valsem": 441.778728606357,
+            "Immutable": 70.97384926118848
+          }
+        },
+        {
+          "name": "List 10000: iterate elements",
+          "values": {
+            "valsem": 60143.34,
+            "Immutable": 201941.68
+          }
+        },
+        {
+          "name": "List 10000: push one, then hash",
+          "values": {
+            "valsem": 1328.32,
+            "Immutable": 275422.5
+          }
+        },
+        {
+          "name": "List 10000: equals = (from vs push chain)",
+          "values": {
+            "valsem": 7.55,
+            "Immutable": 524548.4375
+          }
+        },
+        {
+          "name": "List 10000: equals ≠ (one element differs), cold",
+          "values": {
+            "valsem": 30.46875,
+            "Immutable": 261926.04375
+          }
+        },
+        {
+          "name": "List 10000: equals ≠, Immutable hashes warmed",
+          "values": {
+            "valsem": 29.383311629637504,
+            "Immutable": 67.42485648984798
+          }
+        },
+        {
+          "name": "Map 10k with record values: build from raw records",
+          "values": {
+            "valsem": 30308950,
+            "Immutable": 1518194.18
+          }
+        },
+        {
+          "name": "Map 10k with record values: build from canonical records",
+          "values": {
+            "valsem": 23688838.32,
+            "Immutable": 1021276.68
+          }
+        },
+        {
+          "name": "Map 10k with record values: set one raw record",
+          "values": {
+            "valsem": 5724.2475,
+            "Immutable": 279.14666
+          }
+        }
+      ]
+    },
+    {
+      "id": "hashmap",
+      "title": "HashMap and FastMap — against a native Map",
+      "description": "\n`HashMap` matches keys by content: a key is hashed (`internHash` — O(1) on a canonical key, a walk on a raw one) and\ncompared structurally in a bucket table, and stored as given. `FastMap` is a native `Map` that admits canonical keys\nonly, where reference equality already is value equality: the canonical check costs a probe while checks are on, and\nafter `skipChecks()` the constructor returns a plain `Map`. Rows are hits on a 4,096-entry map unless marked; the\nnative `Map` column is what `FastMap` becomes with checks off.\n",
+      "columns": [
+        "HashMap",
+        "FastMap (checks on)",
+        "native Map"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "get, canonical object key",
+          "values": {
+            "HashMap": 66.27222333333333,
+            "FastMap (checks on)": 28.472916666666666,
+            "native Map": 17.078196666666667
+          }
+        },
+        {
+          "name": "get, primitive key",
+          "values": {
+            "HashMap": 55.11333333333334,
+            "FastMap (checks on)": 25.364026666666668,
+            "native Map": 25.636666666666667
+          }
+        },
+        {
+          "name": "get, raw 2-key object (a walk; FastMap rejects, Map misses)",
+          "values": {
+            "HashMap": 321.36041666666665,
+            "FastMap (checks on)": null,
+            "native Map": null
+          }
+        },
+        {
+          "name": "get, raw 50-record payload key",
+          "values": {
+            "HashMap": 13320.4125,
+            "FastMap (checks on)": null,
+            "native Map": null
+          }
+        },
+        {
+          "name": "set, a novel raw 2-key object per call",
+          "values": {
+            "HashMap": 401.96125,
+            "FastMap (checks on)": null,
+            "native Map": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "memoize",
+      "title": "memoize — hit and miss cost by argument kind",
+      "description": "\n`memoize` keys on the argument tuple by content and interns results. The function is a selector over 100 records\n(filter + map). Used as intended — canonical arguments, possibly with a small config literal built fresh beside them —\na hit is a cached-hash probe and `===` per argument. Handed raw payloads, it hashes and compares them structurally\non every call, which is the cost of skipping the boundary. The last rows isolate the hit cost against the width of\none raw record argument versus its canonical twin.\n",
+      "columns": [
+        "per call"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "recompute, no memo",
+          "values": {
+            "per call": 257.302295
+          }
+        },
+        {
+          "name": "hit, both arguments canonical",
+          "values": {
+            "per call": 53.30854
+          }
+        },
+        {
+          "name": "hit, fresh filter literal + canonical list (the reselect case)",
+          "values": {
+            "per call": 252.91333
+          }
+        },
+        {
+          "name": "hit, fresh filter literal + ValueList",
+          "values": {
+            "per call": 285.979375
+          }
+        },
+        {
+          "name": "hit, both arguments raw (100 × 3-key records)",
+          "values": {
+            "per call": 31192.9875
+          }
+        },
+        {
+          "name": "hit, maxSize 8, working set of 8",
+          "values": {
+            "per call": 67.990835
+          }
+        },
+        {
+          "name": "miss + evict, maxSize 8, working set of 9",
+          "values": {
+            "per call": 4949.996665
+          }
+        },
+        {
+          "name": "hit, one raw 3-key record argument",
+          "values": {
+            "per call": 323.36625
+          }
+        },
+        {
+          "name": "hit, one canonical 3-key record argument",
+          "values": {
+            "per call": 33.040415
+          }
+        },
+        {
+          "name": "hit, one raw 20-key record argument",
+          "values": {
+            "per call": 1200.697705
+          }
+        },
+        {
+          "name": "hit, one canonical 20-key record argument",
+          "values": {
+            "per call": 39.83125
+          }
+        },
+        {
+          "name": "hit, one raw 200-key record argument",
+          "values": {
+            "per call": 20689.5025
+          }
+        },
+        {
+          "name": "hit, one canonical 200-key record argument",
+          "values": {
+            "per call": 40.561045
+          }
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "title": "ValueList — operations and diff at 100k elements",
+      "description": "\n`ValueList` is a content-chunked, hash-consed tree with the open last run kept in a tail array. A leaf boundary\nfalls after any element whose seeded hash says so (1 in 32; runs cap at 64), and branch runs follow the same rule on\nnode hashes, so the shape is a function of the content alone and an edit re-chunks only the runs around it. The first\nblock times each operation on a 100,000-record list (records canonical). The second block times\n`ValueList.diff(a, b)` against a pointer scan over both `toArray()` snapshots (elements are canonical, so the scan\nis already the cheap comparison): c point edits, an insert plus a remove, and a *refetch* — an independently built\nlist with three changed records, which shares nothing by lineage with the original.\n",
+      "columns": [
+        "ValueList",
+        "pointer scan"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "from, raw records (admission dominates)",
+          "values": {
+            "ValueList": 59784975,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "from, canonical records",
+          "values": {
+            "ValueList": 12542133.2,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "get, sequential",
+          "values": {
+            "ValueList": 15.760556666666666,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "get, random",
+          "values": {
+            "ValueList": 72.13402666666667,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "iterate for…of",
+          "values": {
+            "ValueList": 425133.35,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "toArray (memoized)",
+          "values": {
+            "ValueList": 514.6,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "push",
+          "values": {
+            "ValueList": 2145.2363333333333,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "pop",
+          "values": {
+            "ValueList": 799.7636666666667,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "set, middle",
+          "values": {
+            "ValueList": 7650.097,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "insert at 0",
+          "values": {
+            "ValueList": 7933.444333333333,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "insert, middle",
+          "values": {
+            "ValueList": 9768.194333333333,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "remove at 0",
+          "values": {
+            "ValueList": 3108.9443333333334,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "slice, middle half",
+          "values": {
+            "ValueList": 3017.861,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "concat, two halves",
+          "values": {
+            "ValueList": 6746.361,
+            "pointer scan": null
+          }
+        },
+        {
+          "name": "diff: 1 point edit (1 hunks)",
+          "values": {
+            "ValueList": 3583.729,
+            "pointer scan": 803308.3
+          }
+        },
+        {
+          "name": "diff: 10 point edits (10 hunks)",
+          "values": {
+            "ValueList": 12366.729,
+            "pointer scan": 802243.75
+          }
+        },
+        {
+          "name": "diff: 100 point edits (100 hunks)",
+          "values": {
+            "ValueList": 61842.5,
+            "pointer scan": 795410.4
+          }
+        },
+        {
+          "name": "diff: insert + remove (2 hunks)",
+          "values": {
+            "ValueList": 5656.1665,
+            "pointer scan": 810541.65
+          }
+        },
+        {
+          "name": "diff: refetch, 3 changed, independently built (3 hunks)",
+          "values": {
+            "ValueList": 4217.021,
+            "pointer scan": 803641.65
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-draft",
+      "title": "ValueList inside produce — batched updates",
+      "description": "\nOne `produce` per row over a 100,000-record `ValueList`, through its draft. The draft never materialises: structural\nops go to a persistent working list as they happen, point edits and child drafts sit in an overlay by current index,\npushes wait in a tail, and finalize applies the overlay with `setMany` (one bottom-up pass that rebuilds each touched\nleaf and ancestor once) and the tail as one splice. The last row is the direct persistent operations for reference.\n",
+      "columns": [
+        "per produce"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "1 set",
+          "values": {
+            "per produce": 11160.479
+          }
+        },
+        {
+          "name": "1 nested edit (get(i).v = x)",
+          "values": {
+            "per produce": 12586.229
+          }
+        },
+        {
+          "name": "100 sets, spread out",
+          "values": {
+            "per produce": 630654.375
+          }
+        },
+        {
+          "name": "100 nested edits, spread out",
+          "values": {
+            "per produce": 665598.125
+          }
+        },
+        {
+          "name": "push 100",
+          "values": {
+            "per produce": 136742.71
+          }
+        },
+        {
+          "name": "1 insert at n/2",
+          "values": {
+            "per produce": 14376.2085
+          }
+        },
+        {
+          "name": "10 inserts + 10 removes, spread out",
+          "values": {
+            "per produce": 188490.75
+          }
+        },
+        {
+          "name": "100 sets + 10 inserts + 10 removes",
+          "values": {
+            "per produce": 825135.21
+          }
+        },
+        {
+          "name": "splice 1,000 out of the middle",
+          "values": {
+            "per produce": 17923.666
+          }
+        },
+        {
+          "name": "pop 100 then push 100",
+          "values": {
+            "per produce": 193359.165
+          }
+        },
+        {
+          "name": "reference: direct set",
+          "values": {
+            "per produce": 7808.333333333333
+          }
+        },
+        {
+          "name": "reference: direct insert",
+          "values": {
+            "per produce": 7216.639
+          }
+        }
+      ]
+    },
+    {
+      "id": "frozen-array",
+      "title": "Frozen arrays — what the engine charges for the frozen state",
+      "description": "\nvalsem freezes the plain arrays it canonicalises. The `Object.freeze` call is a map transition (~0.1 µs at any size);\nthe cost is the frozen **state**: engines have fast paths for frozen elements in some builtins and not in others.\nThe first row is the freeze call itself — a map transition on V8, an O(n) walk on JavaScriptCore, where it is the\ndominant cost of canonicalising a large array. Each following row is one operation over a 10,000-element array,\nunfrozen and then frozen, with one function per call site so the keyed loads stay monomorphic. Three element kinds: integers (Smi), doubles, and objects. This is the cost\n`skipFreezing()` buys back in the user's own loops; `ValueList` never pays it (its leaves are unfrozen inside a frozen\nwrapper).\n",
+      "columns": [
+        "ints unfrozen",
+        "ints frozen",
+        "doubles unfrozen",
+        "doubles frozen",
+        "objects unfrozen",
+        "objects frozen"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "the Object.freeze call itself (10k elements)",
+          "values": {
+            "ints unfrozen": null,
+            "ints frozen": 202.332,
+            "doubles unfrozen": null,
+            "doubles frozen": 243204.336,
+            "objects unfrozen": null,
+            "objects frozen": 213.836
+          }
+        },
+        {
+          "name": "indexed loop read",
+          "values": {
+            "ints unfrozen": 4828.597333333333,
+            "ints frozen": 58641,
+            "doubles unfrozen": 59077.791666666664,
+            "doubles frozen": 57140.333333333336,
+            "objects unfrozen": 61180.25,
+            "objects frozen": 68286.81966666666
+          }
+        },
+        {
+          "name": "for…of",
+          "values": {
+            "ints unfrozen": 4876.597333333333,
+            "ints frozen": 86451.93066666667,
+            "doubles unfrozen": 73465.93033333334,
+            "doubles frozen": 63781.55533333333,
+            "objects unfrozen": 68750.08333333333,
+            "objects frozen": 65743.097
+          }
+        },
+        {
+          "name": "forEach",
+          "values": {
+            "ints unfrozen": 26521.597,
+            "ints frozen": 232062.34733333334,
+            "doubles unfrozen": 82627.09733333334,
+            "doubles frozen": 256281.84733333334,
+            "objects unfrozen": 78145.65266666666,
+            "objects frozen": 246137.90266666666
+          }
+        },
+        {
+          "name": "map",
+          "values": {
+            "ints unfrozen": 58159.763666666666,
+            "ints frozen": 58626.02766666667,
+            "doubles unfrozen": 78429.847,
+            "doubles frozen": 76032.375,
+            "objects unfrozen": 67357.58333333333,
+            "objects frozen": 67206.40266666666
+          }
+        },
+        {
+          "name": "filter",
+          "values": {
+            "ints unfrozen": 80223.625,
+            "ints frozen": 262040.875,
+            "doubles unfrozen": 200692.29166666666,
+            "doubles frozen": 401415.7083333333,
+            "objects unfrozen": 197066.66666666666,
+            "objects frozen": 428578.764
+          }
+        },
+        {
+          "name": "reduce",
+          "values": {
+            "ints unfrozen": 55700.56933333333,
+            "ints frozen": 55110.083333333336,
+            "doubles unfrozen": 74065.65266666666,
+            "doubles frozen": 69336.94433333333,
+            "objects unfrozen": 91342.25,
+            "objects frozen": 90863.68066666667
+          }
+        },
+        {
+          "name": "indexOf (miss)",
+          "values": {
+            "ints unfrozen": 1942.0416666666667,
+            "ints frozen": 4490.028,
+            "doubles unfrozen": 1942.0833333333333,
+            "doubles frozen": 5867.541666666667,
+            "objects unfrozen": 5882.958333333333,
+            "objects frozen": 5888.069333333333
+          }
+        },
+        {
+          "name": "slice()",
+          "values": {
+            "ints unfrozen": 1490.8193333333334,
+            "ints frozen": 229879.77766666666,
+            "doubles unfrozen": 1521.1113333333333,
+            "doubles frozen": 240491.111,
+            "objects unfrozen": 1632.9446666666668,
+            "objects frozen": 227245.778
+          }
+        },
+        {
+          "name": "spread [...a]",
+          "values": {
+            "ints unfrozen": 1374.7083333333333,
+            "ints frozen": 1369.2776666666666,
+            "doubles unfrozen": 1417.0693333333334,
+            "doubles frozen": 1358.9166666666667,
+            "objects unfrozen": 1524.5416666666667,
+            "objects frozen": 1337.9306666666666
+          }
+        },
+        {
+          "name": "concat",
+          "values": {
+            "ints unfrozen": 3024.736,
+            "ints frozen": 28157.055333333334,
+            "doubles unfrozen": 1825.6806666666666,
+            "doubles frozen": 29239.416666666668,
+            "objects unfrozen": 2880.278,
+            "objects frozen": 28683.194333333333
+          }
+        },
+        {
+          "name": "JSON.stringify",
+          "values": {
+            "ints unfrozen": 42969.875,
+            "ints frozen": 206926.25,
+            "doubles unfrozen": 151050.041,
+            "doubles frozen": 309655.833,
+            "objects unfrozen": 226865.583,
+            "objects frozen": 536227.75
+          }
+        },
+        {
+          "name": "at(-1) ×1000",
+          "values": {
+            "ints unfrozen": 920.625,
+            "ints frozen": 19745.959,
+            "doubles unfrozen": 3529.875,
+            "doubles frozen": 20061.375,
+            "objects unfrozen": 3463.375,
+            "objects frozen": 21007.25
+          }
+        }
+      ]
+    },
+    {
+      "id": "record-copy",
+      "title": "Copying a wide record — dictionary mode and megamorphic spread",
+      "description": "\nTwo engine facts that decide how fast a record copies, which set how `intern` builds canonical records and how\n`produce` copies a draft. (1) An object grown by assigning keys one at a time into `{}` leaves fast-properties\nmode at ~20 keys on V8; `Object.fromEntries` stays fast at any width — the first rows probe the mode where the\nruntime exposes it (`--allow-natives-syntax`; otherwise they are omitted). (2) Object spread is an inline cache: a\nmemcpy while the site has seen ≤4 shapes, a per-property generic fallback after, and a library's single copy site\nsees every shape in an application; `Object.assign` keys on the source map and stays fast at a megamorphic site.\nCopy rows are for frozen fast-mode sources of 3, 20, 100 and 1,000 keys.\n",
+      "columns": [
+        "spread, ≤4 shapes",
+        "spread, megamorphic",
+        "Object.assign, megamorphic"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "copy a 3-key record",
+          "values": {
+            "spread, ≤4 shapes": 11.0292,
+            "spread, megamorphic": 40.6292,
+            "Object.assign, megamorphic": 14.80835
+          }
+        },
+        {
+          "name": "copy a 20-key record",
+          "values": {
+            "spread, ≤4 shapes": 37.71665,
+            "spread, megamorphic": 240.73335,
+            "Object.assign, megamorphic": 39.57915
+          }
+        },
+        {
+          "name": "copy a 100-key record",
+          "values": {
+            "spread, ≤4 shapes": 120.1833,
+            "spread, megamorphic": 2149.40835,
+            "Object.assign, megamorphic": 115.66875
+          }
+        },
+        {
+          "name": "copy a 1000-key record",
+          "values": {
+            "spread, ≤4 shapes": 1046.778,
+            "spread, megamorphic": 108412.63866666667,
+            "Object.assign, megamorphic": 1074.1386666666667
+          }
+        }
+      ]
+    },
+    {
+      "id": "bundle-size",
+      "title": "Bundle size",
+      "description": "\nesbuild, minified ESM, importing through the package name so `exports` and `sideEffects` are honoured; gzip at\nlevel 9. Each row bundles one import (or a set) and nothing else. immer, mutative and Immutable.js rows are the\ncomparable entry points of those libraries. Node only.\n",
+      "columns": [
+        "minified",
+        "gzipped"
+      ],
+      "unit": "bytes",
+      "ratio": null,
+      "rows": [
+        {
+          "name": "valsem: produce",
+          "values": {
+            "minified": 24458,
+            "gzipped": 8783
+          }
+        },
+        {
+          "name": "valsem: produce, current, original",
+          "values": {
+            "minified": 25706,
+            "gzipped": 9161
+          }
+        },
+        {
+          "name": "valsem: deepEqual",
+          "values": {
+            "minified": 3196,
+            "gzipped": 1486
+          }
+        },
+        {
+          "name": "valsem: intern",
+          "values": {
+            "minified": 11297,
+            "gzipped": 4563
+          }
+        },
+        {
+          "name": "valsem: HashMap",
+          "values": {
+            "minified": 10290,
+            "gzipped": 4236
+          }
+        },
+        {
+          "name": "valsem: ValueMap",
+          "values": {
+            "minified": 23321,
+            "gzipped": 8420
+          }
+        },
+        {
+          "name": "valsem: ValueList",
+          "values": {
+            "minified": 28683,
+            "gzipped": 10470
+          }
+        },
+        {
+          "name": "valsem: memoize",
+          "values": {
+            "minified": 13645,
+            "gzipped": 5464
+          }
+        },
+        {
+          "name": "valsem: everything",
+          "values": {
+            "minified": 62378,
+            "gzipped": 20329
+          }
+        },
+        {
+          "name": "immer: produce",
+          "values": {
+            "minified": 9278,
+            "gzipped": 3816
+          }
+        },
+        {
+          "name": "immer: produce + enableMapSet",
+          "values": {
+            "minified": 12260,
+            "gzipped": 4681
+          }
+        },
+        {
+          "name": "mutative: create",
+          "values": {
+            "minified": 19168,
+            "gzipped": 6375
+          }
+        },
+        {
+          "name": "Immutable.js: Map",
+          "values": {
+            "minified": 65505,
+            "gzipped": 18568
+          }
+        }
+      ]
+    }
+  ]
+}

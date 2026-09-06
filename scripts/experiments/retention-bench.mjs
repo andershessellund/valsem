@@ -1,7 +1,7 @@
 // Retention-pattern benchmark — each section MUST run in a fresh process
 // (node scripts/retention-bench.mjs A|B|C|D) to avoid heap cross-pollution.
-import { produce as vProduce } from '../dist/produce.js';
-import { intern } from '../dist/intern.js';
+import { produce as vProduce } from '../../dist/produce.js';
+import { intern } from '../../dist/intern.js';
 import { produce as iProduce, setAutoFreeze } from 'immer';
 import { create as mCreate } from 'mutative';
 setAutoFreeze(false); // immer's best case throughout
@@ -56,7 +56,7 @@ if (section === 'A') {
 
 // Section E lives in the same file for shared setup; run: node ... E
 if (section === 'E') {
-  const { ValueList } = await import('../dist/value-list.js');
+  const { ValueList } = await import('../../dist/value-list.js');
   console.log('E. reducer chain over { list: ValueList } — the designed shape');
   let vc = intern({ list: ValueList.from(Array.from({ length: N }, (_, i) => i)) });
   t('valsem ValueList', (i) => {

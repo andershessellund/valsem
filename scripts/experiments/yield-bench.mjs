@@ -1,8 +1,8 @@
 // Task-per-produce benchmark: real apps produce once per event turn, so the
 // WeakRef keptObjects list ([[KeptAlive]]) clears between produces. A
 // synchronous loop retains EVERY WeakRef'd result until the job ends.
-import { produce as vProduce } from '../dist/produce.js';
-import { intern } from '../dist/intern.js';
+import { produce as vProduce } from '../../dist/produce.js';
+import { intern } from '../../dist/intern.js';
 import { produce as iProduce, setAutoFreeze } from 'immer';
 import { create as mCreate } from 'mutative';
 setAutoFreeze(false);

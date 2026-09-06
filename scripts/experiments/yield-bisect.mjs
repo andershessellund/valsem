@@ -1,6 +1,6 @@
-import { intern, _internPrehashed, _accOf } from '../dist/intern.js';
-import { _arrayHashOf } from '../dist/deep-hash.js';
-import { produce as vProduce } from '../dist/produce.js';
+import { intern, _internPrehashed, _accOf } from '../../dist/intern.js';
+import { _arrayHashOf } from '../../dist/deep-hash.js';
+import { produce as vProduce } from '../../dist/produce.js';
 const N = 10000, ITER = 2000, mid = N >> 1;
 const which = process.argv[2];
 const items = new Array(N);

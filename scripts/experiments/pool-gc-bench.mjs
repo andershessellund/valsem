@@ -27,7 +27,7 @@
 // Run: pnpm build && node --expose-gc scripts/pool-gc-bench.mjs [N]
 // ---------------------------------------------------------------------------
 
-import { createInternPool } from '../dist/intern-pool.js';
+import { createInternPool } from '../../dist/intern-pool.js';
 import { createSweeper, createCirclePool } from './circle-pool.mjs';
 
 const N = Number(process.argv[2] ?? 500_000);
