@@ -13,7 +13,7 @@
 | `HashSet` | class | Mutable set with structural membership — `HashMap`'s twin; members stored as given. |
 | `FastMap` / `FastSet` | class | Native `Map`/`Set` for canonical keys, where `===` is value equality: checked while checks are on (a raw key throws instead of silently missing), literally the native class after `skipChecks()`. |
 | `HashMap` | class | Mutable map with structural keys, matched by content and stored as given — for keys that are new values every call; nothing is interned or pooled. |
-| `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances; `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
+| `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances (`ValueList`: O(log n) `insert`/`remove`/`splice`/`slice`/`concat`, `setMany`, and `ValueList.diff(a, b)` in O(c log n)); `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
 | `ValueDate` | class | An immutable, canonical timestamp — the value a `Date` stands for. `ValueDate.of(x)` takes what `new Date(x)` takes; `toDate()` returns a fresh mutable `Date`; `valueOf()` is the epoch; `toJSON()` matches `Date`. |
 | `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
 | `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |

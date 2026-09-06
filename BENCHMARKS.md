@@ -88,7 +88,7 @@ can; do not intern per render.
 | arena | valsem | immer (default) | mutative | notes |
 | --- | --- | --- | --- | --- |
 | 10k-entry map, one set | **3.5 µs** | 474 µs | 400 µs | their drafts copy the container; `ValueMap` copies a trie path |
-| 10k-element list, set+push | **4.8 µs** | 9.6 µs | 9.0 µs | |
+| 10k-element list, set+push | 10.5 µs via the draft, **4.6 µs** as direct ops | 9.8 µs | 9.2 µs | the chunked list's draft pays a path copy per edit; see the list section |
 | 1000-key record, one set | **19 µs** | 125 µs (2 µs isolated) | 220 µs | the copy site is megamorphic in any real app — see below; immer's 2 µs needs a monomorphic site |
 | recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | transition memoization — and the only `===` results |
 | `deepEqual`, raw arrays ≥ 100 elements | 2.5–2.9× faster than fast-deep-equal | | | |
@@ -250,10 +250,112 @@ trade). It is a separate switch from `skipChecks()` on purpose: both enforce
 a promise the caller made, but a skipped equality check yields one wrong
 boolean, while a skipped freeze lets one mutation corrupt every holder.
 
+## ValueList: the content-chunked tree, against the radix vector it replaced
+
+`pnpm bench:list` (and `npx bun@latest scripts/list-bench.mjs`). Until
+v0.0.2 `ValueList` was a dense radix vector: shape a function of the
+length, so an insert or remove shifted every later leaf and rebuilt O(n).
+The replacement — measured side by side against it at commit 7e7fa85, the
+last with both — puts a leaf
+boundary after any element whose (seeded) hash says so, 1 in 32, and the
+same at each branch level on node hashes, so the shape is a function of the
+content alone — hash consing still works, equal content is one object — and
+an edit disturbs only the runs beside it, resynchronising at the next
+boundary. Every operation is one algorithm, `merge`, and there is no
+amortised rebuild anywhere: the bounds are expected, on the seeded hash,
+and an adversary without the seed cannot craft a bad sequence.
+
+100,000 items (records), Node 26 / Bun 1.4 (JavaScriptCore):
+
+| operation | radix vector node | chunked node | radix vector bun | chunked bun |
+| --- | --- | --- | --- | --- |
+| `from`, raw items (the boundary cost dominates) | 40 ms | 40 ms | 33 ms | 26 ms |
+| `from`, canonical items | 5.1 ms | 6.1 ms | 23 ms | 6.3 ms |
+| `get`, sequential | 14 ns | **8 ns** | 9 ns | 10 ns |
+| `get`, random | **20 ns** | 71 ns | **19 ns** | 81 ns |
+| iterate `for…of` | 432 µs | 405 µs | 708 µs | 948 µs |
+| `push` | 2.1 µs | 3.8 µs | 1.6 µs | 2.0 µs |
+| `pop` | 0.5 µs | 1.1 µs | 0.3 µs | 1.0 µs |
+| `set`, middle | **2.2 µs** | 7.0 µs | **1.6 µs** | 5.2 µs |
+| insert at 0 | 8.6 ms | **4.8 µs** | 12.7 ms | **3.2 µs** |
+| insert, middle | 8.7 ms | **5.6 µs** | 12.2 ms | **4.8 µs** |
+| remove at 0 | 7.8 ms | **2.2 µs** | 10.9 ms | **4.4 µs** |
+| `slice(n/4, 3n/4)` | 4.1 ms (via array) | **4.2 µs** | 3.0 ms | **3.0 µs** |
+| `concat` two halves | 46 ms (via array) | **3.7 µs** | 28 ms | **4.2 µs** |
+
+`ValueList.diff(a, b)` against a pointer scan over both `toArray()`s
+(elements are canonical, so the scan is already the cheap comparison):
+
+| diff, 100k items | pointer scan node | `diff` node | pointer scan bun | `diff` bun |
+| --- | --- | --- | --- | --- |
+| 1 point edit | 792 µs | **3.7 µs** | 2.4 ms | **5.6 µs** |
+| 10 point edits | 785 µs | **11 µs** | 2.4 ms | **14 µs** |
+| 100 point edits | 800 µs | **61 µs** | 2.5 ms | **93 µs** |
+| insert + remove | 797 µs | **4.6 µs** | 2.5 ms | **6.7 µs** |
+| refetch: 3 changed items, independently built | 789 µs | **4.0 µs** | 2.3 ms | **4.3 µs** |
+
+The last row is the one no history-based structure can do: the refetched
+list shares nothing by lineage with the old one, and the diff still costs
+three hunks because equal content is the same node. Read side: random
+`get` is 3.5–4× slower (a size-table search per level instead of a bit
+shift); sequential `get` is faster (a one-leaf cache); iteration is at
+parity on V8 and 1.3× behind on JSC. `set` is 3× slower — it is a general
+splice; a direct path copy would bring it back. Everything that touches
+the sequence's shape moves from milliseconds to microseconds.
+
+### Batched updates through `produce`
+
+`pnpm bench:list-draft`. The radix vector's `DraftList` kept point edits and
+pushes virtual but materialised the whole list into an array on the first
+mid-sequence splice; the chunked draft never materialises — it applies
+every structural op to a persistent working list as it happens, keeps an
+overlay of what the recipe sees at each index and a tail of pushes, and at
+finalize applies the overlay with `setMany` (one bottom-up pass that
+rebuilds each touched leaf and ancestor once, feeding untouched siblings
+through in O(1)) and the tail as one splice. 100k items, one `produce` per
+row, Node / Bun:
+
+| recipe | radix vector node / bun | chunked node / bun |
+| --- | --- | --- |
+| 1 set | 8.3 / 3.6 µs | 8.7 / 4.1 µs |
+| 1 nested edit (`get(i).v = x`) | 4.3 / 3.2 µs | 6.7 / 9.3 µs |
+| 100 sets, spread out | 597 / 316 µs | 641 / 319 µs |
+| 100 nested edits, spread out | 690 / 249 µs | **547** / 326 µs |
+| push 100 | 351 / 144 µs | **156 / 100 µs** |
+| 1 insert at n/2 | 9.8 / 12.3 ms | **9.9 / 15.2 µs** |
+| 10 inserts + 10 removes | 10.1 / 17.1 ms | **144 / 138 µs** |
+| 100 sets + 10 inserts + 10 removes | 10.5 / 14.5 ms | **724 / 676 µs** |
+| splice 1,000 out of the middle | 8.7 / 11.2 ms | **13 / 22 µs** |
+| pop 100 then push 100 | 457 µs / 2.63 ms | **317 / 223 µs** |
+
+Batches of point edits are at parity (100 sets: 1.07× / 1.01×) or ahead
+(nested edits on V8, pushes on both), everything that touches the shape is
+10–1000× ahead, and the one row still behind is a single nested edit —
+1.6× on V8, 2.9× on JSC — where the fixed cost of drafting through the
+chunked draft (a size-table `get`, the overlay, a `setMany` of one) shows
+against the radix draft's virtual edit. Before the two techniques above, point
+batches were 1.2–2.4× behind; the first version of this table is in the
+git history.
+
+`setMany` is public: a batch of point edits on a `ValueList` costs
+O(k log n) with shared path work, and the property test checks it lands on
+the same instance as the edits applied one at a time.
+
+**After the replacement: the tail buffer.** The radix vector kept its last
+32 elements outside the tree, so a push was an array copy; the first chunked
+version path-copied four levels per push (3.8 µs). The chunked `ValueList`
+now does the same: the open last run lives in a plain array until an
+element closes it, and only then joins the tree. Measured on the shipped
+class, 100k items, Node / Bun: `push` 1.5–2.1 / 0.9 µs (was 3.8 / 2.0),
+`pop` 0.1–0.3 / 0.2 µs (was 1.1 / 1.0), with `set`, `insert`, `remove`,
+`slice`, `concat` and `diff` unchanged from the tables above. A result
+built from a full tree remembers it, so a chain of structural operations
+re-attaches the tail only once.
+
 ## The value collections vs Immutable.js
 
 Immutable.js is the closest structural comparison — its `Map`/`Set` are
-HAMTs and its `List` a 32-way radix vector, like valsem's — and the
+HAMTs and its `List` a 32-way radix vector, as valsem's was until v0.0.2 — and the
 cleanest illustration of what hash consing costs and buys. Primitive keys
 and values, so intern-on-entry is a no-op and the trie/vector work is what
 is timed; every row asserts both libraries agree. (`pnpm bench:collections`;
@@ -267,10 +369,10 @@ N = 10,000 unless stated.)
 | `Map.set` new key | 6.5 µs | 0.23 µs | 1/28× |
 | `Map.delete` | 1.6 µs | 0.21 µs | 1/7× |
 | `Set.add` new member | 5.8 µs | 0.24 µs | 1/24× |
-| `List.set` mid | 6.9 µs | 0.15 µs | 1/47× |
-| `List.push` | 3.5 µs | 0.17 µs | 1/21× |
+| `List.set` mid | 6.2 µs | 0.16 µs | 1/38× |
+| `List.push` | 1.8 µs | 0.13 µs | 1/14× |
 | build `Map` from 10k entries | 14.1 ms | 1.0 ms | 1/14× |
-| build `List` from 10k elements | 0.22 ms | 0.34 ms | 1.5× |
+| build `List` from 10k elements | 0.34 ms | 0.36 ms | 1.1× |
 | `get` / `has`, hit or miss | 60–70 ns | 60–70 ns | parity (2× behind at N = 100) |
 
 **Where valsem wins — the rows the design exists for:**
@@ -278,10 +380,10 @@ N = 10,000 unless stated.)
 | op | valsem | Immutable | |
 | --- | --- | --- | --- |
 | iterate 10k `Map` entries / `Set` members | **115 / 109 µs** | 150 / 142 µs | 1.3× |
-| iterate 10k `List` elements | **31 µs** | 180 µs | 5.7× |
+| iterate 10k `List` elements | **29 µs** | 194 µs | 6.7× |
 | equals, two independently built equal `Map`s | **9 ns** | 544 µs | 60,000× |
 | equals, two equal `Set`s | **8 ns** | 627 µs | 80,000× |
-| equals, `List.from` vs push-chain | **8 ns** | 474 µs | 57,000× |
+| equals, `List.from` vs push-chain | **8 ns** | 521 µs | 65,000× |
 | equals, differ in one entry — cold | **9–10 ns** | 100–480 µs | 10,000–45,000× |
 | equals, differ in one entry — Immutable's hashes warmed | **8–9 ns** | 29–66 ns | 4–7× |
 | one update, then hash the successor | **0.4–1.1 µs** | 265–340 µs | 300–670× |
@@ -509,6 +611,8 @@ update-throughput number shows:
 | `node scripts/retention-bench.mjs` | how each library's cost moves when results are actually retained |
 | `node scripts/yield-bench.mjs` | the in-job WeakRef retention effect, isolated |
 | `pnpm bench:frozen` | what V8 charges for the frozen STATE of an array, per operation and elements kind — the case for `skipFreezing()` |
+| `pnpm bench:list-draft` | batched updates through `produce` on `ValueList`'s draft, on Node and Bun |
+| `pnpm bench:list` | `ValueList` per operation, and `ValueList.diff` vs a pointer scan, on Node and (`npx bun@latest scripts/list-bench.mjs`) JSC |
 | `pnpm bench:boundary` | admitting a 1k-record API response with `intern`: fresh, unchanged refetch, partly changed, vs `JSON.parse`/`structuredClone`/immer freeze |
 | `pnpm bench:hashmap` | `HashMap` vs `FastMap` vs native `Map` by key kind: canonical, primitive, raw, novel |
 | `pnpm bench:memoize` | memo hit/miss cost by argument kind: canonical, fresh literal beside canonical, raw, by width |

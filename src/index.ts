@@ -22,6 +22,7 @@ export { FastMap, FastSet } from './fast-collections.js';
 export { intern, createInterner, internHash, isCanonical, fastEquals } from './intern.js';
 export { skipChecks, skipFreezing } from './checks.js';
 export { ValueList } from './value-list.js';
+export type { Hunk } from './value-list.js';
 export { ValueMap } from './value-map.js';
 export { ValueSet } from './value-set.js';
 export { InternedString } from './interned-string.js';

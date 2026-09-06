@@ -1,9 +1,15 @@
 // ---------------------------------------------------------------------------
-// DraftList — the mutable draft twin of ValueList, and its finalize.
+// DraftList — the mutable twin of ValueList inside produce().
 //
-// ValueList implements the `[toDraft]` protocol (see draft-core.ts) by calling
-// createListDraft; produce never imports this module. It rides the same
-// toolkit any third-party draftable would.
+// Never materialises. The state keeps a persistent working list (`work`)
+// that tracks POSITIONS — every structural op is applied to it at O(log n)
+// as it happens, with `undefined` placeholders where new elements went —
+// and an overlay from current index to what the recipe actually sees
+// there: a child draft (drafted on read), or the caller's own raw
+// assignment (which stays raw until finalize, the immer rule). A splice
+// re-indexes the overlay, O(edits). Finalize resolves the overlay onto
+// `work` — O(k log n) for k touched positions — and the recorded ops become
+// `list.set`/`list.splice` patches exactly as for DraftList.
 // ---------------------------------------------------------------------------
 
 import {
@@ -21,38 +27,45 @@ import {
   isImmutable,
   emitSeqOps,
   retractSeqPatches,
-  seqTailProfile,
-  type SeqOp,
   type DraftState,
   type Patch,
   type PatchPath,
   type PatchRecorder,
+  type SeqOp,
 } from './draft-core.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
 
-const INTERNAL = Symbol('valsem.draftInternal');
+const INTERNAL = Symbol('valsem.draft-list');
+
+interface Entry {
+  v: unknown;
+  /** true = assigned by the recipe (its own material); false = child-drafted on read. */
+  assigned: boolean;
+}
 
 export interface ListState<T = unknown> extends DraftState<ValueList<T>> {
   kind: 'list';
-  /** Builds the canonical list for an item array (mid-sequence splices rebuild). */
-  from: (items: unknown[]) => ValueList<unknown>;
-  /**
-   * Virtual mode (items === null): point edits over the base plus an
-   * appended tail — no O(n) materialization for get/set/push/pop flows.
-   */
-  vEdits: Map<number, unknown>;
-  vTail: unknown[];
-  /** Materialized working array — created only when a splice forces it. */
-  items: unknown[] | null;
-  /** Always recorded for lists (never goes opaque). */
+  /** Positions and canonical placeholders for everything but the tail. */
+  work: ValueList<unknown>;
+  /** Current index (below `work.length`) → what the recipe sees there. */
+  overlay: Map<number, Entry>;
+  /** Pushed values not yet in `work` — flushed as one splice by a structural op, or at finalize. */
+  tail: Entry[];
   ops: SeqOp[];
-  /** Indices whose base value was child-drafted on read. */
-  drafted: Set<number>;
   draft: DraftList<T>;
 }
 
-export class DraftList<T> {
+/** Move the tail into `work` (as placeholders) and the overlay — before a splice needs exact positions. */
+function flushTail(s: ListState): void {
+  if (s.tail.length === 0) return;
+  const len = s.work.length;
+  s.work = s.work.splice(len, 0, new Array<unknown>(s.tail.length).fill(undefined));
+  for (let j = 0; j < s.tail.length; j++) s.overlay.set(len + j, s.tail[j]!);
+  s.tail = [];
+}
+
+export class DraftList<T> implements Iterable<T> {
   declare readonly [DRAFT_STATE]: ListState<T>;
 
   constructor(token: symbol, state: ListState) {
@@ -68,53 +81,37 @@ export class DraftList<T> {
     return s;
   }
 
-  /** Fold the virtual edits/tail into a materialized working array. */
-  #materialize(): unknown[] {
-    const s = this.#state;
-    if (s.items === null) {
-      const items = [...s.base.toArray()]; // spread: the snapshot is frozen
-      for (const [i, v] of s.vEdits) items[i] = v;
-      items.push(...s.vTail);
-      s.items = items;
-      s.vEdits.clear();
-      s.vTail.length = 0;
-    }
-    return s.items;
-  }
-
   get length(): number {
     const s = this.#state;
-    return s.items === null ? s.base.length + s.vTail.length : s.items.length;
+    return s.work.length + s.tail.length;
   }
 
-  /** Current value at `index`; only base-positioned values are child-drafted. */
-  #read(index: number): unknown {
-    const s = this.#state;
-    if (s.items !== null) return s.items[index];
-    if (index < s.base.length) {
-      return s.vEdits.has(index) ? s.vEdits.get(index) : s.base.get(index);
-    }
-    return s.vTail[index - s.base.length];
+  /** The entry at `index` if it is overlaid or in the tail, else undefined (the value is then `work`'s). */
+  #entry(s: ListState, index: number): Entry | undefined {
+    const wl = s.work.length;
+    return index < wl ? s.overlay.get(index) : s.tail[index - wl];
+  }
+
+  #read(s: ListState, index: number): unknown {
+    const e = this.#entry(s, index);
+    return e !== undefined ? e.v : s.work.get(index);
   }
 
   get(index: number): Draft<T> | undefined {
     const s = this.#state;
-    if (!Number.isInteger(index) || index < 0 || index >= this.length) return undefined;
-    const value = this.#read(index);
-    // Draft values still at their base position (assigned/inserted material
-    // is the caller's own and comes back raw — the immer rule), and frozen
-    // assigned values (canonicals must copy-on-write, not throw — mutative's
-    // #18 family).
+    if (!Number.isInteger(index) || index < 0 || index >= s.work.length + s.tail.length) return undefined;
+    const e = this.#entry(s, index);
+    const value = e !== undefined ? e.v : s.work.get(index);
     if (
       isDraftable(value) &&
       !s.finalized &&
       stateOf(value) === undefined &&
-      (value === s.base.get(index) || isImmutable(value))
+      (e === undefined || isImmutable(value))
     ) {
       const child = createChildDraft(value, s);
-      s.drafted.add(index);
-      if (s.items !== null) s.items[index] = child;
-      else s.vEdits.set(index, child);
+      const entry: Entry = { v: child, assigned: e !== undefined && e.assigned };
+      if (index < s.work.length) s.overlay.set(index, entry);
+      else s.tail[index - s.work.length] = entry;
       return child as Draft<T>;
     }
     return value as Draft<T>;
@@ -122,17 +119,17 @@ export class DraftList<T> {
 
   set(index: number, value: T): this {
     const s = this.#state;
-    if (!Number.isInteger(index) || index < 0 || index >= this.length) {
-      throw new RangeError(`DraftList.set: index ${index} out of range [0, ${this.length})`);
+    const len = s.work.length + s.tail.length;
+    if (!Number.isInteger(index) || index < 0 || index >= len) {
+      throw new RangeError(`DraftList.set: index ${index} out of range [0, ${len})`);
     }
-    const current = this.#read(index);
+    const current = this.#read(s, index);
     if (same(current, value)) return this;
     assertAssignable(value, s);
     markChanged(s);
     s.ops.push({ t: 'set', i: index, value, old: current });
-    if (s.items !== null) s.items[index] = value;
-    else if (index < s.base.length) s.vEdits.set(index, value);
-    else s.vTail[index - s.base.length] = value;
+    if (index < s.work.length) s.overlay.set(index, { v: value, assigned: true });
+    else s.tail[index - s.work.length] = { v: value, assigned: true };
     return this;
   }
 
@@ -140,66 +137,67 @@ export class DraftList<T> {
     const s = this.#state;
     for (const v of values) assertAssignable(v, s);
     markChanged(s);
-    const len = this.length;
+    const len = s.work.length + s.tail.length;
     s.ops.push({ t: 'splice', i: len, rc: 0, inserted: values.slice(), removed: [] });
-    if (s.items !== null) s.items.push(...values);
-    else s.vTail.push(...values);
+    for (let j = 0; j < values.length; j++) s.tail.push({ v: values[j], assigned: true });
     return len + values.length;
   }
 
   pop(): T | undefined {
     const s = this.#state;
-    const len = this.length;
+    const len = s.work.length + s.tail.length;
     if (len === 0) return undefined;
     markChanged(s);
-    let removed: unknown;
-    if (s.items !== null) {
-      removed = s.items.pop();
-    } else if (s.vTail.length > 0) {
-      removed = s.vTail.pop();
-    } else {
-      removed = this.#materialize().pop();
-    }
+    const removed = this.#read(s, len - 1);
     s.ops.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
+    if (s.tail.length !== 0) s.tail.pop();
+    else {
+      s.work = s.work.pop();
+      s.overlay.delete(len - 1);
+    }
     return removed as T;
   }
 
   splice(start: number, deleteCount?: number, ...values: T[]): T[] {
     const s = this.#state;
     for (const v of values) assertAssignable(v, s);
-    const items = this.#materialize();
-    const len = items.length;
+    flushTail(s);
+    const len = s.work.length;
     let at = Math.trunc(start);
     at = at < 0 ? Math.max(len + at, 0) : Math.min(at, len);
     const rc =
-      deleteCount === undefined
-        ? len - at
-        : Math.min(Math.max(Math.trunc(deleteCount), 0), len - at);
+      deleteCount === undefined ? len - at : Math.min(Math.max(Math.trunc(deleteCount), 0), len - at);
     markChanged(s);
-    const removed = items.splice(at, rc, ...values);
-    s.ops.push({
-      t: 'splice',
-      i: at,
-      rc,
-      inserted: values.slice(),
-      removed: removed.slice(),
-    });
+    const removed: unknown[] = [];
+    for (let i = at; i < at + rc; i++) removed.push(this.#read(s, i));
+    s.ops.push({ t: 'splice', i: at, rc, inserted: values.slice(), removed: removed.slice() });
+    s.work = s.work.splice(at, rc, new Array<unknown>(values.length).fill(undefined));
+    // Re-index the overlay around the edit.
+    const delta = values.length - rc;
+    if (s.overlay.size !== 0) {
+      const next = new Map<number, Entry>();
+      for (const [i, e] of s.overlay) {
+        if (i < at) next.set(i, e);
+        else if (i >= at + rc) next.set(i + delta, e);
+      }
+      s.overlay = next;
+    }
+    for (let j = 0; j < values.length; j++) s.overlay.set(at + j, { v: values[j], assigned: true });
     return removed as T[];
   }
 
   *[Symbol.iterator](): IterableIterator<T> {
     const s = this.#state;
-    if (s.items !== null) {
-      yield* s.items as T[];
-    } else if (s.vEdits.size === 0 && s.vTail.length === 0) {
-      yield* s.base as Iterable<T>;
+    if (s.overlay.size === 0) {
+      yield* s.work as Iterable<T>;
     } else {
-      const baseLen = s.base.length;
-      for (let i = 0; i < baseLen; i++) {
-        yield (s.vEdits.has(i) ? s.vEdits.get(i) : s.base.get(i)) as T;
+      let i = 0;
+      for (const x of s.work) {
+        const e = s.overlay.get(i++);
+        yield (e !== undefined ? e.v : x) as T;
       }
-      yield* s.vTail as T[];
     }
+    for (const e of s.tail) yield e.v as T;
   }
 
   toArray(): readonly T[] {
@@ -207,22 +205,19 @@ export class DraftList<T> {
   }
 }
 
-/** Draft `base` under `parent`; `from` rebuilds a canonical list when a splice forces it. */
+/** Draft `base` under `parent`. */
 export function createListDraft<T>(
   base: ValueList<T>,
   parent: DraftState | undefined,
-  from: (items: unknown[]) => ValueList<unknown>,
 ): ListState<T> {
   const state = createDraftState<ListState>({
     kind: 'list',
     parent,
     base: base as ValueList<unknown>,
-    from,
-    vEdits: new Map(),
-    vTail: [],
-    items: null,
+    work: base as ValueList<unknown>,
+    overlay: new Map(),
+    tail: [],
     ops: [],
-    drafted: new Set(),
     draft: null as unknown as DraftList<unknown>,
     finalize: finalizeList,
     snapshot: snapshotList,
@@ -239,16 +234,12 @@ function applyListPatch(state: ListState, p: Patch): void {
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a list draft`);
 }
 
-/** current()'s view: virtual edits replayed persistently, or the materialized items rebuilt. */
 function snapshotList(state: DraftState<ValueList<unknown>>): unknown {
   const s = state as ListState;
-  if (s.items === null) {
-    let result = s.base;
-    for (const [i, v] of s.vEdits) result = result.set(i, snapshotOf(v));
-    for (const v of s.vTail) result = result.push(snapshotOf(v));
-    return result;
-  }
-  return s.from(s.items.map(snapshotOf));
+  const edits: [number, unknown][] = [];
+  for (const [i, e] of s.overlay) edits.push([i, snapshotOf(e.v)]);
+  const result = s.work.setMany(edits);
+  return s.tail.length === 0 ? result : result.splice(result.length, 0, s.tail.map((e) => snapshotOf(e.v)));
 }
 
 function finalizeList(
@@ -260,58 +251,17 @@ function finalizeList(
   const patchMark = emitting ? recorder!.patches.length : 0;
   const opCount = state.ops.length;
   if (emitting) emitSeqOps(state.ops, path!, recorder);
-
-  const assignedIdx = new Set<number>();
-  for (const op of state.ops) if (op.t === 'set') assignedIdx.add(op.i);
-
-  if (state.items === null) {
-    // Virtual mode: replay point edits and the appended tail onto the base
-    // persistently — O(edits · log n), no materialization ever happened.
-    let result = state.base;
-    for (const [i, v] of state.vEdits) {
-      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
-      result = result.set(i, resolve(v, childPath, recorder));
-    }
-    for (const v of state.vTail) {
-      result = result.push(resolve(v, null, recorder));
-    }
-    if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
-    state.result = result;
-    return result;
+  const edits: [number, unknown][] = [];
+  for (const [i, e] of state.overlay) {
+    const childPath = emitting && !e.assigned ? [...path!, i] : null;
+    edits.push([i, resolve(e.v, childPath, recorder)]);
   }
-
-  const items = state.items;
-  const profile = seqTailProfile(state.ops, state.base.length);
-  if (profile !== null && profile.finalLen === items.length) {
-    // Materialized but positions stable below the low-water mark: replay
-    // persistently — sets below `low`, then rebuild the rewritten tail.
-    const L = state.base.length;
-    const L2 = items.length;
-    const low = profile.low;
-    let result = state.base;
-    const touched = new Set(assignedIdx);
-    for (const i of state.drafted) touched.add(i);
-    for (const i of touched) {
-      if (i >= low) continue;
-      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
-      result = result.set(i, resolve(items[i], childPath, recorder));
-    }
-    for (let k = low; k < L; k++) result = result.pop();
-    for (let i = low; i < L2; i++) result = result.push(resolve(items[i], null, recorder));
-    if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
-    state.result = result;
-    return result;
+  let result = state.work.setMany(edits);
+  if (state.tail.length !== 0) {
+    const tail = state.tail.map((e) => resolve(e.v, null, recorder));
+    result = result.splice(result.length, 0, tail);
   }
-
-  // Mid-sequence splices: rebuild from the resolved items.
-  const resolved = new Array<unknown>(items.length);
-  for (let i = 0; i < items.length; i++) {
-    const st = stateOf(items[i]);
-    const childPath =
-      emitting && st !== undefined && !st.finalized ? [...path!, i] : null;
-    resolved[i] = resolve(items[i], childPath, recorder);
-  }
-  state.result = state.from(resolved);
-  if (emitting && state.result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
-  return state.result;
+  if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
+  state.result = result;
+  return result;
 }

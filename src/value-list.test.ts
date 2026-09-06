@@ -222,3 +222,191 @@ describe('ValueList — size sweep through three tree levels (> 1,024 elements)'
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The content-chunked tree: edits, setMany, diff (property-tested against an array mirror)
+// ---------------------------------------------------------------------------
+import fc from 'fast-check';
+import type { Hunk } from './value-list.js';
+import { intern } from './intern.js';
+
+const arrOf = (n: number, salt = 0) => Array.from({ length: n }, (_, i) => ({ id: i + salt * 1e6, tag: `t${i % 7}` }));
+
+/** Apply hunks to `a` to reconstruct `b`. */
+function applyHunks(a: readonly unknown[], b: readonly unknown[], hunks: Hunk[]): unknown[] {
+  const out: unknown[] = [];
+  let pos = 0;
+  for (const h of hunks) {
+    for (let i = pos; i < h.aStart; i++) out.push(a[i]);
+    for (let i = h.bStart; i < h.bEnd; i++) out.push(b[i]);
+    pos = h.aEnd;
+  }
+  for (let i = pos; i < a.length; i++) out.push(a[i]);
+  return out;
+}
+
+describe('ValueList — canonical form (content-chunked tree)', () => {
+  it('equal content is the same instance, however built', () => {
+    for (const n of [0, 1, 5, 31, 32, 33, 64, 65, 100, 1000, 5000]) {
+      const items = arrOf(n);
+      const a = ValueList.from(items);
+      expect(ValueList.from(items.map((x) => ({ ...x })))).toBe(a);
+      let b = ValueList.empty<{ id: number; tag: string }>();
+      for (const x of items) b = b.push(x);
+      expect(b).toBe(a);
+      expect(a.length).toBe(n);
+      expect(a.toArray()).toEqual(items);
+      expect([...a]).toEqual(items);
+      for (let i = 0; i < n; i += Math.max(1, n >> 4)) expect(a.get(i)).toBe(intern(items[i]));
+      expect(a.get(-1)).toBeUndefined();
+      expect(a.get(n)).toBeUndefined();
+    }
+  });
+
+  it('every edit lands on the canonical list for the resulting content', () => {
+    const base = arrOf(2000);
+    const list = ValueList.from<unknown>(base);
+    const check = (l: ValueList<unknown>, expected: unknown[]) => {
+      expect(l.toArray()).toEqual(expected);
+      expect(l).toBe(ValueList.from(expected));
+    };
+    check(list.insert(0, { id: -1 }), [{ id: -1 }, ...base]);
+    check(list.insert(1000, { id: -1 }), [...base.slice(0, 1000), { id: -1 }, ...base.slice(1000)]);
+    check(list.insert(2000, { id: -1 }), [...base, { id: -1 }]);
+    check(list.remove(0), base.slice(1));
+    check(list.remove(1234), [...base.slice(0, 1234), ...base.slice(1235)]);
+    check(list.remove(1999), base.slice(0, 1999));
+    check(list.set(777, { id: -7 }), base.map((x, i) => (i === 777 ? { id: -7 } : x)));
+    check(list.pop(), base.slice(0, -1));
+    check(list.splice(500, 300, arrOf(10, 9)), [...base.slice(0, 500), ...arrOf(10, 9), ...base.slice(800)]);
+    check(list.splice(0, 2000), []);
+    check(list.slice(100, 900), base.slice(100, 900));
+    check(list.slice(0, 2000), base);
+    check(list.slice(1990), base.slice(1990));
+    check(list.concat(ValueList.from<unknown>(arrOf(50, 3))), [...base, ...arrOf(50, 3)]);
+    check(ValueList.from<unknown>(arrOf(50, 3)).concat(list), [...arrOf(50, 3), ...base]);
+    check(ValueList.empty<unknown>().concat(list), base);
+    expect(list.set(5, base[5]!)).toBe(list);
+    expect(list.concat(ValueList.empty())).toBe(list);
+  });
+});
+
+describe('ValueList — property: every operation agrees with an array mirror and stays canonical', () => {
+  const item = fc.oneof(fc.integer({ min: 0, max: 50 }), fc.string({ maxLength: 3 }), fc.constant(NaN));
+  const op = fc.oneof(
+    fc.record({ kind: fc.constant('push' as const), v: item }),
+    fc.record({ kind: fc.constant('pop' as const) }),
+    fc.record({ kind: fc.constant('set' as const), i: fc.nat(), v: item }),
+    fc.record({ kind: fc.constant('insert' as const), i: fc.nat(), v: item }),
+    fc.record({ kind: fc.constant('remove' as const), i: fc.nat() }),
+    fc.record({ kind: fc.constant('splice' as const), i: fc.nat(), del: fc.nat(5), items: fc.array(item, { maxLength: 5 }) }),
+    fc.record({ kind: fc.constant('slice' as const), i: fc.nat(), j: fc.nat() }),
+    fc.record({ kind: fc.constant('concat' as const), items: fc.array(item, { maxLength: 40 }) }),
+  );
+  it('holds over random operation sequences', () => {
+    fc.assert(
+      fc.property(fc.array(item, { maxLength: 200 }), fc.array(op, { maxLength: 40 }), (init, ops) => {
+        let mirror: unknown[] = init.slice();
+        let list = ValueList.from(init);
+        for (const o of ops) {
+          const n = mirror.length;
+          switch (o.kind) {
+            case 'push': mirror = [...mirror, o.v]; list = list.push(o.v); break;
+            case 'pop': mirror = mirror.slice(0, -1); list = list.pop(); break;
+            case 'set': if (n === 0) break; { const i = o.i % n; mirror = mirror.map((x, k) => (k === i ? o.v : x)); list = list.set(i, o.v); } break;
+            case 'insert': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), o.v, ...mirror.slice(i)]; list = list.insert(i, o.v); } break;
+            case 'remove': if (n === 0) break; { const i = o.i % n; mirror = [...mirror.slice(0, i), ...mirror.slice(i + 1)]; list = list.remove(i); } break;
+            case 'splice': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), ...o.items, ...mirror.slice(i + o.del)]; list = list.splice(i, o.del, o.items); } break;
+            case 'slice': { const i = o.i % (n + 1); const j = o.j % (n + 1); mirror = mirror.slice(i, j); list = list.slice(i, j); } break;
+            case 'concat': mirror = [...mirror, ...o.items]; list = list.concat(ValueList.from(o.items)); break;
+          }
+          expect(list.length).toBe(mirror.length);
+          expect(list.toArray()).toEqual(mirror);
+          expect(list).toBe(ValueList.from(mirror)); // canonical after every step
+        }
+        for (let i = 0; i < mirror.length; i++) expect(list.get(i)).toBe(intern(mirror[i]));
+        expect([...list]).toEqual(mirror);
+      }),
+      { numRuns: 300 },
+    );
+  });
+});
+
+describe('ValueList.setMany', () => {
+  it('property: a batch of point edits equals the same edits one at a time, and is canonical', () => {
+    const item = fc.oneof(fc.integer({ min: 0, max: 40 }), fc.string({ maxLength: 2 }));
+    fc.assert(
+      fc.property(
+        fc.array(item, { minLength: 1, maxLength: 400 }),
+        fc.array(fc.tuple(fc.nat(), item), { maxLength: 60 }),
+        (init, raw) => {
+          const list = ValueList.from<unknown>(init);
+          const edits = raw.map(([i, v]) => [i % init.length, v] as [number, unknown]);
+          const mirror: unknown[] = init.slice();
+          for (const [i, v] of edits) mirror[i] = v;
+          const batched = list.setMany(edits);
+          expect(batched.toArray()).toEqual(mirror);
+          expect(batched).toBe(ValueList.from(mirror));
+          let oneByOne = list;
+          for (const [i, v] of edits) oneByOne = oneByOne.set(i, v);
+          expect(oneByOne).toBe(batched);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+  it('handles a wide list with edits in every leaf', () => {
+    const init = Array.from({ length: 20000 }, (_, i) => i);
+    const list = ValueList.from(init);
+    const edits: [number, number][] = [];
+    for (let i = 0; i < 20000; i += 3) edits.push([i, -i]);
+    const mirror = init.slice();
+    for (const [i, v] of edits) mirror[i] = v;
+    expect(list.setMany(edits)).toBe(ValueList.from(mirror));
+    expect(list.setMany([])).toBe(list);
+    expect(list.setMany([[5, 5]])).toBe(list);
+  });
+});
+
+describe('ValueList.diff', () => {
+  it('reconstructs b from a, with one hunk per isolated edit', () => {
+    const base = arrOf(5000);
+    const a = ValueList.from<unknown>(base);
+    expect(ValueList.diff(a, a)).toEqual([]);
+    const b = a.set(1234, { id: -1 });
+    const h = ValueList.diff(a, b);
+    expect(h).toEqual([{ aStart: 1234, aEnd: 1235, bStart: 1234, bEnd: 1235 }]);
+    const c = a.insert(10, { id: -2 }).remove(4000);
+    const hc = ValueList.diff(a, c);
+    expect(hc).toEqual([
+      { aStart: 10, aEnd: 10, bStart: 10, bEnd: 11 },
+      { aStart: 3999, aEnd: 4000, bStart: 4000, bEnd: 4000 }, // remove(4000) after the insert takes base[3999]
+    ]);
+    expect(applyHunks(a.toArray(), c.toArray(), hc)).toEqual(c.toArray());
+    // unrelated builds: a refetch with three changed items
+    const changed = base.map((x, i) => (i % 1700 === 5 ? { ...x, tag: 'changed' } : x));
+    const d = ValueList.from(changed);
+    const hd = ValueList.diff(a, d);
+    expect(hd.length).toBe(3);
+    expect(applyHunks(base, changed, hd)).toEqual(changed);
+    expect(ValueList.diff(ValueList.empty(), a)).toEqual([{ aStart: 0, aEnd: 0, bStart: 0, bEnd: 5000 }]);
+    expect(ValueList.diff(a, ValueList.empty())).toEqual([{ aStart: 0, aEnd: 5000, bStart: 0, bEnd: 0 }]);
+  });
+
+  it('property: applying the hunks to a yields b', () => {
+    const item = fc.oneof(fc.integer({ min: 0, max: 20 }), fc.string({ maxLength: 2 }));
+    fc.assert(
+      fc.property(fc.array(item, { maxLength: 300 }), fc.array(item, { maxLength: 300 }), (x, y) => {
+        const a = ValueList.from(x);
+        const b = ValueList.from(y);
+        const hunks = ValueList.diff(a, b);
+        expect(applyHunks(x, y, hunks)).toEqual(y);
+        for (let i = 1; i < hunks.length; i++) {
+          expect(hunks[i]!.aStart).toBeGreaterThanOrEqual(hunks[i - 1]!.aEnd);
+          expect(hunks[i]!.bStart).toBeGreaterThanOrEqual(hunks[i - 1]!.bEnd);
+        }
+      }),
+      { numRuns: 300 },
+    );
+  });
+});

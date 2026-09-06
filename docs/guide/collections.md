@@ -18,7 +18,7 @@ ValueSet.from([1, 2]) === ValueSet.from([2, 1]);                 // true — uno
 Mutators are **persistent**: they return the canonical successor, sharing all
 untouched structure and allocating nothing when the result already exists. All
 three collections are backed by **hash-consed trees** (a CHAMP trie for
-`ValueMap`/`ValueSet`, a dense radix vector for `ValueList`): equal content
+`ValueMap`/`ValueSet`, a content-chunked tree for `ValueList`): equal content
 converges on the very same tree nodes process-wide — however and in whatever
 order it was built — so deep equality is a pointer comparison, an update
 copies only an O(log n) path, and equal subtrees are stored once. Ideal for
@@ -51,10 +51,18 @@ methods). Their backing collections are private: JavaScript cannot make a
 accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
-`ValueList` is a hash-consed radix vector behind the same rule: read with
-`get(i)` (a few array hops), iterate in index order, and take the interned
-frozen snapshot with `toArray()` — explicitly O(n), weakly memoized, with
-`toArray()[i] === get(i)` always. `InternedString` *does* expose its datum —
+`ValueList` is a hash-consed, content-chunked tree behind the same rule:
+read with `get(i)` (a size-table walk; sequential reads stay in one leaf),
+iterate in index order, and take the interned frozen snapshot with
+`toArray()` — explicitly O(n), weakly memoized, with `toArray()[i] === get(i)`
+always. Because a chunk boundary is a property of the elements beside it,
+the tree's shape is a function of the content alone, so `insert`, `remove`,
+`splice`, `slice` and `concat` are O(log n) expected (they disturb only the
+chunks around the edit), `setMany` applies a batch of point edits in one
+pass, and `ValueList.diff(a, b)` returns the changed regions between *any*
+two lists — a refetched one included — in O(c log n) expected, by skipping
+every node they share. The bounds are expected on the seeded hash, with no
+amortised rebuild anywhere. `InternedString` *does* expose its datum —
 `value` — because there the platform enforces immutability for real: a string
 is a primitive. The rule: the representation is public exactly where the
 runtime can actually protect it.
