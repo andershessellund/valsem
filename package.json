@@ -1,6 +1,6 @@
 {
   "name": "valsem",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "Apache-2.0",
   "author": "Anders Hessellund Jensen",
   "description": "Value semantics for JavaScript — structural equality, hashing, interning, and value collections.",
