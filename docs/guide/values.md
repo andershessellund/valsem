@@ -101,7 +101,7 @@ deepEqual(a, intern({ city: 'Odense', zip: '5000' })); // false in O(1) — both
 internHash(a);                                          // cached hash, no traversal
 ```
 
-**What can be interned.** Primitives are returned unchanged. Plain objects and
+**What can be interned.** Primitives are returned unchanged, except `-0`, which is stored as `+0` (the two are one value). Plain objects and
 arrays are interned recursively. A class instance is interned when it is a
 **value** — it has an equality *and a hash*, either `[equals]` + `[hashCode]`
 on the class or a `deepEqual.register(Type, equalsFn, hashFn)` pair (which is
@@ -129,7 +129,7 @@ built on it agrees on one definition of what each kind of thing *is*:
 
 | Kind | Its value is |
 | --- | --- |
-| primitive | itself (`NaN` equals `NaN`; `+0` equals `-0`) |
+| primitive | itself (`NaN` equals `NaN`; `+0` equals `-0`, and canonical state holds it as `+0`) |
 | plain object (record) | the **unordered** set of `key → value` pairs over own enumerable string and symbol keys, where `undefined` is not a value |
 | array / `ValueList` | the length and the **ordered** element sequence |
 | `ValueMap` | the **unordered** set of `(key, value)` entries (canonical values — interned on entry) |

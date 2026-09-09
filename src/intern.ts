@@ -137,7 +137,10 @@ let depth = 0;
  * `===` object, frozen (for plain data) and carrying its hash, so from then
  * on `===` is value equality and hashing is a cache read.
  *
- * - Primitives are returned as-is.
+ * - Primitives are returned as-is — except `-0`, which becomes `+0`. The
+ *   two compare and hash equal, so they are one value, and canonical state
+ *   holds that value as `+0` only: no path through valsem stores a negative
+ *   zero, so its sign can never distinguish two canonical states.
  * - Arrays and plain records are interned bottom-up — children first, then
  *   the container. A record's `undefined`-valued keys are dropped (absent in
  *   record semantics); its key order is kept.
@@ -159,7 +162,8 @@ let depth = 0;
  */
 export function intern<T>(value: T): T {
   if (value === null || value === undefined || typeof value !== 'object') {
-    return value;
+    // `=== 0` admits exactly +0 and -0: the one primitive with two spellings.
+    return (value as unknown) === 0 ? (0 as T) : value;
   }
 
   const obj = value as object;

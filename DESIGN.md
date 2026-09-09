@@ -87,7 +87,7 @@ for delivering value semantics in JS, not part of the model.
 
 | Kind | Host representation | Notes |
 | --- | --- | --- |
-| primitives | `null`, `boolean`, `number`, `string`, `bigint` | `NaN` equals `NaN`; `+0` equals `-0`; `undefined` is special (§2.3) |
+| primitives | `null`, `boolean`, `number`, `string`, `bigint` | `NaN` equals `NaN`; `+0` equals `-0` (canonical state holds `+0`); `undefined` is special (§2.3) |
 | record | plain frozen object | **unordered** `key → value`; canonical form has sorted keys |
 | list | plain frozen array | **ordered**; length is semantic |
 | set | `ValueSet` (the `ReadonlySet` read API; set algebra returns `ValueSet`s) | unordered; members interned on entry (structural membership) |
@@ -247,7 +247,7 @@ A global pool of `hash → bucket record` (the singleton `WeakRef` is inlined in
 the record; a true hash collision promotes it to an array) plus a
 `WeakMap<object, hash>` cache. `intern(value)`:
 
-- primitives return as-is;
+- primitives return as-is (`-0` as `+0`);
 - objects marked `[interned]` or already in the hash cache return immediately;
 - arrays and plain records are interned bottom-up (children first), then looked
   up by hash; candidates compare by `childEqual` — **SameValueZero on

@@ -356,10 +356,9 @@ export function trieInsert(
  * stride 1), built bottom-up: entries are partitioned by hash bits level by
  * level and every node of the result is consed exactly once, where n
  * sequential inserts would path-copy and re-cons O(log n) nodes each. Keys
- * are canonical; a key given twice keeps its last value (up to SameValueZero:
- * `+0` and `-0` are one value, and the pool keeps whichever consed first), as
- * sequential insertion would. The result is the trie that insertion would
- * build — the same root object.
+ * are canonical (so `-0` never arrives: `intern` stores zero as `+0`); a key
+ * given twice keeps its last value, as sequential insertion would. The result
+ * is the trie that insertion would build — the same root object.
  */
 export function trieFrom(cfg: TrieConfig, keys: unknown[], vals: unknown[] | null): HNode {
   // Dedupe (last write wins) on SameValueZero — the native Map's key rule.

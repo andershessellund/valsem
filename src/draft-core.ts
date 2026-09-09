@@ -391,7 +391,10 @@ let adoptDepth = 0;
 /** Intern foreign material, finalizing any drafts embedded in it. */
 
 export function adopt(value: unknown): unknown {
-  if (value === null || typeof value !== 'object') return value;
+  // Primitives pass, with the one normalisation `intern` applies: -0 → +0.
+  // This is the only other door into canonical state — produce's fast paths
+  // commit a resolved primitive without calling `intern` on it.
+  if (value === null || typeof value !== 'object') return value === 0 ? 0 : value;
   // O(1) recognition of canonical material: the [interned] marker covers the
   // auto-interning types (the collections); the hash cache covers canonical
   // plain data and pooled value-type instances.

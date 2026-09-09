@@ -306,3 +306,23 @@ an explicit `slice()`. A Proxy that made it array-like was considered and
 dropped: `Array.isArray` would be true and every walk would materialise it.
 The name says what the contents are — raw, the library's word for "not yet
 a value" — rather than where they came from.
+
+## D22. `-0` is normalised to `+0` at admission
+
+`intern(-0)` returns `+0`, and so does every path that admits a primitive
+into canonical state without calling `intern` on it (`produce`'s finalize
+fast paths, through `adopt`). Collections intern on entry, so no map key,
+map value, set member or list element is ever a negative zero, and neither
+is any record field or array element.
+
+**Why.** `+0` and `-0` compare equal (`===`, `deepEqual`) and hash equal
+(the hasher normalises), so they are one value — but a stored `-0` would
+still be observable (`Object.is`, `1 / x`, `JSON.stringify` of a record
+holding it is identical, a `toFixed` is not) and would let two canonical
+states that are "the same value" differ in a way a consumer can see. Worse,
+the pools compare children by SameValueZero, so which sign a canonical
+record or trie node carried would depend on which spelling was admitted
+first: history leaking into a value. Normalising at the door makes the
+canonical representation unique. **Cost.** One `=== 0` test per primitive
+admitted; a consumer who needs a signed zero cannot keep it in canonical
+state.
