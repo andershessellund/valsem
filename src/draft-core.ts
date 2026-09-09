@@ -394,8 +394,8 @@ let adoptDepth = 0;
 export function adopt(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   // O(1) recognition of canonical material: the [interned] marker covers the
-  // collections and pooled value types; the hash cache covers canonical
-  // plain data.
+  // auto-interning types (the collections); the hash cache covers canonical
+  // plain data and pooled value-type instances.
   if (
     _hashCacheHas(value) ||
     ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))

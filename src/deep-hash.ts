@@ -6,10 +6,11 @@
 // Dispatch order (mirrors deepEqual):
 //   1. Primitives → direct hash
 //   2. Array → recursive ordered hash
-//   3. a[hashCode]?.() → class-defined hash
-//   4. hashCodeMethods.get(a.constructor) → registry (registered types)
-//   5. Plain object → structural order-independent hash
-//   6. Class without handler → throw
+//   3. Mutable built-in (by constructor chain) → throw, naming the replacement
+//   4. a[hashCode] (property, getter or method) → class-defined hash
+//   5. hashCodeMethods.get(a.constructor) → registry (registered types)
+//   6. Plain object → structural order-independent hash
+//   7. Class without handler → throw
 // ---------------------------------------------------------------------------
 
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
@@ -289,12 +290,16 @@ function hashObjectValue(obj: object): number {
     // method), else the registry by the PROTOTYPE's constructor. Neither is
     // consulted on a plain record, where a protocol symbol is an ordinary
     // key — so a record cannot forge its hash with an own [hashCode].
+    // The mutable built-ins are refused first, whatever protocol or
+    // registration they carry (a `class Stamp extends Date` with a
+    // `[hashCode]` is still re-timeable) — the same order `intern` applies.
+    const ctor = _ctorOf(obj);
+    if (_mutableBuiltinReason(ctor) !== undefined) throw new TypeError(unhashableMessage(obj));
     if (hashCode in (obj as any)) {
       const hc = (obj as any)[hashCode];
       if (typeof hc === 'number') return hc >>> 0;
       if (typeof hc === 'function') return hc.call(obj) >>> 0;
     }
-    const ctor = _ctorOf(obj);
     const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
     if (handler) return handler(obj);
     throw new TypeError(unhashableMessage(obj));

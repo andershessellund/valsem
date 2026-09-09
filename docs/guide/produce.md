@@ -57,8 +57,42 @@ in-process like any other, and, like immer's, they are not serialisable.
 
 Recipes follow the immer conventions: mutate the draft, or return a
 replacement value (`nothing` for "the result is `undefined`") — never both.
-The curried form `produce(recipe)` returns `(base, ...args) => produce(base,
-(d) => recipe(d, ...args))`.
+The typing is immer's too: a recipe returns the state's type, its draft, or
+nothing, and `nothing` only where the state type admits `undefined`
+(`produce<State | undefined>(state, () => nothing)`). The curried form
+`produce(recipe)` returns `(base, ...args) => produce(base, (d) => recipe(d,
+...args))`, with the extra arguments typed from the recipe. Name the state
+either way, as with immer — an explicit type argument, or an annotated draft
+parameter from which the state is recovered:
+
+```ts
+const toggle  = produce<Todo>((d) => { d.done = !d.done; });
+const setDone = produce((d: Draft<Todo>, done: boolean) => { d.done = done; });
+const rename  = produce<Todo, [string]>((d, text) => { d.text = text; });
+setDone(todo, true);
+```
+
+**What gets drafted.** Plain objects and arrays, and anything implementing
+`[toDraft]`. Everything else — `ValueDate`, `InternedString`, `RawArray`,
+Temporal values, your own `[equals]`/`[hashCode]` classes — is an **opaque
+leaf**: the recipe receives the canonical value itself, its methods work,
+its fields are exactly as the class declares them (`Draft<ValueDate>` is
+`ValueDate` — declare a value type's fields `readonly`, since a write through
+the draft would reach the pooled instance), and you change it by assigning a
+new value into its slot: `d.at = ValueDate.of(later)`. A
+draft earns its keep only for a container, where in-place edits are cheaper
+than rebuilding or a patch can carry intent that replacement loses; a leaf
+gains nothing from one.
+
+The type system recognises a leaf by its methods — a record can never hold a
+function, so a type with one is a class instance. The one case it cannot see
+is a class registered with `deepEqual.register` that has **no methods at
+all**: `Draft<T>` maps it member-wise and writable, while at runtime the
+recipe receives the pooled instance, unfrozen, so a write through it would
+corrupt every holder — and `produce` cannot notice, since the leaf is not a
+draft. Give such a class a method (a `toJSON`, a `with`; an accessor does not
+count, it is a property to the type system), or use the
+`[equals]`/`[hashCode]` form, before it goes into drafted state.
 
 Recipes must be **synchronous** — an `async` recipe returns a Promise, which
 is not a value, and is rejected with a teaching error. Await your data first,

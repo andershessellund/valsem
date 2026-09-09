@@ -72,10 +72,10 @@ for delivering value semantics in JS, not part of the model.
   Reserve before anything else.**
 - Repo split prerequisite — **done in this repo**: the pre-split
   `valsem/internal` subpath (consumed by the wire binding:
-  `_defineRecordField`, `_mutableBuiltinReason`, `_hasValueSemantics`) is
+  `_defineRecordField`, `_mutableBuiltinReason`; a type-level `_hasValueSemantics` came and went — `intern` answers per instance) is
   promoted to the small, semver'd **`valsem/binding`** API for first-party
   binding authors (underscore prefixes dropped: `defineRecordField`,
-  `mutableBuiltinReason`, `hasValueSemantics`). An unstable cross-repo seam is
+  `mutableBuiltinReason`; `hasValueSemantics` was later removed — a type-level probe cannot see an instance-field `[hashCode]` nor verify immutability, and `intern` answers per instance). An unstable cross-repo seam is
   a live wire; downstream bindings migrate when they start consuming the
   published package.
 
@@ -90,7 +90,7 @@ for delivering value semantics in JS, not part of the model.
 | primitives | `null`, `boolean`, `number`, `string`, `bigint` | `NaN` equals `NaN`; `+0` equals `-0`; `undefined` is special (§2.3) |
 | record | plain frozen object | **unordered** `key → value`; canonical form has sorted keys |
 | list | plain frozen array | **ordered**; length is semantic |
-| set | `ValueSet` (implements `ReadonlySet`) | unordered; members interned on entry (structural membership) |
+| set | `ValueSet` (the `ReadonlySet` read API; set algebra returns `ValueSet`s) | unordered; members interned on entry (structural membership) |
 | map | `ValueMap` (implements `ReadonlyMap`) | unordered; keys and values interned on entry (structural, value-keyed) |
 | timestamp family | `Temporal.*` via `valsem/temporal` | eight kinds, registered immutable |
 | your value types | classes via symbols / registration | §5 |
@@ -377,10 +377,12 @@ carry the root's hash as their precomputed `[hashCode]`, compare in O(1)
 (`set`/`delete`/`add` path-copy O(log n) nodes and share the rest; an
 unchanged write returns `this`).
 
-- **They ARE the readonly interfaces**: `ValueMap implements ReadonlyMap`,
-  `ValueSet implements ReadonlySet` (including the ES2025 set-algebra
-  methods, which return fresh native `Set`s per the standard signatures). Pass
-  them anywhere those are accepted; take a mutable copy with `new Map(m)`.
+- **They ARE the readonly interfaces**: `ValueMap implements ReadonlyMap`;
+  `ValueSet` has the whole `ReadonlySet` read API and is a `ReadonlySetLike`,
+  but its ES2025 set algebra returns **`ValueSet`s** — a value's operations
+  yield values — where the lib's `ReadonlySet` signature demands a native
+  `Set`, so it cannot spell `implements ReadonlySet`. Pass them anywhere the
+  read API is accepted; take a mutable copy with `new Map(m)` / `new Set(s)`.
 - **The backing store is a `#private` field, never exposed.** JavaScript cannot
   make a `Map`/`Set` immutable at runtime (`Object.freeze` is a no-op on their
   internal slots — verified: a "frozen" backing map could be mutated, corrupting
@@ -399,8 +401,10 @@ unchanged write returns `this`).
   (`trieGet` returns a sentinel, never `undefined`, for a miss); the wrapper
   canonicalizes through a `WeakMap<root, wrapper>` — ephemeron semantics, no
   scan, no sweep. (Class instances carrying their own `[equals]`/`[hashCode]`
-  but no pool pass through `intern` unchanged — for those, identity
-  semantics and mutation discipline rest with their author.)
+but no pool are pooled by `intern` in the global pool, unfrozen and unmarked
+— the hash is their author's promise of immutability, and equality between
+such instances is the class's own `[equals]`, with the constructor as the
+type: a subclass is its own type.)
 
 The representation-visibility rule: **`InternedString.value` is public because
 a primitive string is *genuinely* enforceable; the collections' backing trees
@@ -810,9 +814,11 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   Temporal pools unfrozen. `intern` now throws for every class it cannot pool.
 - **Record `undefined` normalization; ValueMap keeps stored `undefined`** —
   accident vs TS-typed intent.
-- **Encapsulated Map/Set backing; classes implement ReadonlyMap/ReadonlySet** —
-  freeze is a no-op on internal slots; interop preserved by *being* the
-  interface.
+- **Encapsulated Map/Set backing; classes carry the ReadonlyMap/ReadonlySet
+  read API** — freeze is a no-op on internal slots; interop preserved by
+  *being* the interface. `ValueSet`'s set algebra returns `ValueSet`s (it
+  first returned native `Set`s, per the lib signature — but a value's
+  operations should yield values).
 - **Symbols renamed to `valsem.*`** before first publish (cross-realm keys are
   forever).
 - **NaN pool-split bug fixed** (`childEqual` = SameValueZero) — found by a
@@ -850,7 +856,10 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   total-collision suite under a degenerate `configureHasher` — which also
   fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
   SameValueZero throughout). Deferred: the adaptive flat small-map form (a
-  ≤32-entry collection is already one root node); node-level set algebra.
+  ≤32-entry collection is already one root node). Node-level set algebra
+  shipped since: nodes carry their entry count, and `ValueSet`'s algebra
+  merges two tries sharing by pointer, at a cost proportional to the
+  difference; the argument is any iterable of values, never a foreign `has`.
 - **The first-contact gap closed: development warnings on mutable-builtin
   comparison** — the totality settlement (below) left one real hazard:
   `deepEqual(new Set(), new Set()) === false` is correct and silent, and a

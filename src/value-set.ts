@@ -19,6 +19,12 @@ import {
   trieKeys,
   triePairs,
   trieForEach,
+  trieUnion,
+  trieIntersection,
+  trieDifference,
+  trieSymmetricDifference,
+  trieIsSubset,
+  trieIsDisjoint,
   NOT_FOUND,
   _trieStats,
   type HNode,
@@ -28,6 +34,16 @@ const CFG = createTrieConfig(1);
 
 /** Canonical wrapper per root — ephemeron-collected with the root itself. */
 const wrappers = new WeakMap<HNode, ValueSet<unknown>>();
+
+/**
+ * The `ReadonlySet` contract minus the set algebra, whose lib signatures
+ * return a native `Set` — ValueSet's return ValueSets. (`forEach` is
+ * declared on the class directly: its callback receives the ValueSet.)
+ */
+type ReadonlySetReads<T> = Pick<
+  ReadonlySet<T>,
+  'size' | 'has' | 'keys' | 'values' | 'entries' | typeof Symbol.iterator
+>;
 
 /**
  * Persistent (immutable) set with structural identity.
@@ -45,18 +61,27 @@ const wrappers = new WeakMap<HNode, ValueSet<unknown>>();
  * (per-process, seeded) element hashes. Never attach meaning to it; if order
  * carries meaning, use a `ValueList`.
  *
- * The backing trie is a private field — never exposed. The ValueSet **is** a
- * `ReadonlySet` itself: pass it anywhere one is accepted, and take a mutable
- * copy with `new Set(valueSet)` when you need one.
+ * The backing trie is a private field — never exposed. The ValueSet has the
+ * whole `ReadonlySet` read API and the ES2025 set algebra, with two
+ * deliberate differences. The operations take **any iterable of values** —
+ * a ValueSet, an array, a native Set — treated as a stream of members
+ * interned on entry, with membership decided by this set's equality, never
+ * by the argument's `has`. And they return **ValueSets**: canonical values,
+ * so `a.union(b) === ValueSet.from([...a, ...b])`. Two ValueSets are merged
+ * at node level — hash-consed tries share by pointer wherever they agree —
+ * so the cost is proportional to where the operands differ, O(1) for the
+ * same set, at worst linear, never a per-member insert. (TypeScript's
+ * `ReadonlySet` insists the algebra takes a `ReadonlySetLike` and returns a
+ * native `Set`, so the class does not spell `implements ReadonlySet`; it is
+ * a `ReadonlySetLike`, which the native methods accept as their argument.)
+ * Take a mutable copy with `new Set(valueSet)` when you need one.
  */
-export class ValueSet<T> implements ReadonlySet<T> {
+export class ValueSet<T> implements ReadonlySetLike<T>, ReadonlySetReads<T> {
   readonly #root: HNode;
-  readonly #size: number;
   readonly #hash: number;
 
-  private constructor(root: HNode, size: number) {
+  private constructor(root: HNode) {
     this.#root = root;
-    this.#size = size;
     this.#hash = root.h;
     Object.freeze(this);
   }
@@ -70,17 +95,17 @@ export class ValueSet<T> implements ReadonlySet<T> {
     return true;
   }
 
-  static #for<T>(root: HNode, size: number): ValueSet<T> {
+  static #for<T>(root: HNode): ValueSet<T> {
     const hit = wrappers.get(root);
     if (hit !== undefined) return hit as ValueSet<T>;
-    const fresh = new ValueSet<unknown>(root, size);
+    const fresh = new ValueSet<unknown>(root);
     wrappers.set(root, fresh);
     return fresh as ValueSet<T>;
   }
 
   /** Number of elements. */
   get size(): number {
-    return this.#size;
+    return this.#root.n;
   }
 
   /** Whether a structurally equal `value` is present (the probe is canonicalized). */
@@ -110,53 +135,61 @@ export class ValueSet<T> implements ReadonlySet<T> {
   }
 
   /** Call `fn` for each element, as `ReadonlySet.forEach` does. */
-  forEach(fn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: unknown): void {
+  forEach(fn: (value: T, value2: T, set: ValueSet<T>) => void, thisArg?: unknown): void {
     trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i] as T, slots[i] as T, this));
   }
 
   // -------------------------------------------------------------------------
-  // Set algebra (the rest of the ReadonlySet contract). These return plain,
-  // freshly-allocated native Sets — per the standard signatures — so mutating
-  // one is harmless; wrap with ValueSet.from(...) to get a canonical value.
+  // Set algebra — taking any iterable of values, returning ValueSets.
+  //
+  // The argument is a stream of values: interned on entry, membership decided
+  // by THIS set's equality, never by a foreign `has` — so a native Set of raw
+  // objects is matched by value like anything else, and the answer does not
+  // depend on which operand is larger. The argument becomes a ValueSet (it
+  // usually is one) and the two tries merge at node level (hamt.ts): shared
+  // subtrees are recognised by pointer and reused, so the cost is
+  // proportional to where the operands differ. The result is canonical:
+  // `a.union(b) === ValueSet.from([...a, ...b])`.
   // -------------------------------------------------------------------------
 
-  #native(): Set<T> {
-    return new Set<T>(trieKeys(CFG, this.#root) as Iterable<T>);
+  /** `other` as a ValueSet — itself, or the canonical set of its values. */
+  static #of<U>(other: Iterable<U>): ValueSet<U> {
+    return other instanceof ValueSet ? (other as ValueSet<U>) : ValueSet.from(other);
   }
 
-  /** Elements in this set, `other`, or both — a fresh native `Set`. */
-  union<U>(other: ReadonlySetLike<U>): Set<T | U> {
-    return this.#native().union(other);
+  /** Members of this set, `other`, or both — a canonical ValueSet. */
+  union<U>(other: Iterable<U>): ValueSet<T | U> {
+    return ValueSet.#for<T | U>(trieUnion(CFG, this.#root, ValueSet.#of(other).#root));
   }
 
-  /** Elements in both this set and `other` — a fresh native `Set`. */
-  intersection<U>(other: ReadonlySetLike<U>): Set<T & U> {
-    return this.#native().intersection(other);
+  /** Members of both this set and `other` — a canonical ValueSet. */
+  intersection<U>(other: Iterable<U>): ValueSet<T & U> {
+    return ValueSet.#for<T & U>(trieIntersection(CFG, this.#root, ValueSet.#of(other).#root));
   }
 
-  /** Elements in this set but not `other` — a fresh native `Set`. */
-  difference<U>(other: ReadonlySetLike<U>): Set<T> {
-    return this.#native().difference(other);
+  /** Members of this set that are not in `other` — a canonical ValueSet. */
+  difference<U>(other: Iterable<U>): ValueSet<T> {
+    return ValueSet.#for<T>(trieDifference(CFG, this.#root, ValueSet.#of(other).#root));
   }
 
-  /** Elements in exactly one of this set and `other` — a fresh native `Set`. */
-  symmetricDifference<U>(other: ReadonlySetLike<U>): Set<T | U> {
-    return this.#native().symmetricDifference(other);
+  /** Members of exactly one of this set and `other` — a canonical ValueSet. */
+  symmetricDifference<U>(other: Iterable<U>): ValueSet<T | U> {
+    return ValueSet.#for<T | U>(trieSymmetricDifference(CFG, this.#root, ValueSet.#of(other).#root));
   }
 
-  /** Whether every element of this set is in `other`. */
-  isSubsetOf(other: ReadonlySetLike<unknown>): boolean {
-    return this.#native().isSubsetOf(other);
+  /** Whether every member of this set is in `other`. */
+  isSubsetOf(other: Iterable<unknown>): boolean {
+    return trieIsSubset(CFG, this.#root, ValueSet.#of(other).#root);
   }
 
-  /** Whether this set contains every element of `other`. */
-  isSupersetOf(other: ReadonlySetLike<unknown>): boolean {
-    return this.#native().isSupersetOf(other);
+  /** Whether this set contains every member of `other`. */
+  isSupersetOf(other: Iterable<unknown>): boolean {
+    return trieIsSubset(CFG, ValueSet.#of(other).#root, this.#root);
   }
 
-  /** Whether this set shares no element with `other`. */
-  isDisjointFrom(other: ReadonlySetLike<unknown>): boolean {
-    return this.#native().isDisjointFrom(other);
+  /** Whether this set shares no member with `other`. */
+  isDisjointFrom(other: Iterable<unknown>): boolean {
+    return trieIsDisjoint(CFG, this.#root, ValueSet.#of(other).#root);
   }
 
   [equalsSym](other: unknown): boolean {
@@ -174,7 +207,7 @@ export class ValueSet<T> implements ReadonlySet<T> {
     value = intern(value);
     const r = trieInsert(CFG, this.#root, 0, internHash(value), [value]);
     if (r === null) return this;
-    return ValueSet.#for<T>(r.node, this.#size + 1);
+    return ValueSet.#for<T>(r.node);
   }
 
   /** Remove a structurally equal `value`. Returns `this` if not present. */
@@ -182,7 +215,7 @@ export class ValueSet<T> implements ReadonlySet<T> {
     value = intern(value);
     const r = trieRemove(CFG, this.#root, 0, internHash(value), value);
     if (r === null) return this;
-    return ValueSet.#for<T>(r.node as HNode, this.#size - 1);
+    return ValueSet.#for<T>(r.node as HNode);
   }
 
   // -------------------------------------------------------------------------
@@ -191,22 +224,18 @@ export class ValueSet<T> implements ReadonlySet<T> {
 
   /** Canonical empty set. */
   static empty<T>(): ValueSet<T> {
-    return ValueSet.#for<T>(CFG.empty, 0);
+    return ValueSet.#for<T>(CFG.empty);
   }
 
   /** Canonical ValueSet from an iterable of values (interned on entry). */
   static from<T>(values: Iterable<T>): ValueSet<T> {
     let root: HNode = CFG.empty;
-    let size = 0;
     for (const raw of values) {
       const v = intern(raw);
       const r = trieInsert(CFG, root, 0, internHash(v), [v]);
-      if (r !== null) {
-        root = r.node;
-        size++;
-      }
+      if (r !== null) root = r.node;
     }
-    return ValueSet.#for<T>(root, size);
+    return ValueSet.#for<T>(root);
   }
 
   /** @internal Trie node-pool sizes — exposed for sharing tests. */

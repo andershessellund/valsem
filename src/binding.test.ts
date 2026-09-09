@@ -1,13 +1,12 @@
 // `valsem/binding` — the semver-covered surface for binding authors.
 import { describe, it, expect } from 'vitest';
-import { defineRecordField, hasValueSemantics, mutableBuiltinReason } from './binding.js';
-import { deepEqual, equals } from './deep-equal.js';
+import { defineRecordField, mutableBuiltinReason } from './binding.js';
+import { deepEqual } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 
 describe('valsem/binding', () => {
-  it('exports exactly the three documented functions', () => {
+  it('exports exactly the two documented functions', () => {
     expect(typeof defineRecordField).toBe('function');
-    expect(typeof hasValueSemantics).toBe('function');
     expect(typeof mutableBuiltinReason).toBe('function');
   });
 
@@ -28,34 +27,6 @@ describe('valsem/binding', () => {
   it('mutableBuiltinReason tells the same story deepHash does', () => {
     expect(() => deepHash(new Date(0))).toThrow(mutableBuiltinReason(Date)!);
     expect(() => deepHash(new Map())).toThrow(mutableBuiltinReason(Map)!);
-  });
-
-  it('hasValueSemantics: registered types, symbol types, and neither', () => {
-    class Registered {
-      constructor(readonly v: number) {}
-    }
-    deepEqual.register(
-      Registered,
-      (a, b) => a.v === b.v,
-      (a) => a.v,
-    );
-    class Symbolic {
-      [equals](o: unknown): boolean {
-        return o instanceof Symbolic;
-      }
-    }
-    class Neither {}
-    class ComparableOnly {
-      constructor(readonly v: number) {}
-    }
-    deepEqual.register(ComparableOnly, (a, b) => a.v === b.v); // no hash: not a value
-    expect(hasValueSemantics(Registered)).toBe(true);
-    expect(hasValueSemantics(Symbolic)).toBe(true);
-    expect(hasValueSemantics(Neither)).toBe(false);
-    expect(hasValueSemantics(ComparableOnly)).toBe(false);
-    expect(hasValueSemantics(Date)).toBe(false);
-    expect(hasValueSemantics(Object)).toBe(false);
-    expect(hasValueSemantics((() => {}) as unknown as Function)).toBe(false);
   });
 
   it('defineRecordField writes __proto__ as an own data property', () => {

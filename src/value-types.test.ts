@@ -108,11 +108,11 @@ describe('a class with [equals] and [hashCode] is a value', () => {
   it('sits inside produce as an opaque leaf, adopted canonical', () => {
     const base = intern({ price: eur(1) });
     const next = produce(base, (d) => {
-      d.price = eur(2) as never;
+      d.price = eur(2); // Draft<Money> is Money: the slot takes a value, no cast
     });
     expect(next.price).toBe(intern(eur(2)));
-    expect(produce(next, (d) => void (d.price = eur(2) as never))).toBe(next);
-    expect(produce(base, (d) => void (d.price = eur(1) as never))).toBe(base);
+    expect(produce(next, (d) => void (d.price = eur(2)))).toBe(next);
+    expect(produce(base, (d) => void (d.price = eur(1)))).toBe(base);
   });
 
   it('a getter [hashCode] and a method [hashCode] both count', () => {
@@ -160,6 +160,78 @@ describe('a class with [equals] and [hashCode] is a value', () => {
     expect(b).toBeInstanceOf(B);
     expect(intern(new A())).toBe(a);
     expect(intern(new B())).toBe(b);
+  });
+});
+
+describe('a subclass is its own type, to deepEqual and to the pool alike', () => {
+  class Euro extends Money {}
+  const euro = (n: number): Euro => new Euro(n, 'EUR');
+  it('an inherited instanceof-based [equals] does not make the types equal', () => {
+    // deepEqual and intern must agree: if they did not, two "equal" values
+    // could be two distinct canonicals, and the canonical short-circuit
+    // would then call them unequal — a HashMap miss.
+    expect(deepEqual(eur(1), euro(1))).toBe(false);
+    expect(deepEqual(euro(1), eur(1))).toBe(false);
+    expect(deepEqual(euro(1), euro(1))).toBe(true);
+    expect(intern(euro(1))).toBe(intern(euro(1)));
+    expect(intern(euro(1))).not.toBe(intern(eur(1)));
+    expect(deepEqual(intern(euro(1)), intern(eur(1)))).toBe(false);
+    expect(new HashMap().set(eur(1), 'm').get(euro(1))).toBeUndefined();
+    expect(ValueSet.from([eur(1), euro(1)]).size).toBe(2);
+  });
+});
+
+describe('[equals] is the type\'s, read off the prototype', () => {
+  it('an own [equals] on an instance is not protocol — deepEqual and intern agree', () => {
+    class Own {
+      readonly [hashCode] = 1;
+      readonly [equals] = (o: unknown): boolean => o instanceof Own; // per instance: ignored
+    }
+    expect(deepEqual(new Own(), new Own())).toBe(false); // reference semantics
+    expect(() => intern(new Own())).toThrow(/Own has a hash but no equality/);
+
+    class Proto {
+      constructor(readonly v: number) {}
+      readonly [hashCode] = 1;
+      [equals](o: unknown): boolean {
+        return o instanceof Proto && o.v === this.v;
+      }
+    }
+    const p = new Proto(1);
+    // An own override on one instance changes nothing: the prototype's answers.
+    Object.defineProperty(p, equals, { value: () => false });
+    expect(deepEqual(p, new Proto(1))).toBe(true);
+    expect(intern(p)).toBe(intern(new Proto(1)));
+  });
+});
+
+describe('[equals] must answer true, not merely truthy', () => {
+  it('a truthy non-boolean is "not equal" to deepEqual and to the pool alike', () => {
+    class Loose {
+      readonly [hashCode] = 1;
+      [equals](o: unknown): boolean {
+        return (o instanceof Loose ? 1 : 0) as unknown as boolean; // a contract violation…
+      }
+    }
+    // …answered the same way on both sides, so no two canonicals ever compare equal.
+    expect(deepEqual(new Loose(), new Loose())).toBe(false);
+    const a = intern(new Loose());
+    const b = intern(new Loose());
+    expect(a).not.toBe(b);
+    expect(deepEqual(a, b)).toBe(false);
+  });
+});
+
+describe('a non-callable [equals] is no protocol', () => {
+  it('is rejected consistently, on the first call and every call after', () => {
+    class Weird {
+      readonly [equals] = true;
+      readonly [hashCode] = 7;
+    }
+    expect(deepEqual(new Weird(), new Weird())).toBe(false);
+    expect(() => intern(new Weird())).toThrow(/Weird has a hash but no equality/);
+    expect(() => intern(new Weird())).toThrow(/Weird has a hash but no equality/);
+    expect(() => new HashMap().set(new Weird(), 1)).toThrow(/no equality/);
   });
 });
 
@@ -317,6 +389,28 @@ describe('the mutable built-ins', () => {
         /cannot be registered with a hash/,
       );
     }
+  });
+
+  it('a subclass of a mutable built-in is refused like its base', () => {
+    class Stamp extends Date {}
+    expect(() => deepEqual.register(Stamp, () => true, () => 1)).toThrow(/Stamp cannot be registered with a hash/);
+    expect(() => intern(new Stamp(5))).toThrow(/Stamp cannot be interned.*setTime/);
+    expect(() => deepHash(new Stamp(5))).toThrow(/setTime/);
+    expect(() => intern({ at: new Stamp(5) })).toThrow(/setTime/);
+    deepEqual.register(Stamp, (a, b) => a.getTime() === b.getTime()); // comparable is fine
+    expect(deepEqual(new Stamp(5), new Stamp(5))).toBe(true);
+    // …and carrying the symbol protocol does not smuggle it past deepHash either.
+    class Stamped extends Date {
+      [equals](o: unknown): boolean {
+        return o instanceof Stamped && o.getTime() === this.getTime();
+      }
+      get [hashCode](): number {
+        return this.getTime() >>> 0;
+      }
+    }
+    expect(() => deepHash(new Stamped(5))).toThrow(/setTime/);
+    expect(() => intern(new Stamped(5))).toThrow(/setTime/);
+    expect(() => memoize((d: Stamped) => d.getTime())(new Stamped(5))).toThrow(/is not a value/);
   });
 
   it('an equality alone makes them comparable; hashing and interning still refuse', () => {

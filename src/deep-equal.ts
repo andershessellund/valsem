@@ -37,7 +37,10 @@
 /**
  * Symbol for opt-in value semantics on class instances.
  *
- * Implement this on a class to enable deep structural equality:
+ * Implement this on a class to enable deep structural equality. It is the
+ * type's method — read from the prototype, never an own instance property
+ * — and a subclass is its own type: an inherited `instanceof`-based
+ * `[equals]` does not make a base-class instance equal to a subclass one.
  *
  * ```ts
  * class Money {
@@ -112,9 +115,10 @@ const hashCodeMethods = new Map<Function, (a: any) => number>();
 
 // Injected by the intern module (which imports this one — same pattern as
 // deepHash's precomputed-hash hook). This IS the interner's hash cache:
-// membership means "canonical plain data" — a strictly stronger fact than a
-// cached hash value, since canonical + `!==` proves structural inequality
-// even when two hashes collide.
+// membership means "canonical" — plain data valsem built, or a pooled value
+// type instance — a strictly stronger fact than a cached hash value, since
+// canonical + `!==` proves structural inequality even when two hashes
+// collide.
 let _canonicalProbe: ((obj: object) => boolean) | null = null;
 
 /** @internal Wire the interner's hash cache in as the canonicality probe. */
@@ -177,7 +181,13 @@ for (const T of [
  * explanation wherever a user meets it.
  */
 export function _mutableBuiltinReason(ctor: Function | undefined): string | undefined {
-  return ctor === undefined ? undefined : MUTABLE_BUILTINS.get(ctor);
+  // Up the constructor chain: a `class Stamp extends Date` is a Date, with
+  // the same setTime(), so it gets the same verdict as its base.
+  for (let c: unknown = ctor; typeof c === 'function'; c = Object.getPrototypeOf(c)) {
+    const reason = MUTABLE_BUILTINS.get(c as Function);
+    if (reason !== undefined) return reason;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,33 +296,38 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   const plainB = protoB === Object.prototype || protoB === null;
 
   // [equals] symbol — class-defined value semantics (takes priority over registry).
-  // The [equals] reference is also the kind discriminator: two objects with
-  // mismatched [equals] references are never considered equal. Only class
-  // instances carry the protocol; on a plain record the symbol is a key.
-  if (!plainA && equals in (a as any)) {
-    const eq = (a as any)[equals];
-    if (typeof eq !== 'function') return false;
-    if ((b as any)[equals] !== eq) return false;
+  // The protocol is a property of the TYPE, so it is read off the prototype
+  // (like the registry keys on the prototype's constructor): an own
+  // `[equals]` on an instance is not protocol, and a non-callable one is
+  // none either — the registry may still answer. Only class instances carry
+  // it; on a plain record the symbol is a key.
+  const eqA = plainA ? undefined : (protoA as Record<symbol, unknown>)[equals];
+  if (typeof eqA === 'function') {
+    // A subclass is its own type — the rule the registry and the intern pool
+    // apply, so an inherited `instanceof`-based [equals] cannot make two
+    // types' instances equal to deepEqual yet distinct canonicals to intern.
+    // Same constructor ⟹ same prototype ⟹ the same [equals].
+    if (plainB || _ctorOf(a) !== _ctorOf(b)) return false;
     // Hash pre-filter: the companion invariant (equal ⟹ same hash) means two
     // distinct precomputed [hashCode]s prove inequality without running a
     // potentially O(n) [equals].
     const ha = (a as Record<symbol, unknown>)[hashCode];
     const hb = (b as Record<symbol, unknown>)[hashCode];
     if (typeof ha === 'number' && typeof hb === 'number' && ha !== hb) return false;
-    return eq.call(a, b);
+    return (eqA as (this: unknown, o: unknown) => boolean).call(a, b) === true;
   }
 
   // Mirror of the branch above: `b` declares [equals] and `a` does not, so
   // the pair is cross-kind. Without this, the answer would depend on argument
   // order (a's structural walk cannot see b's symbol key).
-  if (!plainB && equals in (b as any)) return false;
+  if (!plainB && typeof (protoB as Record<symbol, unknown>)[equals] === 'function') return false;
 
   // Registry lookup by constructor (the prototype's, never a shadowing own property)
   if (!plainA && !plainB) {
     const ctor = _ctorOf(a);
     if (ctor !== undefined && ctor === _ctorOf(b)) {
       const handler = equalsMethods.get(ctor);
-      if (handler) return handler(a, b);
+      if (handler) return handler(a, b) === true;
     }
   }
 
@@ -387,7 +402,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  *
  * The companion invariant applies: `equalsFn(a, b)` ⟹ `hashFn(a) === hashFn(b)`.
  * Registering again replaces both handlers (a call without `hashFn` drops a
- * previously registered hash).
+ * previously registered hash; instances pooled before that stay canonical).
+ * Register at startup, before instances flow.
  *
  * @example
  * ```ts
@@ -408,7 +424,7 @@ deepEqual.register = function register<T>(
   hashFn?: (a: T) => number,
 ): void {
   if (hashFn !== undefined) {
-    const reason = MUTABLE_BUILTINS.get(type);
+    const reason = _mutableBuiltinReason(type);
     if (reason !== undefined) {
       throw new TypeError(
         `deepEqual.register: ${type.name} cannot be registered with a hash — a hash declares ` +
@@ -423,22 +439,13 @@ deepEqual.register = function register<T>(
 };
 
 /**
- * Whether `type` has both an equality and a hash handler — either registered
- * via {@link deepEqual.register}, or declared on its prototype via the
- * {@link equals} symbol.
- *
- * The symbol form only requires `[equals]` on the prototype: `[hashCode]` is
- * conventionally an instance field assigned during construction (as the
- * `Value*` collections and the `createInternPool` pattern both do), so it is
- * not observable from the constructor alone.
- *
- * @internal — exposed through `valsem/binding` for registration guards that
- * must reject types that would crash an interning pass (e.g. a wire decoder's).
+ * @internal The `[equals]` protocol method of `obj`'s TYPE — read off the
+ * prototype, never an own property — or `undefined`.
  */
-export function _hasValueSemantics(type: Function): boolean {
-  if (equalsMethods.has(type) && hashCodeMethods.has(type)) return true;
-  const proto = (type as { prototype?: unknown }).prototype;
-  return typeof proto === 'object' && proto !== null && equals in (proto as object);
+export function _protocolEquals(obj: object): ((this: unknown, o: unknown) => boolean) | undefined {
+  const proto = Object.getPrototypeOf(obj) as Record<symbol, unknown> | null;
+  const eq = proto === null ? undefined : proto[equals];
+  return typeof eq === 'function' ? (eq as (this: unknown, o: unknown) => boolean) : undefined;
 }
 
 /**
@@ -451,8 +458,11 @@ export function _hasValueSemantics(type: Function): boolean {
 export function _missingValueSemantics(obj: object): string | undefined {
   const ctor = _ctorOf(obj);
   const name = ctor?.name || 'an anonymous class';
-  const hasEquals = equals in obj || (ctor !== undefined && equalsMethods.has(ctor));
-  const hasHash = hashCode in obj || (ctor !== undefined && hashCodeMethods.has(ctor));
+  const eq = _protocolEquals(obj);
+  const hc = (obj as Record<symbol, unknown>)[hashCode];
+  const hasEquals = eq !== undefined || (ctor !== undefined && equalsMethods.has(ctor));
+  const hasHash =
+    typeof hc === 'number' || typeof hc === 'function' || (ctor !== undefined && hashCodeMethods.has(ctor));
   if (hasEquals && hasHash) return undefined;
   if (hasEquals) {
     return (

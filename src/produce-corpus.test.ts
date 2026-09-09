@@ -4,7 +4,7 @@
 // record undefined-dropping, symbol keys as part of the value), the divergence is
 // asserted, not skipped.
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, applyPatches, nothing } from './produce.js';
+import { produce, produceWithPatches, applyPatches, nothing, type Draft } from './produce.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 
@@ -214,10 +214,13 @@ describe('corpus — relocation after sort/reverse (the baseRefs problem)', () =
   });
 });
 
+// A replacement of ANOTHER shape is a runtime feature the typing (immer's)
+// does not admit — a recipe returns the state's type, its draft, or nothing —
+// so the forms below cast the replacement to `never`.
 describe('corpus — recipe return forms', () => {
   it('returning a nested draft replaces the result with its final value', () => {
     const base = intern({ keep: { x: 1 }, drop: true });
-    expect(produce(base, (d) => d.keep)).toBe(intern({ x: 1 }));
+    expect(produce(base, (d) => d.keep as never)).toBe(intern({ x: 1 }));
   });
 
   it('returning a nested draft AFTER mutating throws (mutate xor return — immer parity)', () => {
@@ -225,14 +228,14 @@ describe('corpus — recipe return forms', () => {
     expect(() =>
       produce(base, (d) => {
         d.keep.x = 2; // modification bubbles to the root draft …
-        return d.keep; // … so returning a replacement is ambiguous: throw
+        return d.keep as never; // … so returning a replacement is ambiguous: throw
       }),
     ).toThrow(/either mutate the draft or return/);
   });
 
   it('returning a new object that embeds a draft', () => {
     const base = intern({ inner: { n: 1 } });
-    expect(produce(base, (d) => ({ wrapped: d.inner }))).toBe(
+    expect(produce(base, (d) => ({ wrapped: d.inner }) as never)).toBe(
       intern({ wrapped: { n: 1 } }),
     );
   });
@@ -240,13 +243,13 @@ describe('corpus — recipe return forms', () => {
   it('null and undefined bases', () => {
     expect(produce(null, () => {})).toBeNull();
     expect(produce(undefined, () => {})).toBeUndefined();
-    expect(produce(undefined, () => 42)).toBe(42);
-    expect(produce({ a: 1 }, () => null)).toBeNull();
+    expect(produce<unknown>(undefined, () => 42)).toBe(42);
+    expect(produce<{ a: number } | null>({ a: 1 }, () => null)).toBeNull();
   });
 
   it('produceWithPatches with a nothing result round-trips', () => {
     const base = intern({ a: 1 });
-    const [result, patches, inverse] = produceWithPatches(base, () => nothing);
+    const [result, patches, inverse] = produceWithPatches<typeof base | undefined>(base, () => nothing);
     expect(result).toBeUndefined();
     expect(applyPatches(base, patches)).toBeUndefined();
     expect(applyPatches(undefined, inverse)).toBe(base);
@@ -255,7 +258,7 @@ describe('corpus — recipe return forms', () => {
 
 describe('corpus — curried form with arguments', () => {
   it('extra call arguments flow into the recipe', () => {
-    const setValue = produce<{ v: number }>((d, next: number) => {
+    const setValue = produce((d: Draft<{ v: number }>, next: number) => {
       d.v = next;
     });
     expect(setValue(intern({ v: 1 }), 5)).toBe(intern({ v: 5 }));

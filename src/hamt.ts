@@ -44,6 +44,8 @@ export interface BNode {
   readonly t: 0;
   /** Consed content hash. */
   readonly h: number;
+  /** Entries in this subtree — a function of the content, so consed with it. */
+  readonly n: number;
   readonly dmap: number;
   readonly nmap: number;
   /** Entry slots (stride each, in bit order), then child slots (in bit order). */
@@ -54,6 +56,8 @@ export interface BNode {
 export interface CNode {
   readonly t: 1;
   readonly h: number;
+  /** Entries in this node. */
+  readonly n: number;
   readonly khash: number;
   /** Entry slots (stride each), in canonical member order. */
   readonly slots: readonly unknown[];
@@ -105,13 +109,18 @@ function consB(cfg: TrieConfig, dmap: number, nmap: number, slots: unknown[]): B
   h = mix(h, nmap);
   const dataEnd = popcount(dmap) * cfg.stride;
   for (let i = 0; i < dataEnd; i++) h = mix(h, internHash(slots[i]));
-  for (let i = dataEnd; i < slots.length; i++) h = mix(h, (slots[i] as HNode).h);
+  let n = popcount(dmap);
+  for (let i = dataEnd; i < slots.length; i++) {
+    const child = slots[i] as HNode;
+    h = mix(h, child.h);
+    n += child.n;
+  }
   const found = cfg.bpool.lookup(
     h,
     (c) => c.dmap === dmap && c.nmap === nmap && slotsSame(c.slots, slots),
   );
   if (found !== undefined) return found;
-  return cfg.bpool.register({ t: 0, h, dmap, nmap, slots }, h);
+  return cfg.bpool.register({ t: 0, h, n, dmap, nmap, slots }, h);
 }
 
 function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
@@ -119,7 +128,7 @@ function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
   for (let i = 0; i < slots.length; i++) h = mix(h, internHash(slots[i]));
   const found = cfg.cpool.lookup(h, (c) => c.khash === khash && slotsSame(c.slots, slots));
   if (found !== undefined) return found;
-  return cfg.cpool.register({ t: 1, h, khash, slots }, h);
+  return cfg.cpool.register({ t: 1, h, n: slots.length / cfg.stride, khash, slots }, h);
 }
 
 export function createTrieConfig(stride: 1 | 2): TrieConfig {
@@ -209,16 +218,16 @@ function memberCompare(a: unknown, b: unknown): number {
 /**
  * The value stored under `key` (for stride 1, the stored member itself), or
  * {@link NOT_FOUND}. A stored `undefined` comes back as `undefined`, distinct
- * from the sentinel.
+ * from the sentinel. `shift` is the level of `node` — 0 for a root.
  */
 export function trieGet(
   cfg: TrieConfig,
   node: HNode,
   khash: number,
   key: unknown,
+  shift = 0,
 ): unknown {
   const stride = cfg.stride;
-  let shift = 0;
   let n = node;
   while (n.t === 0) {
     const bit = 1 << ((khash >>> shift) & 31);
@@ -564,4 +573,284 @@ export function trieForEach(
 /** @internal Node-pool sizes — exposed for sharing/canonicality tests. */
 export function _trieStats(cfg: TrieConfig): { bnodes: number; cnodes: number } {
   return { bnodes: cfg.bpool.size(), cnodes: cfg.cpool.size() };
+}
+
+// ---------------------------------------------------------------------------
+// Set algebra — node-level, stride 1.
+//
+// Two tries with the same content are the same object, so a merge decides
+// subtree equality by pointer and shares every subtree that is present on
+// one side only. A position holds a PART: nothing, one member (the collapsed
+// form of a one-entry subtree), or a node. The walk combines the two sides'
+// parts bit by bit, recursing only where both sides have a node, and conses
+// only the nodes it had to rebuild — so the cost is proportional to the
+// region where the operands differ, O(1) when they are the same set, and at
+// worst linear in the operands (never a per-member insert).
+//
+// Results are normalised to canonical form at every level — a non-root
+// subtree of one member is inlined as data, an empty one disappears — so the
+// output is exactly the trie `from` would build for the same content, and
+// `===` to it.
+// ---------------------------------------------------------------------------
+
+/** One member at a position — the collapsed form of a one-entry subtree. */
+class Single {
+  constructor(readonly m: unknown) {}
+}
+
+type Part = HNode | Single | null;
+
+function partAt(node: BNode, bit: number): Part {
+  if (node.dmap & bit) return new Single(node.slots[popcount(node.dmap & (bit - 1))]);
+  if (node.nmap & bit) {
+    return node.slots[popcount(node.dmap) + popcount(node.nmap & (bit - 1))] as HNode;
+  }
+  return null;
+}
+
+function sizeOf(p: Part): number {
+  return p === null ? 0 : p instanceof Single ? 1 : p.n;
+}
+
+function contains(cfg: TrieConfig, node: HNode, shift: number, m: unknown): boolean {
+  return trieGet(cfg, node, internHash(m), m, shift) !== NOT_FOUND;
+}
+
+function insertInto(cfg: TrieConfig, node: HNode, shift: number, m: unknown): HNode {
+  const r = trieInsert(cfg, node, shift, internHash(m), [m]);
+  return r === null ? node : r.node;
+}
+
+function removeFrom(cfg: TrieConfig, node: HNode, shift: number, m: unknown): Part {
+  const r = trieRemove(cfg, node, shift, internHash(m), m);
+  if (r === null) return node;
+  if (r.entry !== null) return new Single(r.entry[0]);
+  return r.node;
+}
+
+/** Collects a level's parts in bit order and conses the node, normalised for `shift`. */
+class Builder {
+  dmap = 0;
+  nmap = 0;
+  readonly data: unknown[] = [];
+  readonly kids: HNode[] = [];
+
+  put(bit: number, p: Part): void {
+    if (p === null) return;
+    if (p instanceof Single) {
+      this.dmap |= bit;
+      this.data.push(p.m);
+    } else {
+      this.nmap |= bit;
+      this.kids.push(p);
+    }
+  }
+
+  finish(cfg: TrieConfig, shift: number): Part {
+    if (shift > 0) {
+      // A child returned by the recursion holds ≥ 2 entries, so a subtree of
+      // one entry is exactly one data slot and no children: inline it.
+      if (this.kids.length === 0) {
+        if (this.data.length === 0) return null;
+        if (this.data.length === 1) return new Single(this.data[0]);
+      }
+    }
+    return consB(cfg, this.dmap, this.nmap, (this.data as unknown[]).concat(this.kids));
+  }
+}
+
+type SetOp = 0 | 1 | 2 | 3; // union | intersection | difference | symmetric difference
+
+/**
+ * Two collision nodes at one position share the full hash; their slots are
+ * in canonical member order, so every operation is a linear merge.
+ */
+function mergeCollision(cfg: TrieConfig, a: CNode, b: CNode, op: SetOp): Part {
+  const A = a.slots;
+  const B = b.slots;
+  const out: unknown[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < A.length || j < B.length) {
+    const c = i >= A.length ? 1 : j >= B.length ? -1 : memberCompare(A[i], B[j]);
+    if (c === 0) {
+      if (op === 0 || op === 1) out.push(A[i]);
+      i++;
+      j++;
+    } else if (c < 0) {
+      if (op !== 1) out.push(A[i]);
+      i++;
+    } else {
+      if (op === 0 || op === 3) out.push(B[j]);
+      j++;
+    }
+  }
+  if (out.length === 0) return null;
+  if (out.length === 1) return new Single(out[0]);
+  return consC(cfg, a.khash, out);
+}
+
+function unionParts(cfg: TrieConfig, x: Part, y: Part, shift: number): Part {
+  if (x === null) return y;
+  if (y === null || x === y) return x;
+  if (x instanceof Single) {
+    if (y instanceof Single) {
+      if (same(x.m, y.m)) return x;
+      return mergeTwo(cfg, shift, internHash(x.m), [x.m], internHash(y.m), [y.m]);
+    }
+    return insertInto(cfg, y, shift, x.m);
+  }
+  if (y instanceof Single) return insertInto(cfg, x, shift, y.m);
+  if (x.t === 1) return mergeCollision(cfg, x, y as CNode, 0);
+  const yb = y as BNode;
+  const b = new Builder();
+  for (let rest = x.dmap | x.nmap | yb.dmap | yb.nmap; rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    b.put(bit, unionParts(cfg, partAt(x, bit), partAt(yb, bit), shift + 5));
+  }
+  return b.finish(cfg, shift);
+}
+
+function intersectParts(cfg: TrieConfig, x: Part, y: Part, shift: number): Part {
+  if (x === null || y === null) return null;
+  if (x === y) return x;
+  if (x instanceof Single) {
+    const present = y instanceof Single ? same(x.m, y.m) : contains(cfg, y, shift, x.m);
+    return present ? x : null;
+  }
+  if (y instanceof Single) return contains(cfg, x, shift, y.m) ? y : null;
+  if (x.t === 1) return mergeCollision(cfg, x, y as CNode, 1);
+  const yb = y as BNode;
+  const b = new Builder();
+  for (let rest = (x.dmap | x.nmap) & (yb.dmap | yb.nmap); rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    b.put(bit, intersectParts(cfg, partAt(x, bit), partAt(yb, bit), shift + 5));
+  }
+  return b.finish(cfg, shift);
+}
+
+function differenceParts(cfg: TrieConfig, x: Part, y: Part, shift: number): Part {
+  if (x === null || x === y) return null;
+  if (y === null) return x;
+  if (x instanceof Single) {
+    const present = y instanceof Single ? same(x.m, y.m) : contains(cfg, y, shift, x.m);
+    return present ? null : x;
+  }
+  if (y instanceof Single) return removeFrom(cfg, x, shift, y.m);
+  if (x.t === 1) return mergeCollision(cfg, x, y as CNode, 2);
+  const yb = y as BNode;
+  const ymask = yb.dmap | yb.nmap;
+  const b = new Builder();
+  for (let rest = x.dmap | x.nmap; rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    const px = partAt(x, bit);
+    b.put(bit, ymask & bit ? differenceParts(cfg, px, partAt(yb, bit), shift + 5) : px);
+  }
+  return b.finish(cfg, shift);
+}
+
+function symmetricParts(cfg: TrieConfig, x: Part, y: Part, shift: number): Part {
+  if (x === null) return y;
+  if (y === null) return x;
+  if (x === y) return null;
+  if (x instanceof Single) {
+    if (y instanceof Single) {
+      if (same(x.m, y.m)) return null;
+      return mergeTwo(cfg, shift, internHash(x.m), [x.m], internHash(y.m), [y.m]);
+    }
+    return contains(cfg, y, shift, x.m) ? removeFrom(cfg, y, shift, x.m) : insertInto(cfg, y, shift, x.m);
+  }
+  if (y instanceof Single) {
+    return contains(cfg, x, shift, y.m) ? removeFrom(cfg, x, shift, y.m) : insertInto(cfg, x, shift, y.m);
+  }
+  if (x.t === 1) return mergeCollision(cfg, x, y as CNode, 3);
+  const yb = y as BNode;
+  const b = new Builder();
+  for (let rest = x.dmap | x.nmap | yb.dmap | yb.nmap; rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    b.put(bit, symmetricParts(cfg, partAt(x, bit), partAt(yb, bit), shift + 5));
+  }
+  return b.finish(cfg, shift);
+}
+
+function subsetParts(cfg: TrieConfig, x: Part, y: Part, shift: number): boolean {
+  if (x === null || x === y) return true;
+  if (y === null || sizeOf(x) > sizeOf(y)) return false;
+  if (x instanceof Single) return y instanceof Single ? same(x.m, y.m) : contains(cfg, y, shift, x.m);
+  if (y instanceof Single) return false; // a node holds ≥ 2 entries
+  if (x.t === 1) return sizeOf(mergeCollision(cfg, x, y as CNode, 1)) === x.n;
+  const yb = y as BNode;
+  const xmask = x.dmap | x.nmap;
+  if (xmask & ~(yb.dmap | yb.nmap)) return false;
+  for (let rest = xmask; rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    if (!subsetParts(cfg, partAt(x, bit), partAt(yb, bit), shift + 5)) return false;
+  }
+  return true;
+}
+
+function disjointParts(cfg: TrieConfig, x: Part, y: Part, shift: number): boolean {
+  if (x === null || y === null) return true;
+  if (x === y) return sizeOf(x) === 0;
+  if (x instanceof Single) return !(y instanceof Single ? same(x.m, y.m) : contains(cfg, y, shift, x.m));
+  if (y instanceof Single) return !contains(cfg, x, shift, y.m);
+  if (x.t === 1) return mergeCollision(cfg, x, y as CNode, 1) === null;
+  const yb = y as BNode;
+  for (let rest = (x.dmap | x.nmap) & (yb.dmap | yb.nmap); rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    if (!disjointParts(cfg, partAt(x, bit), partAt(yb, bit), shift + 5)) return false;
+  }
+  return true;
+}
+
+function setRoot(cfg: TrieConfig, p: Part): HNode {
+  if (p === null) return cfg.empty;
+  if (p instanceof Single) return consB(cfg, 1 << (internHash(p.m) & 31), 0, [p.m]);
+  return p;
+}
+
+function assertSet(cfg: TrieConfig): void {
+  if (cfg.stride !== 1) throw new Error('valsem: node-level set algebra is for stride-1 tries');
+}
+
+/** The canonical trie holding the members of `a` or `b` (roots, stride 1). */
+export function trieUnion(cfg: TrieConfig, a: HNode, b: HNode): HNode {
+  assertSet(cfg);
+  return setRoot(cfg, unionParts(cfg, a, b, 0));
+}
+
+/** The canonical trie holding the members of both `a` and `b`. */
+export function trieIntersection(cfg: TrieConfig, a: HNode, b: HNode): HNode {
+  assertSet(cfg);
+  return setRoot(cfg, intersectParts(cfg, a, b, 0));
+}
+
+/** The canonical trie holding the members of `a` that are not in `b`. */
+export function trieDifference(cfg: TrieConfig, a: HNode, b: HNode): HNode {
+  assertSet(cfg);
+  return setRoot(cfg, differenceParts(cfg, a, b, 0));
+}
+
+/** The canonical trie holding the members of exactly one of `a` and `b`. */
+export function trieSymmetricDifference(cfg: TrieConfig, a: HNode, b: HNode): HNode {
+  assertSet(cfg);
+  return setRoot(cfg, symmetricParts(cfg, a, b, 0));
+}
+
+/** Whether every member of `a` is in `b`. */
+export function trieIsSubset(cfg: TrieConfig, a: HNode, b: HNode): boolean {
+  assertSet(cfg);
+  return subsetParts(cfg, a, b, 0);
+}
+
+/** Whether `a` and `b` share no member. */
+export function trieIsDisjoint(cfg: TrieConfig, a: HNode, b: HNode): boolean {
+  assertSet(cfg);
+  return disjointParts(cfg, a, b, 0);
 }

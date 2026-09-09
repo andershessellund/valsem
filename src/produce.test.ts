@@ -239,15 +239,17 @@ describe('produce — grafts and aliasing', () => {
 
 describe('produce — recipe conventions', () => {
   it('returned values replace the result; nothing means undefined', () => {
-    expect(produce({ a: 1 }, () => ({ b: 2 }))).toBe(intern({ b: 2 }));
-    expect(produce({ a: 1 }, () => nothing)).toBeUndefined();
+    // A replacement of another shape is untyped (immer's rule): widen the state.
+    expect(produce<unknown>({ a: 1 }, () => ({ b: 2 }))).toBe(intern({ b: 2 }));
+    // `nothing` is admitted only where the state type admits undefined.
+    expect(produce<{ a: number } | undefined>({ a: 1 }, () => nothing)).toBeUndefined();
   });
 
   it('mutating AND returning a replacement throws', () => {
     expect(() =>
       produce({ a: 1 }, (d) => {
         d.a = 2;
-        return { b: 3 };
+        return { b: 3 } as never;
       }),
     ).toThrow(/either mutate the draft or return/);
   });
@@ -393,7 +395,7 @@ describe('produceWithPatches — semantic patches, both directions', () => {
 
   it('replacement results emit a replace patch pair', () => {
     const base = intern({ a: 1 });
-    const [result, patches, inverse] = produceWithPatches(base, () => ({ b: 2 }));
+    const [result, patches, inverse] = produceWithPatches<unknown>(base, () => ({ b: 2 }));
     expect(patches).toEqual([{ kind: 'replace', path: [], value: intern({ b: 2 }) }]);
     expect(applyPatches(base, patches)).toBe(result);
     expect(applyPatches(result, inverse)).toBe(base);

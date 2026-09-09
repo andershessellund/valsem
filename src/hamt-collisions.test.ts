@@ -140,3 +140,44 @@ describe('total-collision trie (degenerate hasher)', () => {
     expect(drained).toBe(ValueSet.empty());
   });
 });
+
+describe('total-collision trie — node-level set algebra through collision nodes', () => {
+  // Member kind keyed on the VALUE, so `members(20)` and `members(20, 10)` overlap on 10..19.
+  const members = (n: number, from = 0): (string | number | object)[] =>
+    Array.from({ length: n }, (_, i) => {
+      const v = i + from;
+      return v % 3 === 0 ? `s${v}` : v % 3 === 1 ? v : intern({ o: v });
+    });
+
+  it('every operation converges on ValueSet.from of the array answer', () => {
+    const xs = members(20);
+    const ys = members(20, 10); // overlaps xs on 10..19
+    const A = ValueSet.from(xs);
+    const B = ValueSet.from(ys);
+    const inA = (v: unknown): boolean => A.has(v as never);
+    const inB = (v: unknown): boolean => B.has(v as never);
+    expect(A.union(B)).toBe(ValueSet.from([...xs, ...ys]));
+    expect(A.intersection(B)).toBe(ValueSet.from(xs.filter(inB)));
+    expect(A.difference(B)).toBe(ValueSet.from(xs.filter((v) => !inB(v))));
+    expect(A.symmetricDifference(B)).toBe(
+      ValueSet.from([...xs.filter((v) => !inB(v)), ...ys.filter((v) => !inA(v))]),
+    );
+    expect(A.isSubsetOf(B)).toBe(false);
+    expect(A.intersection(B).isSubsetOf(B)).toBe(true);
+    expect(A.isDisjointFrom(B)).toBe(false);
+    expect(A.difference(B).isDisjointFrom(B)).toBe(true);
+    expect(A.union(B).size).toBe(30);
+    expect(A.intersection(B).size).toBe(10);
+    expect(A.union(A)).toBe(A);
+    expect(A.difference(A)).toBe(ValueSet.empty());
+  });
+
+  it('collapse to one member and to empty keep canonical form', () => {
+    const A = ValueSet.from(members(6));
+    const one = ValueSet.from([members(6)[2]]);
+    expect(A.intersection(one)).toBe(one);
+    expect(A.difference(A.difference(one))).toBe(one);
+    expect(one.difference(A)).toBe(ValueSet.empty());
+    expect(A.symmetricDifference(A.difference(one))).toBe(one);
+  });
+});

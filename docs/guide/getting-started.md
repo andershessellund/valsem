@@ -7,9 +7,8 @@ npm install valsem
 ::: info Runtime requirements
 Node ≥ 22 and all current browsers, workers, Deno, and Bun. valsem relies on
 `WeakRef`, `FinalizationRegistry` and Web Crypto (`globalThis.crypto`, which
-seeds the flood-resistant hasher) — universal for years; `ValueSet`'s
-set-algebra methods (`union`, `isSubsetOf`, …) delegate to the ES2025 `Set`
-methods. Ships as ES modules with full TypeScript types, dependency-free and
+seeds the flood-resistant hasher) — universal for years. Ships as ES modules
+with full TypeScript types (TypeScript ≥ 5.6), dependency-free and
 tree-shakeable.
 :::
 

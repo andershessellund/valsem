@@ -154,3 +154,18 @@ describe('ValueMap.fromObject — own keys only', () => {
     }
   });
 });
+
+describe('ValueMap — size comes from the root', () => {
+  it('agrees with a walk after every kind of update', () => {
+    let m = ValueMap.empty<number, number>();
+    for (let i = 0; i < 300; i++) m = m.set(i, i);
+    expect(m.size).toBe(300);
+    m = m.set(5, 99); // update, not growth
+    expect(m.size).toBe(300);
+    for (let i = 0; i < 150; i++) m = m.delete(i * 2);
+    expect(m.size).toBe(150);
+    expect([...m].length).toBe(150);
+    expect(ValueMap.from([...m]).size).toBe(150);
+    expect(ValueMap.fromObject({ a: 1, b: undefined, c: 3 }).size).toBe(2);
+  });
+});

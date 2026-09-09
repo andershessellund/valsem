@@ -24,7 +24,7 @@
 // strongly, so a size-N cache pins N argument graphs — choose N knowingly.
 // ---------------------------------------------------------------------------
 
-import { deepEqual } from './deep-equal.js';
+import { deepEqual, _isPlainRecord, _ctorOf } from './deep-equal.js';
 import { intern, internHash, isCanonical } from './intern.js';
 import { HashTable, type TableEntry } from './hash-table.js';
 
@@ -127,13 +127,18 @@ export function memoize<F extends (...args: never[]) => unknown>(
     try {
       result = intern(raw);
     } catch (e) {
-      // intern names what the class lacks; keep that, framed as memoize's problem.
-      throw new TypeError(
-        `valsem: memoize — ${name} returned an instance of ` +
-          `${(raw as object)?.constructor?.name ?? 'an unregistered class'}, which is not a value ` +
-          `(${(e as Error).message}). Memoized results are interned and shared: return data, or a ` +
-          'type valsem can canonicalise.',
-      );
+      // A class instance the function built: say so, keeping intern's reason.
+      // Anything else (a non-value nested in plain data, a depth cap, a
+      // cycle) is best described by intern's own error.
+      if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && !_isPlainRecord(raw)) {
+        throw new TypeError(
+          `valsem: memoize — ${name} returned an instance of ` +
+            `${_ctorOf(raw)?.name ?? 'an anonymous class'}, which is not a value ` +
+            `(${(e as Error).message}). Memoized results are interned and shared: return data, or a ` +
+            'type valsem can canonicalise.',
+        );
+      }
+      throw e;
     }
     if (!isCanonical(result)) {
       // Only functions get here now: intern returns them untouched.

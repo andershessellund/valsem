@@ -12,31 +12,18 @@
 // ---------------------------------------------------------------------------
 
 import {
-  DRAFT_STATE,
   stateOf,
   snapshotOf,
   assertUnrevoked,
   _setCoreSnapshot,
   type DraftState,
 } from './draft-core.js';
-import { _snapshotCore } from './produce.js';
+import { _snapshotCore, type Undraft } from './produce.js';
 import { intern } from './intern.js';
 
 _setCoreSnapshot(_snapshotCore);
 
-/**
- * The value type a draft type stands for — the inverse of `Draft<T>`:
- * `Undraft<DraftMap<K, V>>` is `ValueMap<K, V>`, `Undraft<IntervalDraft>` is
- * `Interval` (read off the draft's `[DRAFT_STATE]`), and a plain object or
- * array draft maps back member-wise.
- */
-export type Undraft<D> = D extends { readonly [DRAFT_STATE]: DraftState<infer B> }
-  ? B
-  : D extends readonly (infer U)[]
-    ? Undraft<U>[]
-    : D extends object
-      ? { [P in keyof D]: Undraft<D[P]> }
-      : D;
+export type { Undraft } from './produce.js';
 
 function stateOrThrow(draft: unknown, fn: string): DraftState {
   let state: DraftState | undefined;

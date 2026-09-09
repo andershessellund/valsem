@@ -14,7 +14,7 @@
 // values — but it IS canonical by identity, like a class instance that
 // opted in: `[hashCode]` is an identity hash, `[equals]` is `===`, and it is
 // marked `[interned]`, so it can sit inside canonical state as an opaque
-// leaf that `intern` and `produce` pass through. `slice()` with no
+// leaf that `intern` and `produce` return as it is (canonical by construction). `slice()` with no
 // arguments is the explicit "admit everything" step.
 //
 // This belongs with `InternedString` in the category "things you are

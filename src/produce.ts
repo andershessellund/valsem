@@ -943,23 +943,129 @@ function finalizeArray(
 // ---------------------------------------------------------------------------
 
 /**
- * The draft twin of a value type — mutable in place inside a recipe.
+ * @internal Whether `T` has a function-typed member. A record never does —
+ * functions are not values — so a type with one is a class instance:
+ * something `produce` hands out as itself, never drafted member-wise.
+ * Symbol-keyed methods (`[equals]`, `[toDraft]`) count, so every value
+ * type written against the protocol is caught. An `any` member is not
+ * evidence (it would match `Function`), and an optional or nullable
+ * function member counts like a plain one.
+ */
+export type _HasFunctionMember<T> = {
+  [K in keyof T]-?: 0 extends 1 & T[K]
+    ? never // any: no evidence
+    : [NonNullable<T[K]>] extends [never]
+      ? never // never / `?: undefined` (the exclusive-union idiom): not a function
+      : NonNullable<T[K]> extends Function
+        ? true
+        : never;
+}[keyof T] extends never
+  ? false
+  : true;
+
+/**
+ * The draft twin of a value type — what the recipe receives for `T`.
  *
  * Plain objects and arrays map to their writable shapes; anything that
  * implements `[toDraft]` maps to whatever its draft state's `draft` is
  * (`ValueMap<K, V>` → `DraftMap<K, V>`, and likewise for your own types).
+ * Everything else is an opaque leaf and maps to **itself**: `ValueDate`,
+ * `InternedString`, `RawArray`, Temporal values, and any class with
+ * `[equals]`/`[hashCode]` are handed to the recipe as the canonical value
+ * they are, so their methods keep working and their fields stay readonly.
+ * Replace such a leaf by assigning a new value into its slot. (The test is
+ * "has a method": a record can never contain a function, so a type with one
+ * is a class instance. A registered third-party class with data fields only
+ * still maps member-wise.)
  */
 export type Draft<T> = T extends { [toDraft](parent?: DraftState): { draft: infer D } }
   ? D
-  : T extends ReadonlyArray<infer U>
-    ? Draft<U>[]
+  : T extends readonly unknown[]
+    ? _IsPlainArray<T> extends true
+      ? Draft<T[number]>[]
+      : { -readonly [K in keyof T]: Draft<T[K]> }
     : T extends object
-      ? { -readonly [P in keyof T]: Draft<T[P]> }
+      ? _HasFunctionMember<T> extends true
+        ? T
+        : { -readonly [P in keyof T]: Draft<T[P]> }
       : T;
+
+/**
+ * @internal A plain array type (`number[]`, `readonly string[]`) as opposed
+ * to a tuple, whose element union would not round-trip — tuples map
+ * homomorphically instead (immer's rule).
+ */
+export type _IsPlainArray<T extends readonly unknown[]> = T extends readonly (infer U)[]
+  ? U[] extends T
+    ? true
+    : false
+  : false;
+
+/**
+ * The value type a draft type stands for — the inverse of {@link Draft}:
+ * `Undraft<DraftMap<K, V>>` is `ValueMap<K, V>`, `Undraft<IntervalDraft>` is
+ * `Interval` (read off the draft's `[DRAFT_STATE]`), a plain object or
+ * array draft maps back member-wise (in the writable spelling — the state
+ * type as most code declares it), and an opaque leaf (a class instance —
+ * `ValueDate`, a value type of your own) is itself, as in `Draft<T>`.
+ */
+export type Undraft<D> = D extends { readonly [DRAFT_STATE]: DraftState<infer B> }
+  ? B
+  : D extends readonly unknown[]
+    ? _IsPlainArray<D> extends true
+      ? Undraft<D[number]>[]
+      : { [K in keyof D]: Undraft<D[K]> }
+    : D extends object
+      ? _HasFunctionMember<D> extends true
+        ? D
+        : { [P in keyof D]: Undraft<D[P]> }
+      : D;
+
+/**
+ * @internal `T` with every record and array readonly — the shape of a
+ * frozen value of `T`. A parameter typed this way accepts a state declared
+ * either way (`number[]` or `readonly number[]`), since mutable is
+ * assignable to readonly.
+ */
+export type _Frozen<T> = T extends readonly unknown[]
+  ? _IsPlainArray<T> extends true
+    ? readonly _Frozen<T[number]>[]
+    : { readonly [K in keyof T]: _Frozen<T[K]> }
+  : T extends object
+    ? _HasFunctionMember<T> extends true
+      ? T
+      : { readonly [P in keyof T]: _Frozen<T[P]> }
+    : T;
+
+/**
+ * @internal The producer a curried `produce(recipe)` returns, read off the
+ * recipe's own type: the draft parameter names the draft, {@link Undraft}
+ * recovers the state, and the base parameter takes the frozen spelling so a
+ * state declared either way is accepted. `never` when the recipe's return
+ * is not a valid {@link RecipeReturn} for that state.
+ */
+export type _CurriedFromRecipe<R> = R extends (draft: infer D, ...args: infer A) => infer Ret
+  ? Ret extends RecipeReturn<Undraft<D>>
+    ? (base: _Frozen<Undraft<D>>, ...args: A) => Undraft<D>
+    : never
+  : never;
+
+/**
+ * What a recipe may return: nothing (it mutated the draft), the draft
+ * itself, a replacement value of the state's type, or {@link nothing} —
+ * the last only when the state type admits `undefined`, since that is what
+ * the result then is. immer's rule, and its typing.
+ */
+export type RecipeReturn<T> =
+  | void
+  | undefined
+  | T
+  | Draft<T>
+  | (undefined extends T ? typeof nothing : never);
 
 function runProduce<T>(
   base: T,
-  recipe: (draft: Draft<T>) => unknown,
+  recipe: (draft: Draft<T>) => RecipeReturn<T>,
   recorder: PatchRecorder | undefined,
 ): T {
   return _runInScope(() => {
@@ -974,9 +1080,9 @@ function runProduce<T>(
 
     let result: unknown;
     if (returned !== undefined && returned !== draft) {
-      // A thenable replacement is almost certainly an `async` recipe — which
-      // would otherwise leak the raw Promise out as the "result" (intern
-      // passes unregistered class instances through). Reject it loudly.
+      // A thenable replacement is almost certainly an `async` recipe. `intern`
+      // would reject the Promise anyway (no value semantics); this names the
+      // actual mistake instead.
       if (typeof (returned as { then?: unknown } | null)?.then === 'function') {
         throw new Error(
           'valsem: recipes must be synchronous — an async recipe returns a Promise, ' +
@@ -1013,21 +1119,34 @@ function runProduce<T>(
  * `produce(base, () => {}) === intern(base)`. Intern is the degenerate case
  * of produce.
  *
- * The curried form `produce(recipe)` returns `base => produce(base, recipe)`.
+ * The recipe mutates the draft, or returns a replacement — never both; see
+ * {@link RecipeReturn} for what it may return.
+ *
+ * The curried form `produce(recipe)` returns `(base, ...args) => produce(base,
+ * d => recipe(d, ...args))`, with the extra arguments typed from the recipe.
+ * Name the state either way, as with immer: an explicit type argument
+ * (`produce<Todo>((d) => …)`, or `produce<Todo, [boolean]>((d, done) => …)`
+ * with extra arguments) or an annotated draft parameter
+ * (`produce((d: Draft<Todo>, done: boolean) => …)`), from which the state
+ * type is recovered with {@link Undraft}.
  */
-export function produce<T>(base: T, recipe: (draft: Draft<T>) => unknown): T;
-export function produce<T>(
-  recipe: (draft: Draft<T>, ...args: never[]) => unknown,
-): (base: T, ...args: unknown[]) => T;
-export function produce<T>(
-  baseOrRecipe: T | ((draft: Draft<T>, ...args: unknown[]) => unknown),
-  recipe?: (draft: Draft<T>) => unknown,
-): T | ((base: T, ...args: unknown[]) => T) {
+export function produce<T>(base: T, recipe: (draft: Draft<T>) => RecipeReturn<T>): T;
+// Curried, from the recipe's own type. Ordered before the explicit form and
+// constrained to a function, so `produce<Todo>(…)` — a type argument that is
+// not a function — falls through to the explicit overload (immer's layout).
+export function produce<R extends (draft: any, ...args: any[]) => unknown>(recipe: R): _CurriedFromRecipe<R>;
+export function produce<T, Args extends unknown[] = []>(
+  recipe: (draft: Draft<T>, ...args: Args) => RecipeReturn<T>,
+): (base: T, ...args: Args) => T;
+export function produce<T, Args extends unknown[]>(
+  baseOrRecipe: T | ((draft: Draft<T>, ...args: Args) => RecipeReturn<T>),
+  recipe?: (draft: Draft<T>) => RecipeReturn<T>,
+): T | ((base: T, ...args: Args) => T) {
   if (recipe === undefined) {
-    const r = baseOrRecipe as (draft: Draft<T>, ...args: unknown[]) => unknown;
+    const r = baseOrRecipe as (draft: Draft<T>, ...args: Args) => RecipeReturn<T>;
     // Curried form: extra call arguments flow into the recipe (immer's
     // convention — `setState(produce(toggle, id))` style).
-    return (base: T, ...args: unknown[]) => runProduce(base, (d) => r(d, ...args), undefined);
+    return (base: T, ...args: Args) => runProduce(base, (d) => r(d, ...args), undefined);
   }
   return runProduce(baseOrRecipe as T, recipe, undefined);
 }
@@ -1039,7 +1158,7 @@ export function produce<T>(
  */
 export function produceWithPatches<T>(
   base: T,
-  recipe: (draft: Draft<T>) => unknown,
+  recipe: (draft: Draft<T>) => RecipeReturn<T>,
 ): [T, Patch[], Patch[]] {
   const recorder: PatchRecorder = { patches: [], inverse: [] };
   const result = runProduce(base, recipe, recorder);

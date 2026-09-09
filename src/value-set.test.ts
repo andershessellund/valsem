@@ -61,10 +61,18 @@ describe('ValueSet — encapsulation & the ReadonlySet contract', () => {
     expect((s as unknown as Record<string, unknown>)['set']).toBeUndefined();
   });
 
-  it('is itself a ReadonlySet — pass it where one is expected', () => {
-    const takesReadonly = (rs: ReadonlySet<number>): number[] => [...rs.keys()].sort();
+  it('has the ReadonlySet read surface, and is a ReadonlySetLike the native methods accept', () => {
+    type Reads = Pick<
+      ReadonlySet<number>,
+      'size' | 'has' | 'keys' | 'values' | 'entries' | typeof Symbol.iterator
+    >;
+    const takesReads = (rs: Reads): number[] => [...rs.keys()].sort();
     const s = ValueSet.from([2, 1]);
-    expect(takesReadonly(s)).toEqual([1, 2]);
+    expect(takesReads(s)).toEqual([1, 2]);
+    const like: ReadonlySetLike<number> = s;
+    expect([...new Set([2, 3]).union(like)].sort()).toEqual([1, 2, 3]);
+    expect(new Set([1]).isSubsetOf(s)).toBe(true);
+    expect(new Set([9]).isDisjointFrom(s)).toBe(true);
     // NB: no order assertion — canonical instances keep the insertion order of
     // whichever structurally-equal set was pooled first.
     expect([...s.entries()].sort()).toEqual([[1, 1], [2, 2]]);
@@ -77,21 +85,104 @@ describe('ValueSet — encapsulation & the ReadonlySet contract', () => {
     expect(seen.sort()).toEqual([1, 2]);
   });
 
-  it('supports the set-algebra methods, returning fresh native Sets', () => {
+  it('supports the set-algebra methods, returning canonical ValueSets', () => {
     const a = ValueSet.from([1, 2, 3]);
     const b = ValueSet.from([2, 3, 4]);
-    expect([...a.union(b)].sort()).toEqual([1, 2, 3, 4]);
-    expect([...a.intersection(b)].sort()).toEqual([2, 3]);
-    expect([...a.difference(b)]).toEqual([1]);
-    expect([...a.symmetricDifference(b)].sort()).toEqual([1, 4]);
+    // The results are ValueSets — canonical, so equality is `toBe`.
+    expect(a.union(b)).toBe(ValueSet.from([1, 2, 3, 4]));
+    expect(a.intersection(b)).toBe(ValueSet.from([2, 3]));
+    expect(a.difference(b)).toBe(ValueSet.from([1]));
+    expect(a.symmetricDifference(b)).toBe(ValueSet.from([1, 4]));
     expect(ValueSet.from([2, 3]).isSubsetOf(a)).toBe(true);
+    expect(ValueSet.from([2, 5]).isSubsetOf(a)).toBe(false);
     expect(a.isSupersetOf(ValueSet.from([1]))).toBe(true);
+    expect(a.isSupersetOf(ValueSet.from([1, 9]))).toBe(false);
     expect(a.isDisjointFrom(ValueSet.from([9]))).toBe(true);
-    // The result is a plain Set — mutating it cannot touch the canonical value.
-    const u = a.union(b);
-    u.add(99);
+    expect(a.isDisjointFrom(b)).toBe(false);
+    // Identities fall out of canonicality.
+    expect(a.union(ValueSet.empty())).toBe(a);
+    expect(a.union(a)).toBe(a);
+    expect(a.intersection(a)).toBe(a);
+    expect(a.difference(ValueSet.empty())).toBe(a);
+    expect(a.difference(a)).toBe(ValueSet.empty());
+    expect(a.symmetricDifference(a)).toBe(ValueSet.empty());
+    expect(a.symmetricDifference(ValueSet.empty())).toBe(a);
+    // The operands are untouched.
     expect(a.size).toBe(3);
     expect(ValueSet.from([1, 2, 3])).toBe(a);
+  });
+
+  it('set algebra takes any iterable of values, interned on entry — membership is by this set\'s equality', () => {
+    const a = ValueSet.from([{ x: 1 }]);
+    // Raw spellings from a native Set, an array, or a generator converge on the canonical member.
+    expect(a.union(new Set([{ x: 1 }, { x: 2 }]))).toBe(ValueSet.from([{ x: 1 }, { x: 2 }]));
+    expect(a.union([{ x: 1 }, { x: 2 }])).toBe(ValueSet.from([{ x: 1 }, { x: 2 }]));
+    expect(a.union((function* () { yield { x: 2 }; })())).toBe(ValueSet.from([{ x: 1 }, { x: 2 }]));
+    // Two raw spellings of one value are one member: they toggle once, not twice.
+    expect(a.symmetricDifference([{ x: 1 }, { x: 1 }])).toBe(ValueSet.empty());
+    expect(a.symmetricDifference([{ x: 2 }, { x: 2 }])).toBe(ValueSet.from([{ x: 1 }, { x: 2 }]));
+    // The argument's own `has` is never consulted, so the answer does not
+    // depend on which operand is larger — a native Set of raw objects is
+    // matched by value in every direction.
+    expect(ValueSet.from([{ x: 1 }]).intersection(new Set([{ x: 1 }, { x: 2 }, { x: 3 }]))).toBe(
+      ValueSet.from([{ x: 1 }]),
+    );
+    expect(ValueSet.from([{ x: 1 }, { x: 2 }, { x: 3 }]).intersection(new Set([{ x: 1 }]))).toBe(
+      ValueSet.from([{ x: 1 }]),
+    );
+    expect(ValueSet.from([{ x: 1 }, { x: 2 }]).difference(new Set([{ x: 2 }, { x: 3 }, { x: 4 }]))).toBe(
+      ValueSet.from([{ x: 1 }]),
+    );
+    expect(ValueSet.from([{ x: 1 }]).isSubsetOf(new Set([{ x: 1 }]))).toBe(true);
+    expect(ValueSet.from([{ x: 1 }]).isSubsetOf([{ x: 1 }, { x: 2 }])).toBe(true);
+    expect(ValueSet.from([{ x: 1 }, { x: 2 }]).isSupersetOf(new Set([{ x: 1 }]))).toBe(true);
+    expect(ValueSet.from([{ x: 1 }]).isDisjointFrom([{ x: 1 }])).toBe(false);
+    // Non-values in the argument are rejected as everywhere.
+    expect(() => a.union([new Date()])).toThrow(/ValueDate/);
+  });
+
+  it('a set knows its size from its root, at every scale', () => {
+    const xs = Array.from({ length: 1000 }, (_, i) => i);
+    const s = ValueSet.from(xs);
+    expect(s.size).toBe(1000);
+    expect([...s].length).toBe(1000);
+    expect(s.delete(3).size).toBe(999);
+    expect(s.union([1000, 1001]).size).toBe(1002);
+    expect(s.intersection(ValueSet.from([5, 6, 7, 2000])).size).toBe(3);
+  });
+
+  it('set algebra matches the native Set on primitives, in both size orders', () => {
+    const cases: [number[], number[]][] = [
+      [[1, 2, 3], [2, 3, 4]],
+      [[1], [1, 2, 3, 4, 5]],
+      [[1, 2, 3, 4, 5], [5, 6]],
+      [[], [1]],
+      [[1], []],
+      [[1, 2], [3, 4]],
+      [[1, 2], [1, 2]],
+    ];
+    const sorted = (s: Iterable<number>): number[] => [...s].sort((x, y) => x - y);
+    for (const [xs, ys] of cases) {
+      const v = ValueSet.from(xs);
+      const w = ValueSet.from(ys);
+      const n = new Set(xs);
+      const m = new Set(ys);
+      expect(sorted(v.union(w))).toEqual(sorted(n.union(m)));
+      expect(sorted(v.intersection(w))).toEqual(sorted(n.intersection(m)));
+      expect(sorted(v.difference(w))).toEqual(sorted(n.difference(m)));
+      expect(sorted(v.symmetricDifference(w))).toEqual(sorted(n.symmetricDifference(m)));
+      expect(v.isSubsetOf(w)).toBe(n.isSubsetOf(m));
+      expect(v.isSupersetOf(w)).toBe(n.isSupersetOf(m));
+      expect(v.isDisjointFrom(w)).toBe(n.isDisjointFrom(m));
+      // …and against the native Set as `other`.
+      expect(sorted(v.union(m))).toEqual(sorted(n.union(m)));
+      expect(sorted(v.intersection(m))).toEqual(sorted(n.intersection(m)));
+      expect(sorted(v.difference(m))).toEqual(sorted(n.difference(m)));
+      expect(sorted(v.symmetricDifference(m))).toEqual(sorted(n.symmetricDifference(m)));
+      expect(v.isSubsetOf(m)).toBe(n.isSubsetOf(m));
+      expect(v.isSupersetOf(m)).toBe(n.isSupersetOf(m));
+      expect(v.isDisjointFrom(m)).toBe(n.isDisjointFrom(m));
+    }
   });
 
   it('yields a mutable copy via the iterator', () => {

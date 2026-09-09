@@ -52,6 +52,8 @@ alike; non-enumerable properties do not. valsem's own protocol symbols
 instances only**: on a plain record they are ordinary symbol keys, part of
 the content like any other, so a record carrying an own `[interned]: true`
 or `[hashCode]` cannot pass itself off as canonical or choose its own hash.
+`[equals]` is the *type's*: it is read from the prototype, so an own
+`[equals]` assigned to one instance is not protocol either.
 A draft rejects writing them, since on a record they are almost certainly a
 mistake. Symbol-keyed entries vanish in JSON, as they always
 have, so a binding round-trip loses them; symbols are process-local, keys

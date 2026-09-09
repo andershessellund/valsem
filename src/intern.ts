@@ -25,10 +25,10 @@
 
 import { deepHash, _deepHashWithAcc, _metaOf, _setMeta, _entryTerm, _recordHashOf } from './deep-hash.js';
 import {
-  equals as equalsSym,
   interned as internedSym,
   _equalsMethods,
   _missingValueSemantics,
+  _protocolEquals,
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
@@ -59,10 +59,10 @@ const pool = createInternPool<object>();
 /**
  * Whether `value` is in canonical form — the form in which `===` IS value
  * equality: a primitive (symbols included; functions are not values), or an
- * object valsem canonicalised (the collections and pooled value types by
- * their marker, plain data by the hash cache). This is the probe every walk
- * uses to stop at a canonical boundary, exposed for boundary assertions and
- * comparators of your own.
+ * object valsem canonicalised (the auto-interning types by their marker;
+ * plain data and pooled value-type instances by the hash cache). This is the
+ * probe every walk uses to stop at a canonical boundary, exposed for boundary
+ * assertions and comparators of your own.
  */
 export function isCanonical(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return typeof value !== 'function';
@@ -257,12 +257,13 @@ export function intern<T>(value: T): T {
   // to avoid.
   const gap = _missingValueSemantics(obj);
   if (gap !== undefined) throw new TypeError(`intern: ${gap}.`);
-  const eqSym = (obj as Record<symbol, unknown>)[equalsSym];
+  // The same relation deepEqual uses: the type's [equals] (off the
+  // prototype), else the registered one; same constructor either way.
+  const eqSym = _protocolEquals(obj);
   const matches =
-    typeof eqSym === 'function'
-      ? (candidate: object) =>
-          _ctorOf(candidate) === ctor && (eqSym as (o: unknown) => boolean).call(obj, candidate) === true
-      : ((eq) => (candidate: object) => _ctorOf(candidate) === ctor && eq(candidate, obj))(
+    eqSym !== undefined
+      ? (candidate: object) => _ctorOf(candidate) === ctor && eqSym.call(obj, candidate) === true
+      : ((eq) => (candidate: object) => _ctorOf(candidate) === ctor && eq(candidate, obj) === true)(
           _equalsMethods.get(ctor!)!,
         );
   return lookupOrStore(obj, matches, false) as T;

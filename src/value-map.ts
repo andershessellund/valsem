@@ -64,12 +64,10 @@ const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
  */
 export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   readonly #root: HNode;
-  readonly #size: number;
   readonly #hash: number;
 
-  private constructor(root: HNode, size: number) {
+  private constructor(root: HNode) {
     this.#root = root;
-    this.#size = size;
     this.#hash = root.h;
     Object.freeze(this);
   }
@@ -83,17 +81,17 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     return true;
   }
 
-  static #for<K, V>(root: HNode, size: number): ValueMap<K, V> {
+  static #for<K, V>(root: HNode): ValueMap<K, V> {
     const hit = wrappers.get(root);
     if (hit !== undefined) return hit as ValueMap<K, V>;
-    const fresh = new ValueMap<unknown, unknown>(root, size);
+    const fresh = new ValueMap<unknown, unknown>(root);
     wrappers.set(root, fresh);
     return fresh as ValueMap<K, V>;
   }
 
   /** Number of entries. */
   get size(): number {
-    return this.#size;
+    return this.#root.n;
   }
 
   /** Whether a structurally equal `key` is present (the probe is canonicalized). */
@@ -154,7 +152,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     value = intern(value);
     const r = trieInsert(CFG, this.#root, 0, internHash(key), [key, value]);
     if (r === null) return this;
-    return ValueMap.#for<K, V>(r.node, this.#size + (r.added ? 1 : 0));
+    return ValueMap.#for<K, V>(r.node);
   }
 
   /** Remove a structurally equal `key`. Returns `this` if not present. */
@@ -162,7 +160,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     key = intern(key);
     const r = trieRemove(CFG, this.#root, 0, internHash(key), key);
     if (r === null) return this;
-    return ValueMap.#for<K, V>(r.node as HNode, this.#size - 1);
+    return ValueMap.#for<K, V>(r.node as HNode);
   }
 
   // -------------------------------------------------------------------------
@@ -171,23 +169,19 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Canonical empty map. */
   static empty<K, V>(): ValueMap<K, V> {
-    return ValueMap.#for<K, V>(CFG.empty, 0);
+    return ValueMap.#for<K, V>(CFG.empty);
   }
 
   /** Canonical ValueMap from an iterable of `[key, value]` entries (interned on entry). */
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
     let root: HNode = CFG.empty;
-    let size = 0;
     for (const [rawK, rawV] of entries) {
       const k = intern(rawK);
       const v = intern(rawV);
       const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
-      if (r !== null) {
-        root = r.node;
-        if (r.added) size++;
-      }
+      if (r !== null) root = r.node;
     }
-    return ValueMap.#for<K, V>(root, size);
+    return ValueMap.#for<K, V>(root);
   }
 
   /**
@@ -200,7 +194,6 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
    */
   static fromObject<V>(obj: Record<string, V>): ValueMap<string, V> {
     let root: HNode = CFG.empty;
-    let size = 0;
     // Own keys only: `for...in` would also admit inherited enumerable keys
     // (prototype pollution) as entries of the value.
     for (const k of Object.keys(obj)) {
@@ -208,12 +201,9 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
       if (raw === undefined) continue;
       const v = intern(raw);
       const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
-      if (r !== null) {
-        root = r.node;
-        if (r.added) size++;
-      }
+      if (r !== null) root = r.node;
     }
-    return ValueMap.#for<string, V>(root, size);
+    return ValueMap.#for<string, V>(root);
   }
 
   /** @internal Trie node-pool sizes — exposed for sharing tests. */

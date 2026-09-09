@@ -12,10 +12,10 @@
 | `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
 | `HashMap` | class | Mutable map keyed by value: a native `Map` of canonical keys, every key interned on the way in (~20 ns over the native lookup for a canonical key, a pool lookup for a raw one). Values are stored as-is. |
 | `HashSet` | class | Mutable set of values — `HashMap`'s twin; members interned on entry. |
-| `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances (`ValueList`: O(log n) `insert`/`remove`/`splice`/`slice`/`concat`, `setMany`, and `ValueList.diff(a, b)` in O(c log n)); `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
+| `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances (`ValueList`: O(log n) `insert`/`remove`/`splice`/`slice`/`concat`, `setMany`, and `ValueList.diff(a, b)` in O(c log n)); `ValueMap` implements `ReadonlyMap`; `ValueSet` has the `ReadonlySet` read API and the ES2025 set algebra taking any iterable and returning `ValueSet`s, merged at node level (cost ∝ where the operands differ). |
 | `RawArray` | class | A raw response you take canonical slices from: `slice(a, b)` admits only that range (each element interned once, memoized per slot), so a refetch's unchanged rows come back `===`. Its own value is its identity, so it sits in canonical state as an opaque leaf. |
 | `ValueDate` | class | An immutable, canonical timestamp — the value a `Date` stands for. `ValueDate.of(x)` takes what `new Date(x)` takes; `toDate()` returns a fresh mutable `Date`; `valueOf()` is the epoch; `toJSON()` matches `Date`. |
-| `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported. |
+| `produce` / `produceWithPatches` | function | Mutate a draft, get the canonical result — optionally with semantic patches and inverses. Curried form supported, with the extra arguments typed from the recipe. `Draft<T>` is the draft's type: records and arrays map to writable shapes, `[toDraft]` implementers to their draft class, and opaque leaves (`ValueDate`, a value type of your own) to themselves; `RecipeReturn<T>` is what a recipe may return (the state, its draft, `void`, or `nothing` where the state admits `undefined`). |
 | `applyPatches` | function | Apply semantic patches to a value; converges on the same canonical instance as direct production. |
 | `nothing` / `isDraft` | symbol / function | Recipe sentinel for "result is `undefined`"; draft detection. |
 | `memoize(fn, { maxSize })` | function | A pure function of values, remembered by content: equal argument tuples return the same interned result. LRU over `maxSize` (default 1). Fast as intended — O(1) hits (~40 ns) on canonical arguments — and slow otherwise: raw arguments are hashed and compared on every call. Intern your state first, as everywhere in valsem. |
@@ -27,6 +27,9 @@
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
 | `skipChecks()` / `skipFreezing()` | function | The two one-way switches you own: stop verifying *canonical only* arguments (`fastEquals`); stop freezing canonical records and arrays (faster iteration in V8, mutations no longer caught). Neither reads the environment. See the hardening guide. |
 | `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
+| `Draft` / `Undraft` / `RecipeReturn` | type | The draft of a value type and its inverse; a recipe's permitted return. |
+| `Patch` / `PatchPath` / `PatchKinds` / `Hunk` | type | Semantic patches and their paths (extend `PatchKinds` by declaration merging); one changed region from `ValueList.diff`. |
+| `Memoized` / `MemoizeOptions` | type | A memoized function (`clear()`, `size`); its options (`maxSize`). |
 | `InternPool` / `Hasher` | type | Pool interface; pluggable leaf-hash interface. |
 
 ## `valsem/temporal`
@@ -40,12 +43,14 @@
 
 The stable surface for binding authors — packages that map valsem's
 information model onto another representation (a wire format, a storage
-layer). Not for application code.
+layer). Not for application code. There is deliberately no "is this type a
+value" probe: valsem decides per instance, at `intern`, and a binding learns
+the answer the same way — `intern` returns the canonical instance or throws
+naming what the class lacks.
 
 | Symbol | Kind | Summary |
 | --- | --- | --- |
 | `defineRecordField` | function | `__proto__`-safe record-field definition, for building records from untrusted keys. |
-| `hasValueSemantics` | function | Whether a type has registered equality **and** hash handlers. |
 | `mutableBuiltinReason` | function | The shared rejection table: why a mutable built-in is not a value, as error text. |
 
 ## `valsem/draft`

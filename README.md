@@ -103,7 +103,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Result | a frozen copy | a frozen **canonical** value — equal content ⟹ `===` |
 | `Map` / `Set` in state | `enableMapSet()` | `ValueMap` / `ValueSet` (drafted as `DraftMap` / `DraftSet`); native `Map`/`Set` are rejected with the replacement named |
 | `Date` in state | allowed | rejected — use `ValueDate.of(date)` (or Temporal via `valsem/temporal`) |
-| Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — one method or one registration, see [Extending](#extending) |
+| Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — `[equals]` + `[hashCode]`, or one registration, see [Extending](#extending); a value is an opaque leaf in a recipe (`Draft<ValueDate>` is `ValueDate`) unless it implements `[toDraft]` — give a registered class at least one method so the types can tell |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
 | Async recipes | silently wrong | rejected with an error |
@@ -463,8 +463,10 @@ bindings (`valsem/binding`).
 | `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches you own |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |
 
-Runs on Node ≥ 22 and current browsers. `ValueSet`'s set-algebra methods
-(`union`, `isSubsetOf`, …) delegate to the ES2025 `Set` methods.
+Runs on Node ≥ 22 and current browsers, with TypeScript ≥ 5.6 for the types.
+`ValueSet` has the ES2025 set algebra (`union`, `isSubsetOf`, …), taking any
+iterable and returning `ValueSet`s, merged at node level: two sets cost what
+they differ by, not what they hold.
 
 ## License
 

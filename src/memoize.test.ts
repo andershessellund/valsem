@@ -133,7 +133,10 @@ describe('memoize', () => {
     expect(() => boxes(1)).toThrow(/memoize — makeBox returned an instance of Box, which is not a value/);
     const fns = memoize((n: number) => () => n);
     expect(() => fns(1)).toThrow(/returned a function, which is not a value/);
-    expect(() => memoize((n: number) => new Date(n))(0)).toThrow(/cannot be interned/);
+    expect(() => memoize((n: number) => new Date(n))(0)).toThrow(/returned an instance of Date.*cannot be interned/);
+    // A non-value nested in plain data: intern's own error, not "an instance of Object".
+    expect(() => memoize(() => ({ at: new Date(0) }))()).toThrow(/^intern: Date cannot be interned/);
+    expect(() => memoize(() => ({ at: new Date(0) }))()).not.toThrow(/instance of Object/);
   });
 
   it('symbols are values here too', () => {

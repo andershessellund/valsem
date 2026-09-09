@@ -44,9 +44,23 @@ m1.get('sp');                    // 5
 
 ### Interop and encapsulation
 
-`ValueMap` **is** a `ReadonlyMap` and `ValueSet` **is** a `ReadonlySet` — pass
-them anywhere those are accepted (`ValueSet` includes the ES2025 set-algebra
-methods). Their backing collections are private: JavaScript cannot make a
+`ValueMap` **is** a `ReadonlyMap` — pass it anywhere one is accepted.
+`ValueSet` has the whole `ReadonlySet` read API and the ES2025 set algebra,
+with two deliberate differences. The operations take **any iterable of
+values** — a `ValueSet`, an array, a native `Set` — as a stream of members
+interned on entry, with membership decided by this set's equality and never
+by the argument's `has`, so a native `Set` of raw objects is matched by value
+in every direction. And they return **`ValueSet`s** — canonical values, so
+`a.union(b) === ValueSet.from([...a, ...b])` — where the native methods return
+a fresh `Set`. Two `ValueSet`s merge at **node level**: hash-consed tries
+share by pointer wherever they agree, so `union`, `intersection`,
+`difference`, `symmetricDifference`, `isSubsetOf`, `isSupersetOf` and
+`isDisjointFrom` cost in proportion to where the operands differ — O(1) when
+they are the same set, at worst linear in the operands, never a per-member
+insert. (TypeScript's `ReadonlySet` insists the algebra takes a
+`ReadonlySetLike` and returns a native `Set`, so `ValueSet` does not declare
+`implements ReadonlySet`; it is a `ReadonlySetLike`, which is what the native
+set methods accept as their argument.) Their backing collections are private: JavaScript cannot make a
 `Map` or `Set` immutable at runtime, so handing one out would let a single
 accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
@@ -94,7 +108,8 @@ per slot, so the visible window costs 100 interns, the same row is the same
 object across slices, and a refetch's unchanged rows land on the same pool
 instances and come back `===`. It is not a value of its content — two views
 over equal JSON are two values, by identity — so it sits inside canonical
-state as an opaque leaf that `intern` and `produce` pass through.
+state as an opaque leaf: it is canonical by construction, so `intern` and
+`produce` return it as it is.
 `slice()` with no arguments admits everything, and `get(i)` reads one row;
 there is deliberately no iteration, so the O(n) step is always spelled out.
 
