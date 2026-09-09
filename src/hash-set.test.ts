@@ -30,7 +30,7 @@ describe('HashSet', () => {
     expect(s.size).toBe(6);
   });
 
-  it('iterates in insertion order, and the first stored member is kept on re-add', () => {
+  it('iterates in insertion order, yields canonical members, and re-adding an equal member is a no-op', () => {
     const s = new HashSet<{ id: number }>();
     const first = { id: 1 };
     s.add(first).add({ id: 2 }).add({ id: 1 });
@@ -45,9 +45,10 @@ describe('HashSet', () => {
     });
     expect(seen).toEqual([1, 2]);
     const [stored] = [...s];
-    expect(stored).toBe(first); // the caller's object, as given
+    expect(stored).toBe(intern({ id: 1 })); // the canonical member, not the caller's object
+    expect(isCanonical(stored)).toBe(true);
     expect(isCanonical(first)).toBe(false);
-    expect(Object.isFrozen(first)).toBe(false);
+    expect(Object.isFrozen(first)).toBe(false); // the caller's object is untouched
     s.clear();
     expect(s.size).toBe(0);
     expect([...s]).toEqual([]);
@@ -76,6 +77,6 @@ describe('HashMap.from', () => {
     const m = HashMap.from([[{ a: 1 }, 'x'], [{ a: 1 }, 'y']]);
     expect(m.size).toBe(1);
     expect(m.get({ a: 1 })).toBe('y');
-    expect(isCanonical([...m.keys()][0])).toBe(false);
+    expect(isCanonical([...m.keys()][0])).toBe(true);
   });
 });

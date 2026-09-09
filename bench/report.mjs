@@ -24,7 +24,7 @@ out.push(
   'Every number below is produced by `pnpm bench`, which runs the suites in `bench/suites/` on Node and on Bun ' +
     '(JavaScriptCore), writes one JSON file per runtime, and renders this file. Each section describes exactly what its ' +
     'suite measures. Cells show **node / bun**; a single value means the suite ran on one runtime. The rationale behind ' +
-    'the designs these numbers reflect lives in [DECISIONS.md](DECISIONS.md).',
+    'the designs these numbers reflect lives in [DECISIONS.md](https://github.com/andershessellund/valsem/blob/main/DECISIONS.md).',
 );
 out.push('');
 out.push('| | ' + runs.map((r) => `${r.runtime.name} ${r.runtime.version} (${r.runtime.engine})`).join(' | ') + ' |');
@@ -86,7 +86,7 @@ out.push('node bench/report.mjs            # re-render BENCHMARKS.md');
 out.push('```');
 out.push('');
 out.push('The one-off experiments behind the decisions — pool cleanup strategies, retention regimes, the in-job WeakRef ' +
-  'effect — live in `scripts/experiments/` and are referenced from [DECISIONS.md](DECISIONS.md).');
+  'effect — live in `scripts/experiments/` and are referenced from [DECISIONS.md](https://github.com/andershessellund/valsem/blob/main/DECISIONS.md).');
 out.push('');
 writeFileSync(new URL('../BENCHMARKS.md', import.meta.url), out.join('\n'));
 console.log('wrote BENCHMARKS.md');

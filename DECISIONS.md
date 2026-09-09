@@ -171,22 +171,32 @@ fold and `===`-per-argument match. Its hit on canonical arguments is ~40 ns;
 on raw arguments it is a structural walk, which is what skipping the
 boundary costs.
 
-## D15. `HashMap`/`HashSet` never intern; `FastMap`/`FastSet` are native
+## D15. `HashMap`/`HashSet` are native `Map`/`Set` behind `intern`
 
-Keys matched by content and stored as given, for keys that are fresh
-values every call (request objects, coordinates): no copy, no freeze, no
-pool entry per novel key. For keys that are canonical, `===` already is
-value equality, so `FastMap`/`FastSet` are native `Map`/`Set` subclasses
-that verify canonicality while checks are on and return the native class
-itself after `skipChecks()`. The interning map they replaced was slower
-than both on their own ground (19 ns on canonical keys against 16; 514 ns on
-raw against 303; 1,073 ns per novel insert against 432). The mutable-key
-rule of every hash map applies to `HashMap`.
+One mutable map, keyed by value: a native `Map` of canonical keys, every
+key interned on the way in. This replaces two earlier designs. A
+content-matched bucket table that stored keys as given (one hash and one
+compare per lookup, no pool traffic) won only on inserting novel keys, at
+half the cost, and lost the property that makes a value-keyed map safe: a
+stored key mutated afterwards was silently unfindable. And `FastMap`/
+`FastSet` — native subclasses that admitted canonical keys only, checked
+while checks were on and literally the native class after `skipChecks()` —
+turned out to buy nothing: the canonical check and the intern probe are the
+same `WeakMap` lookup, so an interning map matches `FastMap` with checks on
+(20 ns against 30 on Node, 17 against 14 on Bun) and sits 4–10 ns off the
+native `Map` it becomes with checks off, while answering correctly on a raw
+key instead of throwing or missing. That difference is not worth a second
+pair of classes; a consumer who wants the last nanoseconds interns their
+keys and uses a native `Map`, which is one sentence of documentation.
+Stored keys are the canonical copies, so mutating the caller's object
+changes nothing, and iteration yields canonical values. `memoize` keeps its
+private bucket table: its argument tuples are fresh arrays every call and
+the point there is not to pool them.
 
 ## D16. Two switches the user owns; nothing reads the environment
 
-`skipChecks()` stops verifying *canonical only* arguments (`fastEquals`,
-`FastMap`, `FastSet`); `skipFreezing()` stops freezing canonical records
+`skipChecks()` stops verifying *canonical only* arguments (`fastEquals`);
+`skipFreezing()` stops freezing canonical records
 and arrays. Both are on by default, one-way, and independent of
 `NODE_ENV`: a bundler's idea of "production" is not evidence that the
 answers are right, and the library must run as bare ESM in browsers. They

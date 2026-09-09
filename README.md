@@ -72,16 +72,15 @@ compared by reference. See [Extending](#extending).
 **Fast.** Here is exactly what is fast, and what is not. Comparing two
 canonical values is a pointer check — about 20 ns for a three-key record and
 for a three-million-key state alike — and everything built on comparison
-inherits that: `fastEquals`, `FastMap` and `FastSet` (native `Map` and `Set`
-for canonical keys, checked), `memoize` hits, and hashing, which is a cached
-property read.
+inherits that: `fastEquals`, `HashMap` and `HashSet` lookups on canonical
+keys, `memoize` hits, and hashing, which is a cached property read.
 
 ```ts
-import { fastEquals, FastMap } from 'valsem';
+import { fastEquals, HashMap } from 'valsem';
 
 fastEquals(current, saved);            // 20 ns at any size
-const derived = new FastMap<State, Derived>();
-derived.get(state);                    // a native Map lookup — the key is canonical, so === is value equality
+const derived = new HashMap<State, Derived>();
+derived.get(state);                    // a native Map lookup plus one probe — the key is canonical, so === is value equality
 ```
 
 What is *not* fast is building: every value is hashed and canonicalised when
@@ -153,10 +152,10 @@ deepEqual(new Date(0), new Date(0)); // false — reference semantics for mutabl
 
 ## Collections
 
-### `HashMap`, `HashSet`, `FastMap`, `FastSet` — mutable, keyed by value
+### `HashMap`, `HashSet` — mutable, keyed by value
 
 ```ts
-import { HashMap, FastMap } from 'valsem';
+import { HashMap } from 'valsem';
 
 const cache = new HashMap<{ table: string; id: number }, Row>();
 cache.set({ table: 'users', id: 1 }, row);
@@ -165,22 +164,19 @@ cache.get({ id: 1, table: 'users' }); // row — key order irrelevant
 // The idiomatic memoised lookup: the factory runs once per distinct key.
 const rows = cache.getOrCreate({ table: 'users', id: 2 }, (key) => loadRow(key));
 
-// Keys that are your state are already canonical — a native Map is a map keyed by value.
-const byState = new FastMap<State, Derived>();
+// Keys that are your state are already canonical: one probe over a native Map lookup.
+const byState = new HashMap<State, Derived>();
 byState.set(state, derive(state));
-byState.get(produce(state, () => {})); // the same value → the same key, at native-Map speed
+byState.get(produce(state, () => {})); // the same value → the same key
 ```
 
-`HashMap` and `HashSet` match keys by content — hashed and compared
-structurally — and store them as given: nothing is copied, frozen, or pooled,
-so keys that are fresh values every call (request objects, query params,
-coordinates) cost one hash and one compare (~300 ns for a small record). A
-key mutated after insertion is no longer found, as in any hash map with
-mutable keys. `FastMap` and `FastSet` are the other half: native `Map` and
-`Set` for keys that are canonical, where reference equality already is value
-equality, so lookups run at native speed (~16 ns). While checks are on a raw
-key throws rather than silently missing; after `skipChecks()` the constructor
-hands back a plain `Map`.
+`HashMap` and `HashSet` are native `Map` and `Set` keyed by canonical
+values: every key is interned on the way in, on `set` and on every lookup.
+A canonical key costs one probe over the native lookup (~20 ns); a raw key
+is interned first (~300 ns for a small record). The stored key is the
+canonical copy, so a key mutated after insertion changes nothing, and
+iteration yields canonical keys. Values are stored as-is, so a `HashMap` can
+index live objects by value.
 
 ### `memoize` — a pure function, remembered by content
 
@@ -450,8 +446,7 @@ bindings (`valsem/binding`).
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
-| `HashMap`, `HashSet` | mutable map and set keyed by content, keys stored as given |
-| `FastMap`, `FastSet` | native `Map`/`Set` for canonical keys, checked |
+| `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |

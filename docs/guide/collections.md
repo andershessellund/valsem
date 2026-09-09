@@ -106,11 +106,11 @@ const visible = rows.slice(first, first + 100);                       // 100 int
 visible[0] === previousVisible[0];                                     // true when that row's content is unchanged
 ```
 
-## `HashMap` and `HashSet` — mutable, keyed by content
+## `HashMap` and `HashSet` — mutable, keyed by value
 
-`HashMap` matches keys by content, so structurally-equal keys — in any field
-order — address the same entry. It is the drop-in answer to "I want to key a
-Map by an object's value".
+`HashMap` is a mutable map whose keys are values: equal keys — in any field
+order, however the object was built — address the same entry. It is the
+drop-in answer to "I want to key a Map by an object's value".
 
 ```ts
 import { HashMap, HashSet } from 'valsem';
@@ -125,44 +125,27 @@ const row2 = cache.getOrCreate({ table: 'users', id: '2' }, loadRow);
 const seen = new HashSet<{ x: number; y: number }>();
 seen.add({ x: 1, y: 2 });
 seen.has({ y: 2, x: 1 });  // true
-HashSet.from(points).size; // duplicates by content collapse
+HashSet.from(points).size; // duplicates collapse
 ```
 
-Keys are hashed and compared structurally and **stored as given**: nothing is
-copied, frozen, or pooled. That makes these the right containers for keys
-that are new values every call — request objects, query params, coordinates
-— at one hash and one compare per lookup (~300 ns for a small record), with
-the pool untouched. Two consequences: iteration yields your own key objects,
-and a key mutated after insertion is no longer found (the rule of every hash
-map with mutable keys).
+Underneath is a native `Map` (or `Set`) keyed by the canonical key: every
+key is **interned on the way in**, on `set` and on every lookup alike. A key
+that is already canonical — your state, anything out of `intern`, `produce`
+or a collection — costs one cache probe over the native lookup, about 20 ns.
+A raw key is interned first: a pool lookup, about 300 ns for a small record,
+and a copy into the pool when the key is new. Two consequences: iteration
+yields canonical keys, ready for `fastEquals` or a native `Map`; and a key
+mutated after insertion changes nothing, because the stored key is the
+canonical copy, not your object.
 
 `HashMap` is a mutable container (like `Map`); only its **keys** get value
 semantics. Values are stored as-is — and that asymmetry is the point.
-`HashMap` is the *boundary type* where the value world meets the mutable
-world: the persistent `Value*` collections intern everything they hold, so
-they can only contain values, while `HashMap` stores its values uninterned and
-can therefore index **live** objects — DOM nodes, subscriptions, open
-connections — by structural key.
+`HashMap` is where the value world meets the mutable world: the persistent
+`Value*` collections intern everything they hold, so they can only contain
+values, while `HashMap` stores its values uninterned and can therefore index
+**live** objects — DOM nodes, subscriptions, open connections — by value.
 
-## `FastMap` and `FastSet` — native, for canonical keys
-
-Once keys are canonical — anything out of `intern`, `produce`, or a
-collection — `===` already *is* value equality, so a native `Map` keyed by
-reference is a map keyed by value, at native speed, with nothing to add.
-`FastMap` and `FastSet` are exactly that: subclasses of `Map` and `Set` that
-verify every key is canonical while checks are on (a raw key would silently
-miss, so it throws instead), and after `skipChecks()` return the plain native
-class from their constructor.
-
-```ts
-import { FastMap } from 'valsem';
-
-const derived = new FastMap<State, Derived>();
-derived.set(state, derive(state));
-derived.get(produce(state, () => {})); // same value, same key — ~16 ns
-derived.get({ ...state });              // TypeError: FastMap takes canonical keys only …
-```
-
-The rule for choosing: keys that are your state take `FastMap`/`FastSet`;
-keys that are fresh values every call take `HashMap`/`HashSet`. Both pairs
-take an iterable (`HashMap.from`, and the native constructors).
+For the last few nanoseconds: once keys are canonical, `===` already *is*
+value equality, so a native `Map` keyed by interned values is a map keyed by
+value at native speed, with nothing to add. `HashMap` is that map plus the
+interning of every key you hand it.

@@ -76,7 +76,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
   }
   const name = fn.name || 'the function';
 
-  const table = new HashTable<Entry>(false); // recency lives in the list below, not in the table
+  const table = new HashTable<Entry>(); // recency lives in the list below, not in the table
   let newest: Entry | null = null;
   let oldest: Entry | null = null;
   let size = 0;

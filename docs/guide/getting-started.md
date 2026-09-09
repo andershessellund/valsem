@@ -81,7 +81,7 @@ Where to go next:
 
 - [Equality, hashing, interning](/guide/values) — the model and its rules.
 - [Value collections](/guide/collections) — `ValueMap`/`ValueSet`/`ValueList`
-  and the `HashMap` boundary type.
+  and the mutable `HashMap`/`HashSet`.
 - [produce](/guide/produce) — drafts, patches, and the semantics doctrine.
 - [The undo-tree demo](/demo) — what canonical history means in practice.
 

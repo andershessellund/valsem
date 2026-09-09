@@ -8,9 +8,9 @@
     "cpu": "Apple M2 Pro",
     "platform": "darwin arm64"
   },
-  "date": "2026-09-06",
-  "commit": "378feb5",
-  "valsem": "0.0.1",
+  "date": "2026-09-09",
+  "commit": "f2cbb25",
+  "valsem": "0.0.2",
   "libraries": {
     "immer": "11.1.18",
     "mutative": "1.3.0",
@@ -871,11 +871,10 @@
     },
     {
       "id": "hashmap",
-      "title": "HashMap and FastMap — against a native Map",
-      "description": "\n`HashMap` matches keys by content: a key is hashed (`internHash` — O(1) on a canonical key, a walk on a raw one) and\ncompared structurally in a bucket table, and stored as given. `FastMap` is a native `Map` that admits canonical keys\nonly, where reference equality already is value equality: the canonical check costs a probe while checks are on, and\nafter `skipChecks()` the constructor returns a plain `Map`. Rows are hits on a 4,096-entry map unless marked; the\nnative `Map` column is what `FastMap` becomes with checks off.\n",
+      "title": "HashMap — against a native Map",
+      "description": "\n`HashMap` is a native `Map` keyed by canonical values: every key is interned on the way in, on `set` and on every\nlookup. For a canonical key that is one cache probe over the native lookup; for a raw key it is a pool lookup (hash\nand compare), and a copy into the pool when the key is new. Rows are hits on a 4,096-entry map unless marked. The\nnative `Map` column is the same map with keys interned beforehand — the escape hatch for the last nanoseconds.\n",
       "columns": [
         "HashMap",
-        "FastMap (checks on)",
         "native Map"
       ],
       "unit": "ns",
@@ -884,40 +883,42 @@
         {
           "name": "get, canonical object key",
           "values": {
-            "HashMap": 66.27222333333333,
-            "FastMap (checks on)": 28.472916666666666,
-            "native Map": 17.078196666666667
+            "HashMap": 24.621943333333334,
+            "native Map": 17.552363333333332
           }
         },
         {
           "name": "get, primitive key",
           "values": {
-            "HashMap": 55.11333333333334,
-            "FastMap (checks on)": 25.364026666666668,
-            "native Map": 25.636666666666667
+            "HashMap": 27.125276666666668,
+            "native Map": 23.890416666666667
           }
         },
         {
-          "name": "get, raw 2-key object (a walk; FastMap rejects, Map misses)",
+          "name": "set, existing canonical key",
           "values": {
-            "HashMap": 321.36041666666665,
-            "FastMap (checks on)": null,
+            "HashMap": 36.459583333333335,
+            "native Map": 19.140693333333335
+          }
+        },
+        {
+          "name": "get, raw 2-key object (interned first; a native Map misses)",
+          "values": {
+            "HashMap": 307.23375,
             "native Map": null
           }
         },
         {
           "name": "get, raw 50-record payload key",
           "values": {
-            "HashMap": 13320.4125,
-            "FastMap (checks on)": null,
+            "HashMap": 13741.7854,
             "native Map": null
           }
         },
         {
-          "name": "set, a novel raw 2-key object per call",
+          "name": "set, a novel raw 2-key object per call (a pool entry each)",
           "values": {
-            "HashMap": 401.96125,
-            "FastMap (checks on)": null,
+            "HashMap": 1060.3425,
             "native Map": null
           }
         }
@@ -1464,7 +1465,7 @@
           "name": "valsem: produce",
           "values": {
             "minified": 24458,
-            "gzipped": 8783
+            "gzipped": 8784
           }
         },
         {
@@ -1491,8 +1492,8 @@
         {
           "name": "valsem: HashMap",
           "values": {
-            "minified": 10290,
-            "gzipped": 4236
+            "minified": 11890,
+            "gzipped": 4760
           }
         },
         {
@@ -1506,21 +1507,21 @@
           "name": "valsem: ValueList",
           "values": {
             "minified": 28683,
-            "gzipped": 10470
+            "gzipped": 10471
           }
         },
         {
           "name": "valsem: memoize",
           "values": {
-            "minified": 13645,
-            "gzipped": 5464
+            "minified": 13441,
+            "gzipped": 5391
           }
         },
         {
           "name": "valsem: everything",
           "values": {
-            "minified": 62378,
-            "gzipped": 20329
+            "minified": 61689,
+            "gzipped": 20192
           }
         },
         {

@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
-// HashTable — the strong bucket table under HashMap's non-interning mode and
-// memoize: hash → entry | entries, with the match supplied by the caller.
-// The strong twin of the intern pool's `lookup(hash, matches)`: the caller
-// owns hashing and equality (memoize folds its arguments and compares them
-// `===`; HashMap uses `internHash`/`deepEqual`), the table owns buckets.
-// Optionally insertion-ordered, for maps that iterate.
+// HashTable — the strong bucket table under memoize: hash → entry | entries,
+// with the match supplied by the caller. The strong twin of the intern
+// pool's `lookup(hash, matches)`: the caller owns hashing and equality
+// (memoize folds its arguments and compares them `===`), the table owns
+// buckets.
 // ---------------------------------------------------------------------------
 
 /** An entry the table can hold: anything carrying its own hash. */
@@ -15,13 +14,7 @@ export interface TableEntry {
 /** @internal */
 export class HashTable<E extends TableEntry> {
   readonly #buckets = new Map<number, E | E[]>();
-  /** Insertion order, kept only when the owner iterates (`ordered`). */
-  readonly #order: Set<E> | null;
   #size = 0;
-
-  constructor(ordered: boolean) {
-    this.#order = ordered ? new Set() : null;
-  }
 
   get size(): number {
     return this.#size;
@@ -44,7 +37,6 @@ export class HashTable<E extends TableEntry> {
     if (b === undefined) this.#buckets.set(entry.hash, entry);
     else if (Array.isArray(b)) b.push(entry);
     else this.#buckets.set(entry.hash, [b, entry]);
-    this.#order?.add(entry);
     this.#size++;
   }
 
@@ -61,20 +53,12 @@ export class HashTable<E extends TableEntry> {
       if (b !== entry) return false;
       this.#buckets.delete(entry.hash);
     }
-    this.#order?.delete(entry);
     this.#size--;
     return true;
   }
 
   clear(): void {
     this.#buckets.clear();
-    this.#order?.clear();
     this.#size = 0;
-  }
-
-  /** Entries in insertion order (an ordered table only). */
-  entries(): SetIterator<E> {
-    if (this.#order === null) throw new Error('valsem: this HashTable is unordered');
-    return this.#order.values();
   }
 }

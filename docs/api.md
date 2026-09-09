@@ -10,9 +10,8 @@
 | `isCanonical(value)` | function | Whether `value` is a primitive or an object valsem canonicalised — the form in which `===` is value equality. The probe behind every canonical short-circuit. |
 | `fastEquals(a, b)` | function | `a === b` for canonical values, never a walk. While checks are on, a raw argument throws instead of yielding a silent `false`. |
 | `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
-| `HashSet` | class | Mutable set with structural membership — `HashMap`'s twin; members stored as given. |
-| `FastMap` / `FastSet` | class | Native `Map`/`Set` for canonical keys, where `===` is value equality: checked while checks are on (a raw key throws instead of silently missing), literally the native class after `skipChecks()`. |
-| `HashMap` | class | Mutable map with structural keys, matched by content and stored as given — for keys that are new values every call; nothing is interned or pooled. |
+| `HashMap` | class | Mutable map keyed by value: a native `Map` of canonical keys, every key interned on the way in (~20 ns over the native lookup for a canonical key, a pool lookup for a raw one). Values are stored as-is. |
+| `HashSet` | class | Mutable set of values — `HashMap`'s twin; members interned on entry. |
 | `ValueList` / `ValueMap` / `ValueSet` / `InternedString` | class | Persistent collections with canonical instances (`ValueList`: O(log n) `insert`/`remove`/`splice`/`slice`/`concat`, `setMany`, and `ValueList.diff(a, b)` in O(c log n)); `ValueMap`/`ValueSet` implement `ReadonlyMap`/`ReadonlySet`. |
 | `RawArray` | class | A raw response you take canonical slices from: `slice(a, b)` admits only that range (each element interned once, memoized per slot), so a refetch's unchanged rows come back `===`. Its own value is its identity, so it sits in canonical state as an opaque leaf. |
 | `ValueDate` | class | An immutable, canonical timestamp — the value a `Date` stands for. `ValueDate.of(x)` takes what `new Date(x)` takes; `toDate()` returns a fresh mutable `Date`; `valueOf()` is the epoch; `toJSON()` matches `Date`. |
@@ -26,7 +25,7 @@
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt-in value-semantics hooks for classes. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
-| `skipChecks()` / `skipFreezing()` | function | The two one-way switches you own: stop verifying *canonical only* arguments (`fastEquals`, `FastMap`, `FastSet`); stop freezing canonical records and arrays (faster iteration in V8, mutations no longer caught). Neither reads the environment. See the hardening guide. |
+| `skipChecks()` / `skipFreezing()` | function | The two one-way switches you own: stop verifying *canonical only* arguments (`fastEquals`); stop freezing canonical records and arrays (faster iteration in V8, mutations no longer caught). Neither reads the environment. See the hardening guide. |
 | `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
 | `InternPool` / `Hasher` / `RegisterOptions` | type | Pool interface; pluggable leaf-hash interface; `register` options (`immutable`). |
 

@@ -21,8 +21,7 @@ let freezing = true;
 
 /**
  * Stop verifying the promises callers make where an API says "canonical
- * only" — `fastEquals`, `FastMap` and `FastSet` then trust their
- * arguments. The checks are cheap (a property read and a cache probe), so
+ * only" — `fastEquals` then trusts its arguments. The checks are cheap (a property read and a cache probe), so
  * the reason to skip them is principle, not speed: a skipped check turns a
  * caught mistake into a silent wrong answer at that call site.
  */

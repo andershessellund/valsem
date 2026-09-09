@@ -126,21 +126,22 @@ describe('HashMap', () => {
     expect(map.has({ id: 1 })).toBe(true);
   });
 
-  it('getOrCreate() hands the factory the key as given', () => {
+  it('getOrCreate() hands the factory the canonical key', () => {
     const map = new HashMap<{ id: number }, object>();
     const raw = { id: 7 };
     const seen = map.getOrCreate(raw, (k) => k);
-    expect(seen).toBe(raw);
-    expect(Object.isFrozen(raw)).toBe(false);
-    expect(isCanonical(raw)).toBe(false); // never interned, never pooled
+    expect(seen).toBe(intern({ id: 7 }));
+    expect(isCanonical(seen)).toBe(true);
+    expect(Object.isFrozen(raw)).toBe(false); // the caller's object is untouched
   });
 
-  it('iteration yields the caller\'s own key objects, stored as given', () => {
+  it('iteration yields canonical keys, whatever was passed in', () => {
     const map = new HashMap<{ id: number }, string>();
     const k = { id: 1 };
     map.set(k, 'v');
     const [yielded] = [...map.keys()];
-    expect(yielded).toBe(k);
+    expect(yielded).toBe(intern({ id: 1 }));
+    expect(isCanonical(yielded)).toBe(true);
     expect(isCanonical(k)).toBe(false);
   });
 
@@ -226,27 +227,27 @@ describe('HashMap', () => {
   });
 });
 
-describe('HashMap — content-matched, keys stored as given', () => {
-  it('matches by content, key order included, without interning the key', () => {
+describe('HashMap — keys interned on entry', () => {
+  it('matches by value, key order included, and stores the canonical key', () => {
     const m = new HashMap<{ table: string; id: number }, string>();
     const k = { table: 'users', id: 1 };
     m.set(k, 'v');
     expect(m.get({ id: 1, table: 'users' })).toBe('v');
     expect(m.has({ table: 'users', id: 1 })).toBe(true);
     expect(m.get({ table: 'users', id: 2 })).toBeUndefined();
-    expect(Object.isFrozen(k)).toBe(false); // stored as given
-    expect(isCanonical(k)).toBe(false); // never pooled
+    expect(Object.isFrozen(k)).toBe(false); // the caller's object is untouched
+    expect(isCanonical(k)).toBe(false);
     const [stored] = [...m.keys()];
-    expect(stored).toBe(k); // the caller's object, not a copy
+    expect(stored).toBe(intern({ table: 'users', id: 1 })); // the canonical key, not the caller's object
   });
 
-  it('set on an equal key replaces the value and keeps the stored key; delete works by content', () => {
+  it('set on an equal key replaces the value; delete works by value', () => {
     const m = new HashMap<{ id: number }, number>();
     const first = { id: 1 };
     m.set(first, 1).set({ id: 1 }, 2);
     expect(m.size).toBe(1);
     expect(m.get({ id: 1 })).toBe(2);
-    expect([...m.keys()][0]).toBe(first);
+    expect([...m.keys()][0]).toBe(intern({ id: 1 }));
     expect(m.delete({ id: 1 })).toBe(true);
     expect(m.delete({ id: 1 })).toBe(false);
     expect(m.size).toBe(0);
@@ -262,13 +263,13 @@ describe('HashMap — content-matched, keys stored as given', () => {
     expect(m.get('s')).toBe('str');
   });
 
-  it('getOrCreate hands the factory the key as given, caches undefined, and never re-runs', () => {
+  it('getOrCreate hands the factory the canonical key, caches undefined, and never re-runs', () => {
     const m = new HashMap<{ q: string }, number | undefined>();
     let runs = 0;
     const key = { q: 'x' };
     const fac = (k: { q: string }) => {
       runs++;
-      expect(k).toBe(key);
+      expect(k).toBe(intern({ q: 'x' }));
       return undefined;
     };
     expect(m.getOrCreate(key, fac)).toBeUndefined();
@@ -307,12 +308,13 @@ describe('HashMap — content-matched, keys stored as given', () => {
     expect(() => m.get(new Date() as never)).toThrow();
   });
 
-  it('the documented hazard: a stored key mutated afterwards is no longer found', () => {
+  it('a key mutated after insertion changes nothing: the stored key is the canonical copy', () => {
     const m = new HashMap<{ id: number }, string>();
     const k = { id: 1 };
     m.set(k, 'v');
     k.id = 2;
-    expect(m.get({ id: 1 })).toBeUndefined();
-    expect(m.get({ id: 2 })).toBeUndefined(); // hashed under the old content
+    expect(m.get({ id: 1 })).toBe('v');
+    expect(m.get({ id: 2 })).toBeUndefined();
+    expect(m.get(k)).toBeUndefined();
   });
 });
