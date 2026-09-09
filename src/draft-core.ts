@@ -16,6 +16,7 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
+import { same } from './shared.js';
 import { intern, _hashCacheHas, isCanonical } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys } from './deep-equal.js';
@@ -203,9 +204,7 @@ export function isDraft(value: unknown): boolean {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-export function same(a: unknown, b: unknown): boolean {
-  return a === b || (a !== a && b !== b);
-}
+export { same };
 
 export function isPlainObject(v: unknown): v is Record<string, unknown> {
   if (v === null || typeof v !== 'object') return false;

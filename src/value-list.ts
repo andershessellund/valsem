@@ -32,6 +32,8 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
+import { mix } from './hasher.js';
+import { same, sameSlots, IteratorBase } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -47,11 +49,6 @@ interface CNode {
   readonly offsets: readonly number[] | null;
 }
 
-/** Ordered hash combine — boost-style. */
-function mix(seed: number, hash: number): number {
-  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
-}
-
 const MAX_RUN = 64;
 
 /** Does an element with hash `h` end a leaf run? (1 in 32.) */
@@ -63,22 +60,12 @@ function nodeBoundary(k: CNode): boolean {
   return Math.imul(k.h ^ 0x5bd1e995, 0x9e3779b1) >>> 27 === 0;
 }
 
-function kidsSame(a: readonly unknown[], b: readonly unknown[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i];
-    const y = b[i];
-    if (x !== y && !(x !== x && y !== y)) return false;
-  }
-  return true;
-}
-
 const cpool = createInternPool<CNode>();
 
 function consLeaf(items: unknown[], hashes: number[]): CNode {
   let h = mix(0xc1ea, items.length);
   for (let i = 0; i < hashes.length; i++) h = mix(h, hashes[i]!);
-  const found = cpool.lookup(h, (c) => c.ht === 1 && kidsSame(c.kids, items));
+  const found = cpool.lookup(h, (c) => c.ht === 1 && sameSlots(c.kids, items));
   if (found !== undefined) return found;
   return cpool.register({ h, n: items.length, ht: 1, kids: items, offsets: null }, h);
 }
@@ -94,7 +81,7 @@ function consBranch(kids: CNode[]): CNode {
     n += k.n;
   }
   const ht = kids[0]!.ht + 1;
-  const found = cpool.lookup(h, (c) => c.ht === ht && kidsSame(c.kids, kids));
+  const found = cpool.lookup(h, (c) => c.ht === ht && sameSlots(c.kids, kids));
   if (found !== undefined) return found;
   return cpool.register({ h, n, ht, kids, offsets }, h);
 }
@@ -358,7 +345,7 @@ export class ValueList<T> implements Iterable<T> {
   /** The canonical list for a (closed tree, open tail) pair — the pair must already be normalised. */
   static #of<T>(root: CNode | null, tail: readonly unknown[]): ValueList<T> {
     const h = ValueList.#hashOf(root, tail);
-    const found = lpool.lookup(h, (c) => c.#root === root && kidsSame(c.#tail, tail));
+    const found = lpool.lookup(h, (c) => c.#root === root && sameSlots(c.#tail, tail));
     if (found !== undefined) return found as ValueList<T>;
     return lpool.register(new ValueList<unknown>(root, tail, h), h) as ValueList<T>;
   }
@@ -391,10 +378,12 @@ export class ValueList<T> implements Iterable<T> {
     return full;
   }
 
+  /** Canonical empty list. */
   static empty<T>(): ValueList<T> {
     return ValueList.#of<T>(null, []);
   }
 
+  /** The canonical list of `items` (elements interned on entry). */
   static of<T>(...items: T[]): ValueList<T> {
     return ValueList.from(items);
   }
@@ -410,10 +399,16 @@ export class ValueList<T> implements Iterable<T> {
     return ValueList.#fromFull<T>(merge([], head, null));
   }
 
+  /** Number of elements. */
   get length(): number {
     return (this.#root === null ? 0 : this.#root.n) + this.#tail.length;
   }
 
+  /**
+   * The element at `index`, or `undefined` out of range. A size-table walk
+   * (O(log n)); the leaf of the last read is cached, so sequential reads
+   * stay in one leaf.
+   */
   get(index: number): T | undefined {
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
@@ -449,26 +444,31 @@ export class ValueList<T> implements Iterable<T> {
     if (!leafClosed(tail)) return ValueList.#of<T>(this.#root, tail);
     // The run closed: it joins the tree as a leaf, re-chunking the levels above.
     const root = this.#root;
-    const full = root === null ? merge([], tail, null) : merge(pathTo(root, root.n).frames, [...pathTo(root, root.n).leaf.kids, ...tail], null);
-    return ValueList.#of<T>(full, []);
+    if (root === null) return ValueList.#of<T>(merge([], tail, null), []);
+    const p = pathTo(root, root.n);
+    const head = p.leaf.kids.slice();
+    for (let i = 0; i < tail.length; i++) head.push(tail[i]);
+    return ValueList.#of<T>(merge(p.frames, head, null), []);
   }
 
+  /** Drop the last element. Returns `this` when empty. */
   pop(): ValueList<T> {
     if (this.#tail.length !== 0) return ValueList.#of<T>(this.#root, this.#tail.slice(0, -1));
     const root = this.#root;
     if (root === null) return this;
-    // The tree's last leaf is closed; shorten it, and it becomes the open tail unless it closes on its own again.
+    // The tree's last leaf is closed by its last element (or by being full);
+    // shorn of it, the rest is an open run — no interior element of a leaf is
+    // a boundary — so it becomes the tail.
     const p = pathTo(root, root.n);
     const items = p.leaf.kids.slice(0, -1);
-    if (items.length === 0) return ValueList.#of<T>(detachLast(p.frames), []);
-    if (leafClosed(items)) return ValueList.#of<T>(replaceLast(p.frames, consLeaf(items, items.map((x) => internHash(x)))), []);
     return ValueList.#of<T>(detachLast(p.frames), items);
   }
 
   /**
-   * Replace `deleteCount` elements at `start` with `items` — the general
-   * edit; O(log n) expected. `insert`, `remove`, `concat` and `slice` are
-   * all this.
+   * Replace `deleteCount` elements at `start` with `items` (interned on
+   * entry) — the general edit; O(log n) expected. `insert`, `remove` and
+   * `slice` are all this. `start` counts from the end when negative, as
+   * `Array.prototype.splice` does.
    */
   splice(start: number, deleteCount: number, items: readonly T[] = []): ValueList<T> {
     const n = this.length;
@@ -506,11 +506,11 @@ export class ValueList<T> implements Iterable<T> {
       const j = index - trunk;
       const old = this.#tail[j];
       if (old === v || (old !== old && v !== v)) return this;
+      // The open run holds no boundary element, so only a new boundary changes
+      // the chunking (closing the run at `j`); let the general path re-chunk.
+      if (itemBoundary(internHash(v))) return this.splice(index, 1, [v]);
       const tail = this.#tail.slice();
       tail[j] = v;
-      // A new boundary inside the tail closes it early; let the general path re-chunk.
-      if (j !== tail.length - 1 && itemBoundary(internHash(v))) return this.splice(index, 1, [v]);
-      if (leafClosed(tail)) return this.splice(index, 1, [v]);
       return ValueList.#of<T>(root, tail);
     }
     const p = pathTo(root!, index);
@@ -576,13 +576,15 @@ export class ValueList<T> implements Iterable<T> {
     return newRoot === root ? this : ValueList.#fromFull<T>(newRoot);
   }
 
+  /** Insert `value` (interned on entry) before `index`; O(log n) expected. */
   insert(index: number, value: T): ValueList<T> {
     return this.splice(index, 0, [value]);
   }
+  /** Remove the element at `index`; O(log n) expected. */
   remove(index: number): ValueList<T> {
     return this.splice(index, 1);
   }
-  /** Elements `[start, end)`; O(log n) expected. */
+  /** Elements `[start, end)` — `Array.prototype.slice` bounds; O(log n) expected. */
   slice(start = 0, end = this.length): ValueList<T> {
     const n = this.length;
     if (start < 0) start = Math.max(0, n + start);
@@ -591,7 +593,7 @@ export class ValueList<T> implements Iterable<T> {
     if (start >= end) return ValueList.empty<T>();
     return this.splice(end, n - end).splice(0, start);
   }
-  /** This list followed by `other`; O(log n) expected. */
+  /** This list followed by `other`; O(log n) expected — the two trees meet at one re-chunked seam. */
   concat(other: ValueList<T>): ValueList<T> {
     if (this.length === 0) return other;
     if (other.length === 0) return this;
@@ -685,18 +687,6 @@ function detachLast(frames: Frame[]): CNode | null {
   return node;
 }
 
-/** The tree with its last leaf replaced by `leaf` — path copies only (same argument as detachLast). */
-function replaceLast(frames: Frame[], leaf: CNode): CNode {
-  let node: CNode = leaf;
-  for (let k = frames.length - 1; k >= 0; k--) {
-    const f = frames[k]!;
-    const kids = f.node.kids.slice() as CNode[];
-    kids[f.i] = node;
-    node = consBranch(kids);
-  }
-  return node;
-}
-
 // ---------------------------------------------------------------------------
 // Batch rebuild — used by setMany
 // ---------------------------------------------------------------------------
@@ -781,10 +771,6 @@ function chunkLevel(nodes: CNode[]): CNode[] {
   if (run.length !== 0) out.push(consBranch(run));
   return out;
 }
-
-// Iterators inherit the ES2025 iterator helpers (`map`, `filter`, …) where
-// the runtime has them, exactly as the collections' iterators do.
-const IteratorBase = ((globalThis as { Iterator?: unknown }).Iterator ?? Object) as new () => object;
 
 /** Leaf-at-a-time iteration on an explicit stack (a generator costs ~3× here). */
 class ChunkIterator<T> extends IteratorBase implements IterableIterator<T> {
@@ -886,8 +872,4 @@ function diffRuns(A: CNode[], B: CNode[], ht: number, aPos: number, bPos: number
     i += di;
     j += dj;
   }
-}
-
-function same(a: unknown, b: unknown): boolean {
-  return a === b || (a !== a && b !== b);
 }

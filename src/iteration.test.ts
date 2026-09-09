@@ -2,7 +2,7 @@
 // objects (not generators), so the protocol details are pinned here —
 // done-state, fresh iterators per call, iterator helpers where the runtime
 // has them, forEach signatures, and the structural boundaries (trie levels,
-// trunk/tail, multi-level trunk) that the stacks must cross correctly.
+// tree/tail, multi-level tree) that the stacks must cross correctly.
 import { describe, it, expect } from 'vitest';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
@@ -122,9 +122,9 @@ describe('ValueSet iteration', () => {
 });
 
 describe('ValueList iteration', () => {
-  it('streams trunk leaves then the tail, across every structural boundary', () => {
-    // 0 (empty), tail-only, exactly one leaf, leaf + partial tail, two levels,
-    // exactly full levels, three levels, and a partial tail after three levels.
+  it('streams the tree leaves then the tail, across every structural boundary', () => {
+    // Leaf and branch boundaries are content-determined, so this is a spread
+    // of sizes: empty, tail-only, and lists several branch levels tall.
     for (const n of [0, 1, 31, 32, 33, 64, 65, 1_023, 1_024, 1_025, 1_056, 1_057, 2_100]) {
       const items = Array.from({ length: n }, (_, i) => i);
       const list = ValueList.from(items);

@@ -18,14 +18,9 @@
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
-import { hashNumber } from './hasher.js';
+import { hashNumber, mix } from './hasher.js';
 
 const pool = createInternPool<ValueDate>();
-
-/** Ordered hash combine — boost-style. */
-function mix(seed: number, hash: number): number {
-  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
-}
 
 /**
  * An immutable, canonical timestamp — the value a `Date` stands for.

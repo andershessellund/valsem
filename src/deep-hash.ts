@@ -15,7 +15,7 @@
 
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics } from './deep-equal.js';
-import { hashString, hashNumber } from './hasher.js';
+import { hashString, hashNumber, mix } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 
 /**
@@ -71,11 +71,6 @@ const TAG_UNIQUE_SYMBOL = 0x5553;
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-/** Ordered hash combine (position-dependent). Based on boost::hash_combine. */
-function mix(seed: number, hash: number): number {
-  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
-}
 
 /**
  * Scramble a hash value for use in unordered accumulation.

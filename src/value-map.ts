@@ -31,6 +31,7 @@ import {
   trieKeys,
   trieValues,
   trieForEach,
+  trieFrom,
   NOT_FOUND,
   _trieStats,
   type HNode,
@@ -114,12 +115,12 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Iterate the values (content-determined order — see the class docs). */
   values(): MapIterator<V> {
-    return trieValues(CFG, this.#root) as MapIterator<V>;
+    return trieValues(this.#root) as MapIterator<V>;
   }
 
   /** Iterate the `[key, value]` entries (content-determined order — see the class docs). */
   entries(): MapIterator<[K, V]> {
-    return trieEntries(CFG, this.#root) as MapIterator<[K, V]>;
+    return trieEntries(this.#root) as MapIterator<[K, V]>;
   }
 
   /** Iterate the `[key, value]` entries (content-determined order — see the class docs). */
@@ -128,7 +129,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   /** Call `fn` for each entry, as `ReadonlyMap.forEach` does. */
-  forEach(fn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
+  forEach(fn: (value: V, key: K, map: ValueMap<K, V>) => void, thisArg?: unknown): void {
     trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i + 1] as V, slots[i] as K, this));
   }
 
@@ -172,16 +173,19 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     return ValueMap.#for<K, V>(CFG.empty);
   }
 
-  /** Canonical ValueMap from an iterable of `[key, value]` entries (interned on entry). */
+  /**
+   * Canonical ValueMap from an iterable of `[key, value]` entries (interned
+   * on entry; a key given twice keeps its last value). Built in one
+   * bottom-up pass — every trie node consed once — not by n inserts.
+   */
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
-    let root: HNode = CFG.empty;
+    const keys: unknown[] = [];
+    const vals: unknown[] = [];
     for (const [rawK, rawV] of entries) {
-      const k = intern(rawK);
-      const v = intern(rawV);
-      const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
-      if (r !== null) root = r.node;
+      keys.push(intern(rawK));
+      vals.push(intern(rawV));
     }
-    return ValueMap.#for<K, V>(root);
+    return ValueMap.#for<K, V>(trieFrom(CFG, keys, vals));
   }
 
   /**
@@ -193,17 +197,17 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
    * ValueMap it is a legitimate value, distinct from absence.
    */
   static fromObject<V>(obj: Record<string, V>): ValueMap<string, V> {
-    let root: HNode = CFG.empty;
+    const keys: unknown[] = [];
+    const vals: unknown[] = [];
     // Own keys only: `for...in` would also admit inherited enumerable keys
     // (prototype pollution) as entries of the value.
     for (const k of Object.keys(obj)) {
       const raw = obj[k];
       if (raw === undefined) continue;
-      const v = intern(raw);
-      const r = trieInsert(CFG, root, 0, internHash(k), [k, v]);
-      if (r !== null) root = r.node;
+      keys.push(k);
+      vals.push(intern(raw));
     }
-    return ValueMap.#for<string, V>(root);
+    return ValueMap.#for<string, V>(trieFrom(CFG, keys, vals));
   }
 
   /** @internal Trie node-pool sizes — exposed for sharing tests. */

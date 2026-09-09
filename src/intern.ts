@@ -32,6 +32,7 @@ import {
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
+import { same } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
 
@@ -366,21 +367,14 @@ export function createInterner(): { intern: typeof intern } {
 }
 
 // ---------------------------------------------------------------------------
-// Shallow reference equality — compares structure using === on children
+// Shallow reference equality — SameValueZero on (canonical) children
 // ---------------------------------------------------------------------------
-
-/** SameValueZero on interned children: `===` plus NaN equals NaN. Children
- * are already canonical, so reference equality is value equality — except for
- * NaN, which `!==` itself and would forever split the pool without this. */
-function childEqual(x: unknown, y: unknown): boolean {
-  return x === y || (x !== x && y !== y);
-}
 
 function shallowRefEqual(a: object, b: object): boolean {
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (!childEqual(a[i], b[i])) return false;
+      if (!same(a[i], b[i])) return false;
     }
     return true;
   }
@@ -398,7 +392,7 @@ function shallowRefEqual(a: object, b: object): boolean {
   for (let i = 0; i < keysA.length; i++) {
     const k = keysA[i]!;
     if (!Object.prototype.hasOwnProperty.call(rb, k)) return false;
-    if (!childEqual(ra[k], rb[k])) return false;
+    if (!same(ra[k], rb[k])) return false;
   }
   return true;
 }

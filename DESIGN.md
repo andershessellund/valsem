@@ -417,9 +417,10 @@ flat-array backing for the same reason; the vector rebuild retired it —
 
 `intern([1, 2])` already yields a canonical frozen `===`-comparable plain
 array; strings natively have value semantics. What the wrappers add is purely
-performance: `ValueList` is the hash-consed radix vector of §8.3 (O(log n)
-persistent `push`/`pop`/`set` with structural sharing; equality is two
-pointer comparisons on root and tail; `toArray()` snapshots on demand), and
+performance: `ValueList` is the hash-consed content-chunked tree of §8.3
+(O(log n) expected persistent `push`/`pop`/`set`/`insert`/`remove`/`splice`/
+`slice`/`concat` with structural sharing; equality is one pointer comparison,
+since instances are pooled; `toArray()` snapshots on demand), and
 `InternedString` precomputes a string's hash once. Accordingly they are
 **opt-ins for measured hot paths, not defaults** — and on the wire they are
 *hints* (`valsem.list`, `valsem.string`), not model types: a hint-blind
@@ -537,7 +538,7 @@ property**: children compare `===` and have cached hashes — cost is container
 | --- | --- |
 | plain record / array | O(width) — floor is the copy itself |
 | HAMT-backed map/set | O(edits · log₃₂ n) |
-| radix-vector list | O(edits · log₃₂ n); push ~O(1) amortized |
+| content-chunked list | O(edits · log n) expected (`setMany`, one bottom-up pass); push is a tail-array copy |
 
 > **Plain data scales with depth; optimized structures scale with width.**
 > Records are schema-narrow by nature (declared fields) — plain is
@@ -580,23 +581,32 @@ data structure and becomes the data structure):
   cross the wire); iteration order becomes content-determined (an honesty
   *upgrade* over pool-history order).
 
-### 8.3 Lists: dense radix vector, not RRB — **shipped**
+### 8.3 Lists: a content-chunked tree, not a radix vector or RRB — **shipped**
 
 RRB's O(log n) concat/slice comes from history-*dependent* relaxed nodes —
 which breaks canonical shape and with it hash-consing, O(1) equality, and
-pointer-pruned diffs. Dense radix vectors (Clojure `PersistentVector`) are
-shape-canonical (a pure function of length, tail included). The operations RRB
-accelerates are exactly the ones plain arrays are also bad at, so omitting them
-violates no expectation. The contract table:
+pointer-pruned diffs. The first shipped backing was a dense radix vector
+(Clojure `PersistentVector`): shape-canonical (a pure function of length),
+but every insert, remove, slice and concat rebuilt O(n). It was replaced at
+v0.0.2 (DECISIONS.md D18) by a **content-chunked tree**: a leaf run ends
+after any element whose seeded hash says so (1 in 32, runs capped at 64), and
+branch runs follow the same rule on node hashes (with at least two nodes per
+run, so every level shrinks), so the shape is a function
+of the *content* — still canonical, still hash-consed, equal content is one
+node however built — and an edit re-chunks only the runs beside it,
+resynchronising with the untouched remainder at the next boundary. The
+closed runs form the tree; the open last run is a plain tail array. The
+contract table (bounds are expected, on the seeded hash):
 
-| op | plain `Array` | vector-backed `ValueList` |
+| op | plain `Array` | `ValueList` |
 | --- | --- | --- |
-| `get(i)` | O(1) | O(log₃₂ n) — ≤ 7 hops |
-| `set(i)` → new | O(n) | O(log₃₂ n) |
-| `push`/`pop` → new | O(n) | ~O(1) amortized (tail) |
+| `get(i)` | O(1) | O(log n) size-table walk; sequential reads stay in one cached leaf |
+| `set(i)` → new | O(n) | O(log n) (a path copy when no boundary flips; `setMany` batches) |
+| `push`/`pop` → new | O(n) | a tail-array copy; the tree is touched when a run closes |
 | iterate | O(n) | O(n) via **leaf-streaming iterator** (near-array locality) |
-| `slice`/`concat`/mid-`splice` | O(n) | O(n) — *same as arrays, on purpose* |
+| `insert`/`remove`/`splice`/`slice`/`concat` | O(n) | **O(log n)** — a path of local re-chunks |
 | equality | O(n) | **O(1)** |
+| `diff(a, b)`, any two lists | O(n) | **O(c log n)** for c changes — shared nodes are skipped by pointer |
 
 Exotic structures (ropes, RRB) are **userland value types** via
 `createInternPool` + the symbols + a wire hint — first-class without being
@@ -827,8 +837,9 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   marker.
 - **Draft classes over context-gated mutators** — interning-induced aliasing
   makes `this` location-ambiguous.
-- **Dense radix vectors over RRB** — history-independence required for
-  hash-consing.
+- **Content-chunked tree over RRB (and over the dense radix vector it
+  replaced)** — history-independence required for hash-consing; content
+  chunking keeps it while making mid-list edits and diff sublinear (D18).
 - **`toArray()` over auto-materialization** — the n² history-memory argument;
   consumer-owned lifetime via the returned reference.
 - **Proxy array facade rejected** — the structural-liar dichotomy (break

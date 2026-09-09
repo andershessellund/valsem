@@ -19,6 +19,7 @@ import {
   trieKeys,
   triePairs,
   trieForEach,
+  trieFrom,
   trieUnion,
   trieIntersection,
   trieDifference,
@@ -131,7 +132,7 @@ export class ValueSet<T> implements ReadonlySetLike<T>, ReadonlySetReads<T> {
 
   /** Iterate `[value, value]` pairs, as `ReadonlySet.entries` does. */
   entries(): SetIterator<[T, T]> {
-    return triePairs(CFG, this.#root) as SetIterator<[T, T]>;
+    return triePairs(this.#root) as SetIterator<[T, T]>;
   }
 
   /** Call `fn` for each element, as `ReadonlySet.forEach` does. */
@@ -227,15 +228,14 @@ export class ValueSet<T> implements ReadonlySetLike<T>, ReadonlySetReads<T> {
     return ValueSet.#for<T>(CFG.empty);
   }
 
-  /** Canonical ValueSet from an iterable of values (interned on entry). */
+  /**
+   * Canonical ValueSet from an iterable of values (interned on entry). Built
+   * in one bottom-up pass — every trie node consed once — not by n adds.
+   */
   static from<T>(values: Iterable<T>): ValueSet<T> {
-    let root: HNode = CFG.empty;
-    for (const raw of values) {
-      const v = intern(raw);
-      const r = trieInsert(CFG, root, 0, internHash(v), [v]);
-      if (r !== null) root = r.node;
-    }
-    return ValueSet.#for<T>(root);
+    const members: unknown[] = [];
+    for (const raw of values) members.push(intern(raw));
+    return ValueSet.#for<T>(trieFrom(CFG, members, null));
   }
 
   /** @internal Trie node-pool sizes — exposed for sharing tests. */

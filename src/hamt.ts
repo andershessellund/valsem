@@ -35,6 +35,8 @@
 
 import { createInternPool, type InternPool } from './intern-pool.js';
 import { internHash } from './intern.js';
+import { mix } from './hasher.js';
+import { same, sameSlots, IteratorBase } from './shared.js';
 
 /** Absent-key sentinel for {@link trieGet} — distinct from a stored `undefined`. */
 export const NOT_FOUND: unique symbol = Symbol('valsem.hamt.notFound');
@@ -72,32 +74,13 @@ export interface TrieConfig {
   readonly empty: BNode;
 }
 
-// SameValueZero — identity plus NaN-equals-NaN; members and stored values are
-// compared this way throughout (matching native Map/Set key semantics).
-function same(a: unknown, b: unknown): boolean {
-  return a === b || (a !== a && b !== b);
-}
+// Members and stored values compare by SameValueZero (`same`) throughout.
 
 function popcount(x: number): number {
   x -= (x >> 1) & 0x55555555;
   x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
   x = (x + (x >> 4)) & 0x0f0f0f0f;
   return (x * 0x01010101) >> 24;
-}
-
-/** Ordered hash combine — boost-style. */
-function mix(seed: number, hash: number): number {
-  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
-}
-
-function slotsSame(a: readonly unknown[], b: readonly unknown[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i];
-    const y = b[i];
-    if (x !== y && !(x !== x && y !== y)) return false;
-  }
-  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +100,7 @@ function consB(cfg: TrieConfig, dmap: number, nmap: number, slots: unknown[]): B
   }
   const found = cfg.bpool.lookup(
     h,
-    (c) => c.dmap === dmap && c.nmap === nmap && slotsSame(c.slots, slots),
+    (c) => c.dmap === dmap && c.nmap === nmap && sameSlots(c.slots, slots),
   );
   if (found !== undefined) return found;
   return cfg.bpool.register({ t: 0, h, n, dmap, nmap, slots }, h);
@@ -126,7 +109,7 @@ function consB(cfg: TrieConfig, dmap: number, nmap: number, slots: unknown[]): B
 function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
   let h = mix(0xc0111, khash);
   for (let i = 0; i < slots.length; i++) h = mix(h, internHash(slots[i]));
-  const found = cfg.cpool.lookup(h, (c) => c.khash === khash && slotsSame(c.slots, slots));
+  const found = cfg.cpool.lookup(h, (c) => c.khash === khash && sameSlots(c.slots, slots));
   if (found !== undefined) return found;
   return cfg.cpool.register({ t: 1, h, n: slots.length / cfg.stride, khash, slots }, h);
 }
@@ -365,6 +348,103 @@ export function trieInsert(
 }
 
 // ---------------------------------------------------------------------------
+// Bulk build — the trie for a whole entry list, every node consed once
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical trie holding `keys` (with `vals`, for stride 2; `null` for
+ * stride 1), built bottom-up: entries are partitioned by hash bits level by
+ * level and every node of the result is consed exactly once, where n
+ * sequential inserts would path-copy and re-cons O(log n) nodes each. Keys
+ * are canonical; a key given twice keeps its last value (up to SameValueZero:
+ * `+0` and `-0` are one value, and the pool keeps whichever consed first), as
+ * sequential insertion would. The result is the trie that insertion would
+ * build — the same root object.
+ */
+export function trieFrom(cfg: TrieConfig, keys: unknown[], vals: unknown[] | null): HNode {
+  // Dedupe (last write wins) on SameValueZero — the native Map's key rule.
+  // Keys are canonical, so identity is value equality, and the seen-map
+  // costs a hash-table probe per entry, not a trie walk.
+  const ks: unknown[] = [];
+  const vs: unknown[] | null = vals === null ? null : [];
+  const hs: number[] = [];
+  const seen = new Map<unknown, number>();
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    const at = seen.get(k);
+    if (at === undefined) {
+      seen.set(k, ks.length);
+      ks.push(k);
+      hs.push(internHash(k));
+      if (vs !== null) vs.push(vals![i]);
+    } else if (vs !== null) {
+      vs[at] = vals![i];
+    }
+  }
+  if (ks.length === 0) return cfg.empty;
+  if (ks.length === 1) {
+    return consB(cfg, 1 << (hs[0]! & 31), 0, vs === null ? [ks[0]] : [ks[0], vs[0]]);
+  }
+  const ids = new Array<number>(ks.length);
+  for (let i = 0; i < ids.length; i++) ids[i] = i;
+  return buildNode(cfg, ks, vs, hs, ids, 0);
+}
+
+/**
+ * The node for the ≥ 2 distinct entries `ids` (indices into `ks`/`vs`/`hs`)
+ * below `shift`. Distinct keys either separate at some level or share the
+ * full hash, so the result is always a node, never a lone entry — which is
+ * what lets a one-entry bucket be inlined as data by the caller (the CHAMP
+ * canonical form insertion produces).
+ */
+function buildNode(
+  cfg: TrieConfig,
+  ks: unknown[],
+  vs: unknown[] | null,
+  hs: number[],
+  ids: number[],
+  shift: number,
+): HNode {
+  if (shift >= 32) {
+    // Every key here shares the full hash: one collision node, in canonical member order.
+    ids.sort((a, b) => memberCompare(ks[a], ks[b]));
+    const slots: unknown[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]!;
+      slots.push(ks[id]);
+      if (vs !== null) slots.push(vs[id]);
+    }
+    return consC(cfg, hs[ids[0]!]!, slots);
+  }
+  // Partition by the five bits at `shift`, in bit order.
+  const buckets: (number[] | undefined)[] = new Array(32);
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i]!;
+    const b = (hs[id]! >>> shift) & 31;
+    const g = buckets[b];
+    if (g === undefined) buckets[b] = [id];
+    else g.push(id);
+  }
+  let dmap = 0;
+  let nmap = 0;
+  const data: unknown[] = [];
+  const kids: HNode[] = [];
+  for (let b = 0; b < 32; b++) {
+    const g = buckets[b];
+    if (g === undefined) continue;
+    if (g.length === 1) {
+      dmap |= 1 << b;
+      data.push(ks[g[0]!]);
+      if (vs !== null) data.push(vs[g[0]!]);
+    } else {
+      nmap |= 1 << b;
+      kids.push(buildNode(cfg, ks, vs, hs, g, shift + 5));
+    }
+  }
+  return consB(cfg, dmap, nmap, kids.length === 0 ? data : data.concat(kids));
+}
+
+// ---------------------------------------------------------------------------
 // Remove
 // ---------------------------------------------------------------------------
 
@@ -454,9 +534,6 @@ export function trieRemove(
 // (`.map`, `.filter`, `.take`, …) work exactly as they did on generators.
 // ---------------------------------------------------------------------------
 
-/** `Iterator` (ES2025) as a base class where the runtime has it; a plain base otherwise. */
-const IteratorBase = ((globalThis as { Iterator?: unknown }).Iterator ?? Object) as new () => object;
-
 /** Explicit-stack traversal shared by the three iterators: `next()` yields slot indices. */
 abstract class TrieIterator<T> extends IteratorBase implements IterableIterator<T> {
   readonly #stride: 1 | 2;
@@ -538,18 +615,18 @@ export function trieKeys(cfg: TrieConfig, node: HNode): IterableIterator<unknown
   return new KeyIterator(cfg.stride, node);
 }
 
-/** Iterate values (stride 2) — no `[key, value]` tuple allocated. */
-export function trieValues(cfg: TrieConfig, node: HNode): IterableIterator<unknown> {
+/** Iterate values of a stride-2 trie — no `[key, value]` tuple allocated. */
+export function trieValues(node: HNode): IterableIterator<unknown> {
   return new ValueIterator(2, node);
 }
 
-/** Iterate `[key, value]` pairs (stride 2). */
-export function trieEntries(cfg: TrieConfig, node: HNode): IterableIterator<[unknown, unknown]> {
+/** Iterate `[key, value]` pairs of a stride-2 trie. */
+export function trieEntries(node: HNode): IterableIterator<[unknown, unknown]> {
   return new EntryIterator(2, node);
 }
 
-/** Iterate `[member, member]` pairs (stride 1). */
-export function triePairs(cfg: TrieConfig, node: HNode): IterableIterator<[unknown, unknown]> {
+/** Iterate `[member, member]` pairs of a stride-1 trie. */
+export function triePairs(node: HNode): IterableIterator<[unknown, unknown]> {
   return new PairIterator(1, node);
 }
 

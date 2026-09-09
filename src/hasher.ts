@@ -64,6 +64,14 @@ export function getHashSeed(): Uint32Array {
   return SEED.slice();
 }
 
+/**
+ * Ordered hash combine (position-dependent), boost::hash_combine style —
+ * the one structural combiner every consed node and value type folds with.
+ */
+export function mix(seed: number, hash: number): number {
+  return (seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >>> 2))) >>> 0;
+}
+
 // ---------------------------------------------------------------------------
 // Default hasher: Marvin32 (strings) + seeded avalanche (numbers).
 // ---------------------------------------------------------------------------

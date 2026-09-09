@@ -114,12 +114,13 @@ describe('ValueList', () => {
   });
 });
 
-describe('ValueList — hash-consed canonicality across the trunk/tail boundary', () => {
+describe('ValueList — hash-consed canonicality across the tree/tail boundary', () => {
   const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
 
   it('push construction equals from() at every size through two tree levels', () => {
-    // Crosses: tail fill (32), first trunk leaf (33), root overflow to
-    // height 1 (1025 needs > 32 leaves), and assorted interior sizes.
+    // Runs close on content (a boundary element, or 64 elements), not at a
+    // fixed width, so this is a spread of sizes across several leaves and
+    // branch levels rather than a list of known boundaries.
     const sizes = [1, 31, 32, 33, 63, 64, 65, 100, 1023, 1024, 1025, 1057, 2050];
     let built = ValueList.empty<number>();
     let n = 0;
@@ -147,17 +148,17 @@ describe('ValueList — hash-consed canonicality across the trunk/tail boundary'
     expect(m).toBe(ValueList.from(range(1024)));
   });
 
-  it('set() detours in trunk and tail return to the same instance', () => {
+  it('set() detours in the tree and the tail return to the same instance', () => {
     const base = ValueList.from(range(200));
-    expect(base.set(5, 999).set(5, 5)).toBe(base); // trunk
-    expect(base.set(199, 999).set(199, 199)).toBe(base); // tail
+    expect(base.set(5, 999).set(5, 5)).toBe(base); // in the tree (runs cap at 64)
+    expect(base.set(199, 999).set(199, 199)).toBe(base); // the last element: tail, unless it closes a run
     expect(base.set(5, 5)).toBe(base); // unchanged write
     expect(base.get(5)).toBe(5);
     expect(base.set(5, 999).get(5)).toBe(999);
   });
 
   it('iteration and get() agree with a plain-array mirror at an awkward size', () => {
-    const mirror = range(1057); // trunk 1056 (two levels), tail 1
+    const mirror = range(1057); // several branch levels, and (almost surely) an open tail
     const l = ValueList.from(mirror);
     expect([...l]).toEqual(mirror);
     for (const i of [0, 31, 32, 1023, 1024, 1055, 1056]) {
@@ -173,12 +174,12 @@ describe('ValueList — hash-consed canonicality across the trunk/tail boundary'
   });
 });
 
-describe('ValueList — size sweep through three tree levels (> 1,024 elements)', () => {
-  // The trunk grows a level at 32 and at 1,024 trunk elements, and pop must
-  // collapse those levels back down. Walk every size across both boundaries
-  // and compare the push-built and pop-walked instances with from() — the
-  // canonical-form oracle — at each step.
-  const N = 1_024 + 32 * 3 + 5; // two full levels, three more leaves, a partial tail
+describe('ValueList — size sweep through several tree levels', () => {
+  // Leaf and branch boundaries fall at content-determined sizes, so walking
+  // every size up to N crosses many run closures and level growths, and pop
+  // must reverse each one. Compare the push-built and pop-walked instances
+  // with from() — the canonical-form oracle — at each step.
+  const N = 1_125; // roughly 35 leaves: enough for two or three branch levels
 
   it('push-chain === from() at every size up to N', () => {
     let list = ValueList.empty<number>();
@@ -208,7 +209,7 @@ describe('ValueList — size sweep through three tree levels (> 1,024 elements)'
     expect(list.get(N)).toBeUndefined();
   });
 
-  it('set() deep in the trunk at level 2 detours and returns', () => {
+  it('set() deep in the tree detours and returns', () => {
     const items = Array.from({ length: N }, (_, i) => i);
     const list = ValueList.from(items);
     for (const i of [0, 31, 32, 1_023, 1_024, 1_040, N - 1]) {
