@@ -158,8 +158,9 @@ carries none of it.
 Arguments must be values (the hasher's boundary; functions and mutable
 built-ins throw with the usual message), because a key resolver could
 return a non-value. Results are interned, and a function returning
-something `intern` would pass through unchanged is rejected, because a
-mutable result shared across calls is exactly the hazard. `maxSize`
+something `intern` refuses (a function, or a class that is not a value) is
+rejected with the reason, because a mutable result shared across calls is
+exactly the hazard. `maxSize`
 defaults to 1: the cache holds arguments and results strongly, and size 1
 is the reselect default with no retention surprise. Two designs were
 rejected on measurement: keying an identity `Map` on the first argument

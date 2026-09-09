@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
-import { _hashCodeMethods, _mutableBuiltinReason } from './deep-equal.js';
+import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics } from './deep-equal.js';
 import { hashString, hashNumber } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 
@@ -192,7 +192,9 @@ function unhashableMessage(obj: object): string {
       `Add Temporal support with a side-effect import: import 'valsem/temporal';`;
   }
 
-  return `deepHash: class instance '${name}' has no [hashCode] or registered hash handler`;
+  // The shared story for a class with no (or only half of) the protocol —
+  // `intern` throws with the same text.
+  return `deepHash: ${_missingValueSemantics(obj) ?? `${name} cannot be hashed`}`;
 }
 
 // ---------------------------------------------------------------------------

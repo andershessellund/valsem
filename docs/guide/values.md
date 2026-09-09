@@ -100,13 +100,19 @@ internHash(a);                                          // cached hash, no trave
 ```
 
 **What can be interned.** Primitives are returned unchanged. Plain objects and
-arrays are interned recursively. A class instance is interned only if it is
-**declared immutable** — either by carrying its own pool (see
+arrays are interned recursively. A class instance is interned when it is a
+**value** — it has an equality *and a hash*, either `[equals]` + `[hashCode]`
+on the class or a `deepEqual.register(Type, equalsFn, hashFn)` pair (which is
+how `valsem/temporal` makes Temporal values canonical): the hash declares that
+instances never change, and `intern` pools equal ones into one `===` instance,
+unfrozen. Auto-interning types (the collections, and classes built on
 [`createInternPool`](/guide/extending#interned-value-types-with-createinternpool))
-or by registering with `{ immutable: true }`, which is how `valsem/temporal`
-makes Temporal values canonical. Everything else passes through **untouched**.
-`Date`, `RegExp`, `Map`, and `Set` [throw](/guide/boundary) rather than
-passing through.
+are canonical already and return in O(1). Everything else **throws** — nothing
+passes through: `Date`, `RegExp`, `Map`, and `Set` [naming their
+replacement](/guide/boundary), and any other class naming what it lacks (a
+class with `[equals]` alone is comparable, not a value). A `HashMap` keyed by
+a passed-through object would miss every equal lookup silently, which is the
+one answer valsem refuses to give.
 
 ::: warning Interned values are frozen
 Treat interning as the boundary into immutable, shareable data. If you need to

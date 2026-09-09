@@ -14,7 +14,6 @@
 // ---------------------------------------------------------------------------
 
 export { deepEqual, equals, hashCode, interned } from './deep-equal.js';
-export type { RegisterOptions } from './deep-equal.js';
 export { deepHash } from './deep-hash.js';
 export { HashMap } from './hash-map.js';
 export { HashSet } from './hash-set.js';

@@ -4,9 +4,9 @@
 
 | Symbol | Kind | Summary |
 | --- | --- | --- |
-| `deepEqual` | function | Structural equality; `.register(type, eq, hash, opts?)` adds a handler pair. Total over admitted values and uncapped: a pair of distinct cyclic raw objects recurses until the engine throws a `RangeError`. |
-| `deepHash` | function | Companion structural hash (`equal ⟹ same hash`). |
-| `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds, unless `skipFreezing()` was called). |
+| `deepEqual` | function | Structural equality; `.register(type, eq, hash?)` adds handlers for a type you cannot edit — an equality alone makes it *comparable*, an equality and a hash make it a *value* (the hash declares immutability; refused for the mutable built-ins). Total over admitted values and uncapped: a pair of distinct cyclic raw objects recurses until the engine throws a `RangeError`. |
+| `deepHash` | function | Companion structural hash (`equal ⟹ same hash`). Throws for anything that is not a value, naming the fix. |
+| `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds, unless `skipFreezing()` was called). A class with an equality and a hash is pooled by that equality, unfrozen; anything less throws — nothing passes through. |
 | `isCanonical(value)` | function | Whether `value` is a primitive or an object valsem canonicalised — the form in which `===` is value equality. The probe behind every canonical short-circuit. |
 | `fastEquals(a, b)` | function | `a === b` for canonical values, never a walk. While checks are on, a raw argument throws instead of yielding a silent `false`. |
 | `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
@@ -23,11 +23,11 @@
 | `DraftMap` / `DraftSet` / `DraftList` | class | Mutable draft twins of the collections, handed out inside `produce`; `get()` returns drafts (`Draft<V>`). |
 | `toDraft` | symbol | The draft protocol: implement `[toDraft](parent)` to make a type draftable; `Draft<T>` infers a type's draft from it. Toolkit in `valsem/draft`. |
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
-| `equals` / `hashCode` / `interned` | symbol | Opt-in value-semantics hooks for classes. |
+| `equals` / `hashCode` / `interned` | symbol | Opt-in value-semantics hooks for classes: `[equals]` makes a class comparable, `[hashCode]` declares it immutable and makes it a value (hashable, internable, a key), `[interned]` marks an auto-interning type. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
 | `skipChecks()` / `skipFreezing()` | function | The two one-way switches you own: stop verifying *canonical only* arguments (`fastEquals`); stop freezing canonical records and arrays (faster iteration in V8, mutations no longer caught). Neither reads the environment. See the hardening guide. |
 | `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
-| `InternPool` / `Hasher` / `RegisterOptions` | type | Pool interface; pluggable leaf-hash interface; `register` options (`immutable`). |
+| `InternPool` / `Hasher` | type | Pool interface; pluggable leaf-hash interface. |
 
 ## `valsem/temporal`
 

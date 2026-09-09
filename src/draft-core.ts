@@ -437,8 +437,8 @@ function adoptUncached(value: object): unknown {
     }
     return intern(changed ? out : value);
   }
-  // Registered immutables pool; class instances pass through; mutable
-  // built-ins throw with their teaching errors.
+  // Value types (an equality and a hash) pool; every other class instance
+  // and the mutable built-ins throw with their teaching errors.
   return intern(value);
 }
 

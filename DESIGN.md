@@ -253,11 +253,12 @@ the record; a true hash collision promotes it to an array) plus a
   up by hash; candidates compare by `childEqual` — **SameValueZero on
   children** (`===` plus NaN-equals-NaN; plain `!==` would split the pool
   forever on NaN-containing values — a real bug found and fixed);
-- registered `{ immutable: true }` types (§5) are pooled by their registered
-  equality, **without freezing** (they are immutable by contract; freezing a
-  foreign type can break it);
-- everything else (unregistered class instances) passes through; the four
-  mutable built-in families **throw**.
+- value types (§5) — a class with an equality *and a hash*, by symbol or by
+  registration — are pooled by that equality, **without freezing** (the hash
+  declares them immutable; freezing a foreign type can break it);
+- everything else **throws**: the mutable built-in families naming the
+  replacement, any other class naming what it lacks. Nothing passes through
+  — a pass-through is a `HashMap` keyed by reference, missing silently.
 
 On a miss: the hash is cached, plain data is **frozen**, and a `WeakRef` enters
 the pool. The pool holds nothing alive: canonical instances are reclaimed when
@@ -313,19 +314,26 @@ forever):
 
 | Symbol | Enables | Shape |
 | --- | --- | --- |
-| `equals` | `deepEqual` | `[equals](other): boolean` — also the kind discriminator |
-| `hashCode` | `deepHash` | number property (preferred) or method |
+| `equals` | `deepEqual` — *comparable* | `[equals](other): boolean` — also the kind discriminator |
+| `hashCode` | `deepHash` and pooling by `intern` — *a value* | number property (preferred) or method |
 | `interned` | intern fast path | `true` on canonical instances |
 
 Registry for types you cannot edit:
 
 ```ts
-deepEqual.register(Type, equalsFn, hashFn, { immutable: true });
+deepEqual.register(Type, equalsFn);          // comparable: deepEqual by content
+deepEqual.register(Type, equalsFn, hashFn);  // a value: hashable, internable
 ```
 
-`{ immutable: true }` is the gate for pooling — deliberately **not implied** by
-having handlers. "Immutable" means *no reachable mutation*, not "no obvious
-setter": `Date` and `RegExp` are hashable and comparable and must never opt in.
+The hash is the gate for pooling, by symbol or by registration: a hash is
+only useful if it never changes, so supplying one *declares* immutability —
+"no reachable mutation", not "no obvious setter". An equality alone is the
+comparable tier, honest for a mutable object, and the only registration the
+mutable built-ins accept: `register` refuses a hash for `Date`, `RegExp`,
+`Map`, `Set` and the TypedArrays. (Earlier revisions carried a separate
+`{ immutable: true }` flag beside the hash; it was redundant, and it let a
+class with `[equals]` + `[hashCode]` fall through `intern` untouched and key a
+`HashMap` by reference. Removed.)
 
 `createInternPool<T>()` gives a class its own typed weak pool (canonical `===`
 instances, the same deal the built-in collections get); per-class pools need no
@@ -794,8 +802,12 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
 
 - **Removed Date/RegExp/Map/Set, then TypedArrays** — mutability, freeze
   ineffectiveness, and measured silent HashMap misses; teaching errors added.
-- **`{ immutable: true }` gate for pooling** — hashable ≠ immutable (Date/RegExp
-  counterexamples); Temporal pools unfrozen.
+- **The hash is the immutability declaration** — `[hashCode]` (or a registered
+  `hashFn`) makes a class a value and poolable; an equality alone is comparable
+  only. Replaced the earlier `{ immutable: true }` flag, under which a class
+  with `[equals]`/`[hashCode]` passed through `intern` and keyed `HashMap` by
+  reference — a silent miss. The mutable built-ins refuse a hash outright;
+  Temporal pools unfrozen. `intern` now throws for every class it cannot pool.
 - **Record `undefined` normalization; ValueMap keeps stored `undefined`** —
   accident vs TS-typed intent.
 - **Encapsulated Map/Set backing; classes implement ReadonlyMap/ReadonlySet** —
@@ -907,7 +919,8 @@ formats (a separate layer's job); schemas (higher layers); framework adapters
   canonicality invariant: O(1) false, no walk. Measured: distinct canonical
   1000-key records 74 µs → 0.04 µs (~1800×); mixed raw trees terminate at
   every canonical boundary; worst-case raw-vs-raw walk overhead +1.3%.
-  Trust note: the `[interned]` marker and `{ immutable: true }` were always
+  Trust note: the `[interned]` marker and the hash (then a separate
+  `{ immutable: true }` flag) were always
   contracts — stamping them on non-canonical data has always broken
   equality, and now does so faster.
 - **Freeze-disable experiment: measured, not shipped (negative result

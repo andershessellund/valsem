@@ -1,61 +1,84 @@
 # Making your own types values
 
 Three well-known symbols let any class opt into value semantics. Import them
-and implement whichever the operation needs:
+and implement whichever tier you mean:
 
-| Symbol       | Enables                          | Shape                            |
-| ------------ | -------------------------------- | -------------------------------- |
-| `equals`     | `deepEqual`                      | `[equals](other): boolean`       |
-| `hashCode`   | `deepHash`                       | `[hashCode]: number` (or method) |
-| `interned`   | auto-interning type contract     | `[interned]: true`               |
+| Symbol       | Makes the class                                                 | Shape                                       |
+| ------------ | --------------------------------------------------------------- | ------------------------------------------- |
+| `equals`     | **comparable** — `deepEqual` answers by content                 | `[equals](other): boolean`                  |
+| `hashCode`   | **a value** — hashable, internable, usable wherever a value goes | `[hashCode]: number` (a field, getter, or method) |
+| `interned`   | an **auto-interning type** — every instance canonical by construction | `[interned]: true`                    |
 
 ```ts
-import { equals, hashCode } from 'valsem';
+import { deepEqual, equals, hashCode, deepHash, intern } from 'valsem';
 
 class Money {
-  constructor(readonly amount: number, readonly currency: string) {}
+  readonly [hashCode]: number;
+
+  constructor(readonly amount: number, readonly currency: string) {
+    this[hashCode] = deepHash([amount, currency]);
+  }
 
   [equals](other: unknown): boolean {
     return other instanceof Money
       && other.amount === this.amount
       && other.currency === this.currency;
   }
-
-  get [hashCode](): number {
-    return (this.amount * 31 + hashString(this.currency)) >>> 0;
-  }
 }
 
-deepEqual(new Money(5, 'DKK'), new Money(5, 'DKK')); // true
+deepEqual(new Money(5, 'DKK'), new Money(5, 'DKK'));        // true
+intern(new Money(5, 'DKK')) === intern(new Money(5, 'DKK')); // true — one pooled instance
 ```
 
-Implement `equals` and `hashCode` **together** — the companion invariant
-(`equals ⟹ same hashCode`) is what makes hashing and interning correct.
+The two tiers are a statement about mutability. An equality alone claims
+nothing beyond "here is how to compare two of these right now", which is
+honest even for a mutable object. A hash is only useful if it never changes,
+so **`[hashCode]` declares that instances are immutable after construction**
+— and with that declaration the class is a value everywhere: `deepHash`
+hashes it, `intern` pools equal instances into one canonical `===` instance
+(unfrozen — immutability is the class's own contract), and it can be a
+`HashMap` key, a collection member, a `memoize` argument, or state inside
+`produce`. Only claim it if it is true: a pooled instance is shared by every
+holder, so one mutation corrupts all of them and invalidates the pooled hash.
 
-For third-party types you cannot edit, register a handler pair globally:
+Implement `equals` and `hashCode` **together** — the companion invariant
+(`equals ⟹ same hashCode`) is what makes hashing and interning correct. A
+class with `[equals]` but no `[hashCode]` compares by content and is refused
+everywhere else — `deepHash`, `intern`, the collections, `HashMap` keys,
+`memoize`, `produce` — with an error naming the missing hash. Nothing is
+passed through silently: a `HashMap` keyed by such an object would miss
+every equal lookup.
+
+For third-party types you cannot edit, register handlers globally — the same
+two tiers, so the hash is optional:
 
 ```ts
 import { deepEqual, deepHash } from 'valsem';
 
+// A value: comparable, hashable, internable.
 deepEqual.register(
   Money,
   (a, b) => a.amount === b.amount && a.currency === b.currency,
-  (m) => deepHash(`${m.amount}|${m.currency}`),
+  (m) => deepHash([m.amount, m.currency]),
 );
+
+// Comparable only — deepEqual by content; deepHash and intern still refuse it.
+deepEqual.register(Legacy, (a, b) => a.id === b.id);
 ```
 
-Add `{ immutable: true }` as a fourth argument when instances genuinely cannot
-change after construction; that makes the type internable, so `intern`
-collapses equal values to one canonical `===` instance instead of passing them
-through. Only claim it if it is true — the pooled instance is shared by every
-holder.
+Registering again replaces both handlers. The mutable built-ins (`Date`,
+`RegExp`, `Map`, `Set`, the TypedArrays) accept an equality only; `register`
+refuses a hash for them, since a hash would declare them immutable — see
+[the mutable boundary](/guide/boundary#the-contained-escape-hatch).
 
 ## Interned value types with `createInternPool`
 
-To get canonical `===` instances for your own class — the same deal the
-built-in collections get — allocate a per-class `InternPool` and route
-construction through it. Give the class a `[hashCode]`, an `[equals]`, and let
-the pool deduplicate:
+`intern` already pools any class with `[equals]` and `[hashCode]`, so you do
+not need a pool to get canonical instances — you need one when you want them
+**by construction**: `Point.of(1, 2) === Point.of(1, 2)` with no `intern`
+call anywhere, the same deal the built-in collections get. Allocate a
+per-class `InternPool`, route construction through it, and mark the type
+`[interned]` so every walk recognises its instances as canonical in O(1):
 
 ```ts
 import { createInternPool, equals, hashCode, interned } from 'valsem';

@@ -123,14 +123,22 @@ export function memoize<F extends (...args: never[]) => unknown>(
     }
 
     const raw = fn.apply(this, args as never[]);
-    const result = intern(raw);
-    if (!isCanonical(result)) {
-      const what =
-        typeof raw === 'function'
-          ? 'a function'
-          : `an instance of ${(raw as object).constructor?.name ?? 'an unregistered class'}`;
+    let result: unknown;
+    try {
+      result = intern(raw);
+    } catch (e) {
+      // intern names what the class lacks; keep that, framed as memoize's problem.
       throw new TypeError(
-        `valsem: memoize — ${name} returned ${what}, which is not a value. ` +
+        `valsem: memoize — ${name} returned an instance of ` +
+          `${(raw as object)?.constructor?.name ?? 'an unregistered class'}, which is not a value ` +
+          `(${(e as Error).message}). Memoized results are interned and shared: return data, or a ` +
+          'type valsem can canonicalise.',
+      );
+    }
+    if (!isCanonical(result)) {
+      // Only functions get here now: intern returns them untouched.
+      throw new TypeError(
+        `valsem: memoize — ${name} returned a function, which is not a value. ` +
           'Memoized results are interned and shared: return data, or a type valsem can canonicalise.',
       );
     }

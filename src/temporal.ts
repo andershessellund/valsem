@@ -6,9 +6,9 @@
 //   * an equality handler   (its own `equals()`, except ZonedDateTime and
 //                            Duration — see registerTemporal)
 //   * a hash handler        (over the canonical `toString()`, except the two
-//                            kinds whose equality is field-wise)
-//   * an immutability declaration, so `intern()` pools Temporal values as
-//     canonical `===` instances rather than passing them through
+//                            kinds whose equality is field-wise) — which is
+//                            also the immutability declaration, so `intern()`
+//                            pools Temporal values as canonical `===` instances
 //
 //     import 'valsem/temporal';
 //
@@ -142,12 +142,10 @@ export function registerTemporal(): void {
     const equalsFn = buildEquals(kind, ctor);
     const hashFn = buildHash(kind);
 
-    deepEqual.register(
-      ctor as unknown as new (...args: any[]) => TemporalValue,
-      equalsFn,
-      hashFn,
-      { immutable: true },
-    );
+    // Registering a hash declares immutability, which Temporal values have:
+    // accessors only, no mutators — so `intern` pools them as canonical
+    // `===` instances.
+    deepEqual.register(ctor as unknown as Function & { prototype: TemporalValue }, equalsFn, hashFn);
   }
 
   registered = true;

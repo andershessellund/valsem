@@ -10,21 +10,25 @@
 //      design and its measured rationale).
 //
 // Supported value types: primitives (returned as-is), plain objects, arrays,
-// and any type registered as `{ immutable: true }` via `deepEqual.register`
-// (Temporal, via `valsem/temporal`, and consumer value types).
+// the auto-interning types (marked `[interned]`), and any class with both an
+// equality and a hash — `[equals]` + `[hashCode]` on the class, or
+// `deepEqual.register(Type, equalsFn, hashFn)` (Temporal, via
+// `valsem/temporal`, and consumer value types). A hash declares immutability,
+// so such instances are pooled by their own equality, unfrozen.
 //
-// Everything else passes through unchanged. Mutability is the reason: a pooled
-// instance is shared by every holder, so one mutation would corrupt all of them
-// *and* invalidate the hash cached against it. valsem does not treat the mutable
-// built-ins (`Date`, `RegExp`, `Map`, `Set`) as values at all — `deepHash` and
-// `encode` reject them, naming the immutable replacement.
+// Everything else THROWS, naming the fix: the mutable built-ins (`Date`,
+// `RegExp`, `Map`, `Set`, the TypedArrays) with their immutable replacement,
+// and any other class with what it lacks. Passing an instance through
+// silently would let `HashMap` key by reference and miss every structurally
+// equal lookup — the silent wrong answer this package exists to avoid.
 // ---------------------------------------------------------------------------
 
 import { deepHash, _deepHashWithAcc, _metaOf, _setMeta, _entryTerm, _recordHashOf } from './deep-hash.js';
 import {
+  equals as equalsSym,
   interned as internedSym,
   _equalsMethods,
-  _immutableTypes,
+  _missingValueSemantics,
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
@@ -125,26 +129,33 @@ export function internHash(value: unknown): number {
 // intern() — global, recursive, weak-pooled
 // ---------------------------------------------------------------------------
 
-/**
- * Internalize a value. Returns the canonical (deduplicated) copy.
- *
- * - Primitives are returned as-is.
- * - Arrays: elements are internalized first, then the array itself.
- * - Plain objects: values are internalized first (keys kept in the order
- *   ordering), then the object itself.
- * - Already-interned objects (present in the hash cache) are returned
- *   immediately.
- * - Types registered with `{ immutable: true }` (Temporal via
- *   `valsem/temporal`, plus consumer value types) are pooled by their
- *   registered equality handler, unfrozen.
- * - The mutable built-ins `Date`, `RegExp`, `Map`, and `Set` throw, naming the
- *   immutable replacement.
- * - Everything else (unregistered class instances) passes through unchanged,
- *   because pooling a mutable instance would let one mutation corrupt every
- *   holder and invalidate its cached hash.
- */
 let depth = 0;
 
+/**
+ * The canonical instance of a value: structurally equal inputs return one
+ * `===` object, frozen (for plain data) and carrying its hash, so from then
+ * on `===` is value equality and hashing is a cache read.
+ *
+ * - Primitives are returned as-is.
+ * - Arrays and plain records are interned bottom-up — children first, then
+ *   the container. A record's `undefined`-valued keys are dropped (absent in
+ *   record semantics); its key order is kept.
+ * - Canonical objects — already interned, or of an auto-interning type such
+ *   as the collections — are returned immediately, no lookup.
+ * - A class with an equality **and a hash** (`[equals]` + `[hashCode]`, or
+ *   `deepEqual.register(Type, equalsFn, hashFn)` — Temporal via
+ *   `valsem/temporal`) is a value: instances are pooled by that equality and
+ *   returned canonical. They are not frozen; a hash declares that they are
+ *   immutable already.
+ * - Everything else throws, naming the fix: the mutable built-ins `Date`,
+ *   `RegExp`, `Map`, `Set` and the TypedArrays with their immutable
+ *   replacement; a class with only an equality, only a hash, or neither
+ *   with what it lacks. Nothing is passed through silently — a `HashMap`
+ *   keyed by such an object would miss every equal lookup.
+ *
+ * Nesting deeper than `configureLimits({ maxDepth })` (default 512) is
+ * rejected; so is cyclic input.
+ */
 export function intern<T>(value: T): T {
   if (value === null || value === undefined || typeof value !== 'object') {
     return value;
@@ -222,25 +233,12 @@ export function intern<T>(value: T): T {
     }
   }
 
-  // Types registered as immutable are pooled by their own equality handler.
-  // They are NOT frozen: they are already immutable by contract, and freezing a
-  // foreign type can break it (freezing a RegExp makes `lastIndex` read-only,
-  // which makes `.exec()` throw on a global pattern).
+  // A class instance. The mutable built-ins are rejected first, whatever is
+  // registered for them: `register` refuses a hash for these, and an
+  // equality alone makes them comparable, never internable. Nested ones
+  // already throw from deepHash; this covers the top-level case so both fail
+  // the same way.
   const ctor = _ctorOf(obj);
-  if (ctor !== undefined && _immutableTypes.has(ctor)) {
-    const eq = _equalsMethods.get(ctor)!;
-    return lookupOrStore(
-      obj,
-      (candidate) => _ctorOf(candidate) === ctor && eq(candidate, obj),
-      false,
-    ) as T;
-  }
-
-  // The mutable built-ins are rejected rather than passed through: passing a
-  // Date through silently would let `HashMap` key by reference and miss every
-  // structurally equal lookup, which is the silent wrong answer this package
-  // exists to avoid. Nested ones already throw from deepHash; this covers the
-  // top-level case so both fail the same way.
   const reason = _mutableBuiltinReason(ctor);
   if (reason !== undefined) {
     throw new TypeError(
@@ -249,8 +247,25 @@ export function intern<T>(value: T): T {
     );
   }
 
-  // Everything else (unregistered class instances) — as-is.
-  return value;
+  // A value type — equality and hash, by symbol or by registration — is
+  // pooled by its own equality. Its hash declares it immutable, so it is NOT
+  // frozen: freezing a foreign type can break it (freezing a RegExp makes
+  // `lastIndex` read-only, which makes `.exec()` throw on a global pattern).
+  // Anything short of that is not a value: throw, naming what is missing.
+  // Passing it through would let `HashMap` key by reference and miss every
+  // structurally equal lookup — the silent wrong answer this package exists
+  // to avoid.
+  const gap = _missingValueSemantics(obj);
+  if (gap !== undefined) throw new TypeError(`intern: ${gap}.`);
+  const eqSym = (obj as Record<symbol, unknown>)[equalsSym];
+  const matches =
+    typeof eqSym === 'function'
+      ? (candidate: object) =>
+          _ctorOf(candidate) === ctor && (eqSym as (o: unknown) => boolean).call(obj, candidate) === true
+      : ((eq) => (candidate: object) => _ctorOf(candidate) === ctor && eq(candidate, obj))(
+          _equalsMethods.get(ctor!)!,
+        );
+  return lookupOrStore(obj, matches, false) as T;
 }
 
 /** Widest record built by assignment: V8 keeps such objects in fast mode well past this (measured: dictionary mode at 20). */

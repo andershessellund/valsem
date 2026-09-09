@@ -373,25 +373,28 @@ describe('deepEqual — the [interned] type contract', () => {
 });
 
 describe('mutable built-ins — tier-1 registration is contained', () => {
-  // The escape hatch: an app MAY register equality/hash for a mutable
-  // built-in (without { immutable: true }). deepEqual/deepHash then answer —
-  // but canonicalization still refuses: rejection is independent of
-  // registration, so no mutable instance can reach a pool, a collection, or
-  // a HashMap key.
+  // The escape hatch: an app MAY register an EQUALITY for a mutable built-in.
+  // deepEqual then answers by content — and that is all an equality claims.
+  // A hash would declare immutability, so `register` refuses one for these
+  // types, and deepHash/intern keep rejecting them: no mutable instance can
+  // reach a pool, a collection, or a HashMap key.
   //
   // ORDER-SENSITIVE: registration is global and has no unregister; this
   // block must stay LAST in the file — the reference-semantics Date tests
   // above rely on running before it.
-  it('registering Date enables comparison but never interning', async () => {
-    deepEqual.register(
-      Date,
-      (a, b) => a.getTime() === b.getTime(),
-      (d) => d.getTime() >>> 0,
-    );
+  it('registering an equality for Date enables comparison but never hashing or interning', async () => {
+    expect(() =>
+      deepEqual.register(
+        Date,
+        (a, b) => a.getTime() === b.getTime(),
+        (d) => d.getTime() >>> 0,
+      ),
+    ).toThrow(/Date cannot be registered with a hash/);
+    deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
     expect(deepEqual(new Date(5), new Date(5))).toBe(true);
     expect(deepEqual(new Date(5), new Date(6))).toBe(false);
     const { deepHash } = await import('./deep-hash.js');
-    expect(typeof deepHash(new Date(5))).toBe('number');
+    expect(() => deepHash(new Date(5))).toThrow(/ValueDate\.of/);
     const { intern } = await import('./intern.js');
     expect(() => intern(new Date(5))).toThrow(/Temporal\.Instant/);
     expect(() => intern({ at: new Date(5) })).toThrow(/Temporal\.Instant/);

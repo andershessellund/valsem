@@ -61,8 +61,8 @@ The collections agree with all of this: `ValueMap`, `ValueSet`, `ValueList`
 are immutable collections with structural sharing; `HashMap` and `HashSet`
 are mutable and keyed by content.
 
-**Extensible.** Your own classes become values with one method — `[equals]`
-with a companion `[hashCode]` — or one registration, `deepEqual.register`,
+**Extensible.** Your own classes become values with two members — `[equals]`
+and a companion `[hashCode]` — or one registration, `deepEqual.register`,
 and then compare, hash, intern, and key a map like anything else. Third-party
 types work the same way; Temporal ships ready-made behind `valsem/temporal`.
 Anything valsem cannot treat as a value — a `Date`, a native `Map`, a class it
@@ -313,7 +313,7 @@ Any class becomes a value by implementing `[equals]` and carrying a
 `[hashCode]` (a number, precomputed — equal values must hash equal):
 
 ```ts
-import { equals, hashCode, deepHash } from 'valsem';
+import { deepEqual, equals, hashCode, deepHash, intern, HashMap } from 'valsem';
 
 class Money {
   readonly [hashCode]: number;
@@ -324,11 +324,20 @@ class Money {
     return o instanceof Money && o.amount === this.amount && o.currency === this.currency;
   }
 }
-deepEqual(new Money(5, 'EUR'), new Money(5, 'EUR')); // true
+deepEqual(new Money(5, 'EUR'), new Money(5, 'EUR'));        // true
+intern(new Money(5, 'EUR')) === intern(new Money(5, 'EUR')); // true — pooled, one instance
+new HashMap().set(new Money(5, 'EUR'), 'x').get(new Money(5, 'EUR')); // 'x' — keyed by content
 ```
 
-Types you do not own are registered instead. Declare `immutable: true` and
-`intern` will pool them as canonical `===` instances:
+`[hashCode]` is the declaration that makes it a value. A hash is only useful
+if it never changes, so carrying one says the instance is immutable after
+construction — and with that promise valsem pools it, keys by it, and stores
+it in state. A class with `[equals]` alone is *comparable*: `deepEqual`
+answers by content, which is fine even for a mutable object, but hashing or
+interning it throws, naming the missing hash.
+
+Types you do not own are registered instead, with the same two tiers — an
+equality alone, or an equality and a hash:
 
 ```ts
 import { deepEqual, deepHash } from 'valsem';
@@ -336,8 +345,7 @@ import { deepEqual, deepHash } from 'valsem';
 deepEqual.register(
   Money,
   (a, b) => a.amount === b.amount && a.currency === b.currency,
-  (m) => deepHash([m.amount, m.currency]),
-  { immutable: true },
+  (m) => deepHash([m.amount, m.currency]), // omit the hash for "comparable only"
 );
 ```
 

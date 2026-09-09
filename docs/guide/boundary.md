@@ -21,7 +21,7 @@ immutable replacement:
 gated on that check.)
 
 ```ts
-deepHash(new Date(0));        // throws — names Temporal.Instant
+deepHash(new Date(0));        // throws — names ValueDate.of (and Temporal.Instant)
 intern({ at: new Date(0) });  // throws
 intern(new Set([1]));         // throws — names ValueSet.from
 ```
@@ -55,24 +55,23 @@ classic first encounter). Production builds stay silent; nothing ever throws.
 
 ## The contained escape hatch
 
-If your application truly wants, say, Date-by-time equality:
+If your application truly wants, say, Date-by-time equality, register an
+**equality alone**:
 
 ```ts
-deepEqual.register(
-  Date,
-  (a, b) => a.getTime() === b.getTime(),
-  (d) => d.getTime() >>> 0,
-);
+deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
 ```
 
-That makes `deepEqual`/`deepHash` answer for Dates — while `intern`, the
-collections, `produce`, and `HashMap` keys still refuse them (rejection is
-independent of registration). The risk you accept is the classic one: a hash
-taken from a mutable object goes stale the moment it mutates, and structures
-you key by it will silently miss. That silent miss is precisely why these
-types are not values by default.
+That makes `deepEqual` answer by content for Dates — and that is all an
+equality claims, so it is honest for a mutable type. What it does not do is
+make `Date` a value: `deepHash`, `intern`, the collections, `produce`, and
+`HashMap` keys still refuse it. A hash would declare immutability, and a hash
+taken from a mutable object goes stale the moment it mutates, so structures
+keyed by it would silently miss; `register` therefore refuses a hash for the
+mutable built-ins outright. That silent miss is precisely why these types are
+not values by default.
 
 A class instance with neither an `[equals]` method nor a registered handler
 falls back to **reference semantics** (`deepEqual` is `Object.is`); `deepHash`
-throws, because it has no safe, content-based hash to offer. See
+and `intern` throw, because there is no safe, content-based hash to offer. See
 [Making your own types values](/guide/extending).

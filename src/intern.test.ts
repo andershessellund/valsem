@@ -39,10 +39,12 @@ describe('intern', () => {
     expect(Object.isFrozen(obj)).toBe(true);
   });
 
-  it('returns class instances unchanged', () => {
+  it('rejects a class instance with no value semantics rather than passing it through', () => {
+    // Passing it through would let HashMap key by reference and miss every
+    // equal lookup silently; see value-types.test.ts for the whole story.
     class Foo { x = 1; }
-    const f = new Foo();
-    expect(intern(f)).toBe(f);
+    expect(() => intern(new Foo())).toThrow(/Foo.*has no \[hashCode\]/);
+    expect(() => intern({ f: new Foo() })).toThrow(/Foo.*has no \[hashCode\]/);
   });
 });
 

@@ -45,9 +45,14 @@ describe('valsem/binding', () => {
       }
     }
     class Neither {}
+    class ComparableOnly {
+      constructor(readonly v: number) {}
+    }
+    deepEqual.register(ComparableOnly, (a, b) => a.v === b.v); // no hash: not a value
     expect(hasValueSemantics(Registered)).toBe(true);
     expect(hasValueSemantics(Symbolic)).toBe(true);
     expect(hasValueSemantics(Neither)).toBe(false);
+    expect(hasValueSemantics(ComparableOnly)).toBe(false);
     expect(hasValueSemantics(Date)).toBe(false);
     expect(hasValueSemantics(Object)).toBe(false);
     expect(hasValueSemantics((() => {}) as unknown as Function)).toBe(false);

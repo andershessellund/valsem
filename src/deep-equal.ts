@@ -53,13 +53,24 @@
 export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 
 /**
- * Symbol for companion hash code on class instances.
+ * Symbol for the companion hash code on class instances — and the
+ * declaration that makes a class a **value**.
  *
- * May be either a **property** (precomputed `number`, preferred — O(1)
- * read) or a **method** returning `number` (legacy form).
+ * `[equals]` alone makes a class *comparable*: `deepEqual` answers by
+ * content, which is fine even for a mutable object (the answer is about the
+ * two objects as they are right now). A hash is only useful if it never
+ * changes, so carrying `[hashCode]` declares that instances are **immutable
+ * after construction** — and with that, the class is a value everywhere:
+ * `deepHash` hashes it, `intern` pools equal instances into one canonical
+ * `===` instance, and it can be a `HashMap` key, a collection member, a
+ * `memoize` argument, or state inside `produce`. Only claim it if it is
+ * true: a pooled instance is shared by every holder, so one mutation
+ * corrupts all of them and invalidates the hash cached against it.
  *
- * Must be implemented alongside {@link equals} to maintain the invariant:
- * `a[equals](b) === true → readHash(a) === readHash(b)`.
+ * May be a **property** (a precomputed `number`, or a getter — preferred:
+ * O(1) read) or a **method** returning `number`. Must be implemented
+ * alongside {@link equals}, maintaining the companion invariant:
+ * `a[equals](b) === true → hash(a) === hash(b)`.
  */
 export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
 
@@ -110,20 +121,6 @@ let _canonicalProbe: ((obj: object) => boolean) | null = null;
 export function _setCanonicalProbe(probe: (obj: object) => boolean): void {
   _canonicalProbe = probe;
 }
-
-/**
- * Types whose instances are declared deeply immutable, and may therefore be
- * pooled by {@link intern} (canonical `===` instances) instead of passing
- * through untouched.
- *
- * This is deliberately NOT implied by having handlers registered: a registered
- * type is comparable and hashable, which says nothing about whether it can
- * change afterwards. Only a type that cannot be mutated after construction
- * (Temporal, and consumer types that opt in) is safe to canonicalize, because a
- * canonical instance is shared by every holder — one mutation corrupts all of
- * them and invalidates the hash cached against it.
- */
-const immutableTypes = new Set<Function>();
 
 // ---------------------------------------------------------------------------
 // Mutable built-ins valsem refuses to treat as values
@@ -370,56 +367,59 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return count === bCount;
 }
 
-/** Options for {@link deepEqual.register}. */
-export interface RegisterOptions {
-  /**
-   * Declare that instances of this type are **deeply immutable** after
-   * construction, allowing {@link intern} to pool them as canonical `===`
-   * instances rather than passing them through untouched.
-   *
-   * Default `false`. Only set this when the type genuinely cannot be mutated —
-   * a pooled instance is shared by every holder, so a single mutation corrupts
-   * all of them and invalidates the pooled hash.
-   *
-   * "Immutable" means no reachable mutation, not merely no obvious setter.
-   * `Object.freeze` is not a proof: it does not reach the internal slots of a
-   * `Date` or a `Map`, it makes a `RegExp`'s `lastIndex` read-only (breaking
-   * `.exec()`), and it throws outright on a non-empty TypedArray — whose bytes
-   * are rewritable through any other view over the same buffer anyway.
-   */
-  readonly immutable?: boolean;
-}
-
 /**
- * Register equality and hash handlers for a type.
+ * Register value semantics for a type you cannot edit — the registry form of
+ * the {@link equals}/{@link hashCode} protocol, with the same two tiers.
  *
- * Both `equalsFn` and `hashFn` are required to enforce the invariant:
- * `equalsFn(a, b) === true → hashFn(a) === hashFn(b)`.
+ * `equalsFn` alone makes the type **comparable**: `deepEqual` answers by
+ * content. That is all it claims, and it is fine for a mutable type.
  *
- * Pass `{ immutable: true }` for types that cannot be mutated after
- * construction; those become internable (canonical `===` instances) instead of
- * passing through {@link intern} untouched.
+ * Adding `hashFn` makes the type a **value**: a hash is only useful if it
+ * never changes, so supplying one declares that instances are immutable
+ * after construction. `deepHash` then hashes them, `intern` pools equal
+ * instances into one canonical `===` instance (unfrozen — immutability is
+ * the type's own contract), and they can be `HashMap` keys, collection
+ * members, `memoize` arguments, and state inside `produce`. Only claim it
+ * if it is true: a pooled instance is shared by every holder, so one
+ * mutation corrupts all of them and invalidates the pooled hash. The
+ * mutable built-ins (`Date`, `RegExp`, `Map`, `Set`, the TypedArrays) can be
+ * registered with an equality only; a hash for them is refused.
+ *
+ * The companion invariant applies: `equalsFn(a, b)` ⟹ `hashFn(a) === hashFn(b)`.
+ * Registering again replaces both handlers (a call without `hashFn` drops a
+ * previously registered hash).
  *
  * @example
  * ```ts
+ * // A value: comparable, hashable, internable.
  * deepEqual.register(
  *   Money,
  *   (a, b) => a.amount === b.amount && a.currency === b.currency,
- *   (m) => deepHash(`${m.amount}|${m.currency}`),
- *   { immutable: true },
+ *   (m) => deepHash([m.amount, m.currency]),
  * );
+ *
+ * // Comparable only — deepEqual by content; deepHash and intern still refuse it.
+ * deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
  * ```
  */
 deepEqual.register = function register<T>(
-  type: new (...args: any[]) => T,
+  type: Function & { readonly prototype: T },
   equalsFn: (a: T, b: T) => boolean,
-  hashFn: (a: T) => number,
-  opts?: RegisterOptions,
+  hashFn?: (a: T) => number,
 ): void {
+  if (hashFn !== undefined) {
+    const reason = MUTABLE_BUILTINS.get(type);
+    if (reason !== undefined) {
+      throw new TypeError(
+        `deepEqual.register: ${type.name} cannot be registered with a hash — a hash declares ` +
+          `that instances never change, and ${reason}. Register an equality alone to compare ` +
+          `${type.name} instances by content.`,
+      );
+    }
+  }
   equalsMethods.set(type, equalsFn);
-  hashCodeMethods.set(type, hashFn);
-  if (opts?.immutable) immutableTypes.add(type);
-  else immutableTypes.delete(type);
+  if (hashFn !== undefined) hashCodeMethods.set(type, hashFn);
+  else hashCodeMethods.delete(type);
 };
 
 /**
@@ -429,7 +429,7 @@ deepEqual.register = function register<T>(
  *
  * The symbol form only requires `[equals]` on the prototype: `[hashCode]` is
  * conventionally an instance field assigned during construction (as the
- * `Intern*` collections and the `createInternPool` pattern both do), so it is
+ * `Value*` collections and the `createInternPool` pattern both do), so it is
  * not observable from the constructor alone.
  *
  * @internal — exposed through `valsem/binding` for registration guards that
@@ -439,6 +439,35 @@ export function _hasValueSemantics(type: Function): boolean {
   if (equalsMethods.has(type) && hashCodeMethods.has(type)) return true;
   const proto = (type as { prototype?: unknown }).prototype;
   return typeof proto === 'object' && proto !== null && equals in (proto as object);
+}
+
+/**
+ * @internal Why a class instance is not a value — or `undefined` when it has
+ * both an equality and a hash, by symbol or by registration. `deepHash` and
+ * `intern` both throw with this text, so one type tells one story wherever a
+ * user meets it. (The mutable built-ins have their own story:
+ * {@link _mutableBuiltinReason}.)
+ */
+export function _missingValueSemantics(obj: object): string | undefined {
+  const ctor = _ctorOf(obj);
+  const name = ctor?.name || 'an anonymous class';
+  const hasEquals = equals in obj || (ctor !== undefined && equalsMethods.has(ctor));
+  const hasHash = hashCode in obj || (ctor !== undefined && hashCodeMethods.has(ctor));
+  if (hasEquals && hasHash) return undefined;
+  if (hasEquals) {
+    return (
+      `${name} compares by content but is not a value: it has an equality but no hash, and ` +
+      `a hash declares that the content never changes. Add [hashCode] (or a hashFn to ` +
+      `deepEqual.register) if instances are immutable after construction`
+    );
+  }
+  if (hasHash) {
+    return `${name} has a hash but no equality to pool by. Add [equals] (or register with deepEqual.register)`;
+  }
+  return (
+    `class instance '${name}' has no [hashCode] or registered hash handler, and no equality: ` +
+    `it is not a value. Implement [equals] and [hashCode], or deepEqual.register(${name}, equalsFn, hashFn)`
+  );
 }
 
 /**
@@ -497,8 +526,5 @@ export function _isPlainRecord(obj: object): boolean {
   return proto === Object.prototype || proto === null;
 }
 
-/** @internal — exposed for deepHash to read the shared registry. */
+/** @internal — exposed for deepHash and intern to read the shared registry. */
 export { equalsMethods as _equalsMethods, hashCodeMethods as _hashCodeMethods };
-
-/** @internal — exposed for intern to know which rich types are poolable. */
-export { immutableTypes as _immutableTypes };
