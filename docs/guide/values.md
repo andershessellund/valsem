@@ -134,13 +134,16 @@ built on it agrees on one definition of what each kind of thing *is*:
 | array / `ValueList` | the length and the **ordered** element sequence |
 | `ValueMap` | the **unordered** set of `(key, value)` entries (canonical values — interned on entry) |
 | `ValueSet` | the **unordered** set of elements (canonical values — interned on entry) |
+| `OrderedMap` | the **ordered** sequence of `(key, value)` entries — order is part of the value |
+| `OrderedSet` | the **ordered** sequence of distinct elements |
 | `InternedString` | the wrapped string (the large-string tool: hash paid once per distinct text) |
 | class with `[equals]` / registered type | whatever its handlers say |
 
 ### Iteration order is not part of the value
 
 Order is *observable* on records, `ValueMap`, and `ValueSet` — you can iterate
-them — but it is **not semantic**: it never affects `deepEqual`, `deepHash`,
+them — but it is **not semantic** (on `OrderedMap`/`OrderedSet` it is, by
+definition — that is what they are for): it never affects `deepEqual`, `deepHash`,
 or which canonical instance you get. On `ValueMap`/`ValueSet` the order is
 **content-determined**: equal collections iterate identically, in an order
 driven by the per-process, seeded hashes of the contents — stable within a
@@ -152,8 +155,9 @@ process (equal records are one object), possibly different across runs, and
 never meaningful. If you need identical bytes for equal values across
 processes, sort at serialisation.
 
-If order carries meaning, put it in the value: use an array / `ValueList` (of
-`[key, value]` pairs, for a map).
+If order carries meaning, put it in the value: an array or `ValueList`, or,
+for a map or set whose insertion order means something, `OrderedMap` /
+`OrderedSet`.
 
 ### `undefined` is not a value (in records)
 
@@ -188,8 +192,9 @@ position or intent makes it meaningful there:
   is stricter than a loose "same-ish" check.
 - **Only immutable things get value identity** — see
   [the mutable boundary](/guide/boundary).
-- **Order is never semantic** for records, `ValueMap`, and `ValueSet`; arrays
-  and `ValueList` are ordered.
+- **Order is semantic exactly where the type says so**: never for records,
+  `ValueMap`, and `ValueSet`; always for arrays, `ValueList`, `OrderedMap`
+  and `OrderedSet`.
 - **No cycle handling.** `deepEqual` / `deepHash` / `intern` assume acyclic,
   data-shaped values; deeply nested or cyclic input is rejected at the
   admission boundary (see [Hardening](/guide/hardening)).

@@ -1,30 +1,26 @@
-# valsem — Design Document
+# valsem — Design
 
-**Value semantics for JavaScript.** Structural equality, companion hashing, global
-interning, canonical instances, and immutable value collections — so that `===`
-*is* deep equality, equal data exists once in memory, and change detection is a
-pointer comparison.
+**Value semantics for JavaScript.** Structural equality, companion hashing,
+global interning, canonical instances, and immutable value collections, so
+that `===` *is* deep equality, equal data exists once in memory, and change
+detection is a pointer comparison.
 
-This document is the consolidated design record of the valsem project: what is
-built, what is decided-but-unbuilt, the reasoning behind every major decision,
-and the laws that keep the design coherent. It is intended to travel with the
-project into its own repository.
+This document describes the library as it is: the model, the invariants,
+and how each mechanism works, in enough detail to work on the code or to
+reimplement it. It says *what*; the *why*, the alternatives and the
+measurements are in [DECISIONS.md](DECISIONS.md), cited as `D<n>`. Current
+numbers are in [BENCHMARKS.md](BENCHMARKS.md). User documentation is the
+README and the guide under `docs/`.
 
 ---
 
 ## 1. What valsem is
 
-valsem gives JavaScript the thing the language never had and TC39 has so far
-failed to add (Records & Tuples: withdrawn): **values** — data compared by
-content, not by reference.
-
 Reduced to one sentence:
 
-> **valsem is one operation — `(value, recipe) → canonical value` — where
+> **valsem is one operation, `(value, recipe) → canonical value`, where
 > equality is `===`, cost is proportional to novelty, and everything else is
 > sugar.**
-
-Concretely:
 
 ```ts
 const a = intern({ city: 'Aarhus', zip: '8000' });
@@ -38,46 +34,32 @@ deepHash(a);                   // O(1) — cached on the canonical instance
 Three properties arrive together and reinforce each other:
 
 1. **Value equality is `===`.** No traversal per comparison.
-2. **Hashing is O(1)** after canonicalization (cached).
+2. **Hashing is O(1)** after canonicalisation (cached).
 3. **Sharing is automatic.** Equal subtrees are stored once, process-wide.
 
 ### 1.1 Position in the stack
 
-valsem is the foundation layer of a larger suite, but is **independently
-valuable** and is developed as a standalone project (own repo, own docs, own
-audience):
+valsem depends on nothing: not on a wire format, a framework, or a runtime.
+Everything may depend on it. A reactive UI layer dedupes via `deepEqual`; a
+wire decoder interns via the pool; neither is visible from inside valsem.
+valsem is the TypeScript binding of a language-neutral information model;
+interning is its *strategy* for delivering value semantics in JavaScript,
+not part of the model.
 
-| Layer | Depends on |
+### 1.2 Entry points
+
+| Subpath | Contents |
 | --- | --- |
-| Value semantics (this project — `valsem`) | nothing |
-| Wire format (schemaless, JSON + binary; developed separately) | valsem |
-| Schemas, expression rules, IDL, UI | the above |
-| Application runtimes | all of the above |
+| `valsem` | the API: equality, hashing, interning, the collections, `produce`, `memoize`, the switches |
+| `valsem/temporal` | side-effect import registering value semantics for the eight Temporal kinds (§5.3) |
+| `valsem/draft` | the toolkit for making a type draftable (§7.1); semver-covered |
+| `valsem/binding` | the two helpers a wire or storage binding needs (§10.1); semver-covered |
 
-The dependency law is absolute and one-directional: **everything may depend on
-valsem; valsem depends on nothing** — not on the wire format, not on any
-framework, not on any runtime. A reactive UI layer dedupes via valsem's
-`deepEqual`; a wire decoder interns via valsem's pool. Neither is visible from
-inside valsem.
-
-valsem is the TypeScript **binding** of a language-neutral information model
-(the wire-format project above carries its specification). Other languages may
-bind the same model without interning at all; interning is valsem's *strategy*
-for delivering value semantics in JS, not part of the model.
-
-### 1.2 Naming and packaging
-
-- npm: **`valsem`** (unscoped — the vite/svelte pattern: the package people
-  type stays unscoped). **Status: name verified free, NOT yet reserved.
-  Reserve before anything else.**
-- Repo split prerequisite — **done in this repo**: the pre-split
-  `valsem/internal` subpath (consumed by the wire binding:
-  `_defineRecordField`, `_mutableBuiltinReason`; a type-level `_hasValueSemantics` came and went — `intern` answers per instance) is
-  promoted to the small, semver'd **`valsem/binding`** API for first-party
-  binding authors (underscore prefixes dropped: `defineRecordField`,
-  `mutableBuiltinReason`; `hasValueSemantics` was later removed — a type-level probe cannot see an instance-field `[hashCode]` nor verify immutability, and `intern` answers per instance). An unstable cross-repo seam is
-  a live wire; downstream bindings migrate when they start consuming the
-  published package.
+Ships as ES modules with declarations, dependency-free. Requires `WeakRef`,
+`FinalizationRegistry` and `globalThis.crypto`; uses the global `Iterator`
+as an iterator base class where the runtime has it. Declared floor: Node ≥
+22, current browsers, workers, Deno, Bun. `sideEffects` lists only the
+Temporal entry (D7).
 
 ---
 
@@ -87,86 +69,91 @@ for delivering value semantics in JS, not part of the model.
 
 | Kind | Host representation | Notes |
 | --- | --- | --- |
-| primitives | `null`, `boolean`, `number`, `string`, `bigint` | `NaN` equals `NaN`; `+0` equals `-0` (canonical state holds `+0`); `undefined` is special (§2.3) |
-| record | plain frozen object | **unordered** `key → value`; canonical form has sorted keys |
-| list | plain frozen array | **ordered**; length is semantic |
-| set | `ValueSet` (the `ReadonlySet` read API; set algebra returns `ValueSet`s) | unordered; members interned on entry (structural membership) |
-| map | `ValueMap` (implements `ReadonlyMap`) | unordered; keys and values interned on entry (structural, value-keyed) |
-| timestamp family | `Temporal.*` via `valsem/temporal` | eight kinds, registered immutable |
-| your value types | classes via symbols / registration | §5 |
+| primitives | `null`, `boolean`, `number`, `string`, `bigint`, `symbol` | `NaN` equals `NaN`; `+0` equals `-0`, and canonical state holds `+0` only (D22); `undefined` is special (§2.3); functions are not values |
+| record | plain frozen object | **unordered** `key → value` over own enumerable string and symbol keys |
+| list | plain frozen array | **ordered**; length is semantic; holes canonicalise to `undefined` |
+| set | `ValueSet` | unordered; members interned on entry |
+| map | `ValueMap` | unordered; keys and values interned on entry; stored `undefined` is a real entry |
+| ordered set / map | `OrderedSet` / `OrderedMap` | **ordered** member / entry sequence; order is part of the value |
+| optimised list | `ValueList` | a distinct type whose value is its element sequence (§6.4); not equal to the plain array of the same elements |
+| timestamp | `ValueDate` | epoch milliseconds; the value a `Date` stands for |
+| interned string | `InternedString` | the wrapped string, with its hash paid once |
+| raw view | `RawArray` | a value by identity, not by content (§6.7) |
+| Temporal | `Temporal.*` via `valsem/temporal` | eight kinds |
+| your value types | classes via symbols or registration | §5 |
 
 ### 2.2 Mutable values are not values
 
 `Date`, `RegExp`, native `Map`/`Set`, and the entire TypedArray family
-(including `DataView`, `ArrayBuffer`) are **rejected** — `deepHash`, `intern`,
-and the wire encoder all throw, each error naming the immutable replacement.
-`deepEqual` alone cannot throw (it is a total function) and reports reference
-semantics.
-
-Rationale, established empirically during design:
-
-- A canonical instance is shared by every holder; one `date.setTime()` corrupts
-  all of them *and* invalidates the hash cached against it.
-- `Object.freeze` is not a defense: it does not reach `Date`/`Map`/`Set`
-  internal slots, it makes a `RegExp`'s `lastIndex` read-only (which makes
-  `.exec()` **throw** on `/g` patterns), and it throws outright on any
-  non-empty TypedArray — whose bytes are rewritable through any other view over
-  the same buffer regardless.
-- Half-supported mutable types were measured to be *silently broken*: before
-  removal, `HashMap.get()` silently missed on structurally-equal `Date` keys.
-  Loud rejection replaced silent wrong answers.
+(`DataView`, `ArrayBuffer`, `SharedArrayBuffer` included) are rejected:
+`deepHash`, `intern`, the collections, `produce` and `memoize` throw, each
+error naming the immutable replacement. `deepEqual` alone never throws on a
+type and reports reference semantics (§3.1). A subclass of a rejected type
+is rejected with it (the check walks the constructor chain). The rejection
+table lives in one place (`deep-equal.ts`, `_mutableBuiltinReason`) and is
+shared by every throwing surface and by `valsem/binding`, so one type gives
+one explanation wherever a user meets it. Why: D1, D24.
 
 | Instead of | Use |
 | --- | --- |
-| `Date` | `Temporal.Instant.fromEpochMilliseconds(d.getTime())` + `valsem/temporal` |
-| `RegExp` | a plain `{ source, flags }` record — a regex is behavior, not data |
-| `Map` / `Set` | `ValueMap` / `ValueSet` |
-| TypedArrays / buffers | hex/base64 strings for small binary; content-addressed blob references for large (transfer plane: HTTP, not the value model) |
-
-The rejection table lives in one place (`deep-equal.ts`) and is shared by every
-throwing surface, so one type gives one explanation wherever a user meets it.
+| `Date` | `ValueDate.of(d)`, or `Temporal.Instant` with `valsem/temporal` |
+| `RegExp` | a plain `{ source, flags }` record |
+| `Map` / `Set` | `ValueMap` / `ValueSet` (or the ordered twins) |
+| TypedArrays / buffers | hex or base64 strings |
 
 ### 2.3 `undefined` is not a value (in records)
 
-A record is a partial function from string keys to values; **a key mapped to
-`undefined` is the same record as one without the key**:
+A record is a partial function from keys to values; a key mapped to
+`undefined` is the same record as one without the key:
 
 ```ts
 deepEqual({ a: undefined }, {});           // true
-intern({ a: undefined }) === intern({});   // true — canonical form drops the key
+intern({ a: undefined }) === intern({});   // true — the canonical form drops the key
 ```
 
-The distinction is almost always an accident of construction
-(`{ ...base, x: opts.x }`), and no wire format can express it. Model "present
-but intentionally empty" with `null`. Two deliberate exceptions where intent is
-plausible:
+Arrays are positional, so `[undefined]` has length 1 and differs from `[]`.
+`ValueMap` stores `undefined` deliberately: `m.set(k, undefined)` is a real
+entry distinct from absence (`has` distinguishes; the trie returns a
+sentinel, never `undefined`, for a miss). `ValueMap.fromObject` takes a
+*record*, so record semantics apply to its input. Why: D25.
 
-- **Arrays are positional**: `[undefined]` has length 1 and ≠ `[]`.
-- **`ValueMap` stores `undefined` deliberately**: `m.set(k, undefined)` is a
-  real entry, distinct from absence (`has` distinguishes). With TypeScript, a
-  `Map<K, V | undefined>` is declared intent in a way a record field never is.
-  (`ValueMap.fromObject` takes a *record* as input, so record semantics apply
-  to it: undefined-valued keys are not carried over.)
+### 2.4 Order is semantic exactly where the type says so
 
-### 2.4 Iteration order is not part of the value
+Order is part of the value for arrays, `ValueList`, `OrderedMap` and
+`OrderedSet`, and never for records, `ValueMap` and `ValueSet`. On the
+unordered kinds order is still *observable*, and it is never meaningful:
 
-Order is observable on records, `ValueMap`, and `ValueSet`, but never
-semantic: it does not affect equality, hashing, or which canonical instance you
-get. Consequence: because equal collections collapse to a single canonical
-instance, the order you observe carries no meaning. On `ValueMap`/`ValueSet`
-it is **content-determined** (hash-consed HAMT backing, §8.2 — shipped): equal
-collections iterate identically, in seeded-hash order — stable within a
-process, different across runs, arbitrary by design. (Interned records are the
-deterministic exception: canonical records have sorted keys.) If order carries
-meaning, put it in the value (a list of pairs); an order-sensitive
-`OrderedMap`/`OrderedSet` may exist someday.
+- `ValueMap`/`ValueSet` iterate in a content-determined order (the trie's
+  structure, driven by seeded key hashes): equal collections iterate
+  identically, stable within a process, different across runs.
+- A canonical record's key layout is that of the first spelling interned
+  in this process (string keys, then symbol keys). Equal records are one
+  object, so this too is stable within a process and meaningless (D10).
 
-### 2.5 Equality is substitutability, up to canonicalization
+If order carries meaning, put it in the value: an array or `ValueList`, or
+an ordered collection.
+
+### 2.5 Equality is substitutability, up to canonicalisation
 
 `deepEqual(a, b)` means a and b are interchangeable everywhere *after
-canonicalization*. Observable-but-nonsemantic aspects (key order, insertion
-order, present-undefined) are erased by the canonical form. This is what makes
-interning sound: the pool may substitute either object for the other.
+canonicalisation*. Observable-but-nonsemantic aspects (key order,
+`ValueMap` iteration order, present-`undefined`, the sign of zero) are
+erased by the canonical form. This is what makes interning sound: the pool
+may substitute either object for the other.
+
+### 2.6 Symbols
+
+A registered symbol (`Symbol.for(name)`) *is* its name: hashed by the name,
+so it agrees across realms and installs. A unique symbol (`Symbol(desc)`,
+the well-known symbols) is an identity with no content: it hashes by an id
+assigned on first sight and kept in the hash cache (unique symbols are
+valid `WeakMap` keys since ES2023; registered ones are not, which is why
+they take the other branch). Symbols work as record fields, record keys,
+`HashMap` keys and collection members. Own enumerable symbol keys are part
+of a record's content. valsem's protocol symbols (`equals`, `hashCode`,
+`interned`, `toDraft`) are honoured on class instances only; on a plain
+record they are ordinary keys, so a record cannot forge canonicality or
+choose its own hash. A draft rejects writing them. Why: D9, D27.
 
 ---
 
@@ -174,177 +161,217 @@ interning sound: the pool may substitute either object for the other.
 
 ### 3.1 `deepEqual`
 
-Polymorphic dispatch, in order: `===` (with NaN handling) → primitives →
-`Array.isArray` → the `[equals]` symbol (also the kind discriminator: mismatched
-`[equals]` references are never equal) → constructor registry → plain-object
-structural comparison (own enumerable string keys, undefined-valued keys
-skipped, `__proto__`-safe) → reference semantics for everything else.
+Dispatch, in order:
 
-Total function; never throws. `NaN` equals `NaN`; `0` equals `-0`. Symbol keys
-are ignored (documented). No cycle handling — values are acyclic by doctrine;
-an explicit depth/size limit at decode boundaries is the (still open) DoS
-backstop.
+1. `a === b` → true. Then non-objects: true only for `NaN`/`NaN`.
+2. **Canonical fast path.** If either side carries `[interned] === true`
+   (a class instance; on a plain record the symbol is a key) the pair is
+   unequal. If both sides are in the interner's hash cache the pair is
+   unequal. Two distinct canonicals are distinct values (D27).
+3. `Array.isArray` on either side: both arrays, element-wise, or false.
+4. `[equals]` read from `a`'s **prototype** (an own instance property is
+   not protocol): same constructor required (a subclass is its own type);
+   then, if both sides carry a numeric `[hashCode]` and they differ, false
+   without calling `[equals]` (the companion invariant); else the method's
+   verdict. If only `b` declares `[equals]`, false (the answer must not
+   depend on argument order).
+5. Registry: same constructor on both sides and a registered handler.
+6. Plain records (prototype `Object.prototype` or `null`): own enumerable
+   string and symbol keys, `undefined`-valued keys skipped, `hasOwn` on the
+   other side (never `in`), single pass in the common case with a deferred
+   key count only when undefined-valued keys exist.
+7. Anything else → false. Two distinct instances of the same mutable
+   built-in additionally log a once-per-type development warning (D24).
+
+`deepEqual` is total: it never throws on a type. It is uncapped; on raw
+cyclic input it recurses until the engine throws (§9).
 
 ### 3.2 `deepHash` — the companion invariant
 
-> `deepEqual(a, b)` ⟹ `deepHash(a) === deepHash(b)` — always. The converse
-> never holds (collisions exist). Every equality in the system has a companion
-> hash, and every new equality must ship one.
+> `deepEqual(a, b)` ⟹ `deepHash(a) === deepHash(b)`, always. The converse
+> never holds. Every equality in the system has a companion hash, and every
+> new equality must ship one.
 
-Mechanics: type tags mixed into every hash (arrays ≠ records ≠ sets with
-similar content); records hash order-independently (commutative scrambled sum);
-arrays order-dependently (polynomial); `ValueList` carries incremental hash
-state (§3.4), while `ValueMap`/`ValueSet` hashes are their consed root-node
-hashes (§8.2) — computed once per novel node, O(1) to read. Throws for anything without a hash handler — with teaching errors
-(unregistered Temporal names the `valsem/temporal` import).
+Dispatch mirrors `deepEqual`: primitives; arrays; the mutable built-ins
+(throw); `[hashCode]` as property, getter or method; the registry; plain
+records; any other class (throw, naming what it lacks). Type tags are
+mixed into every hash so arrays, records and sets with similar content
+differ. Records hash **order-independently** and arrays **positionally**
+through accumulators (§3.4). Canonical objects return their cached hash in
+O(1). `deepHash` is depth-capped (§9).
 
-### 3.3 Seeded, flood-resistant leaf hashing
+### 3.3 Leaf hashing
 
-The default leaf hash is **Marvin32** (the DoS-resistant algorithm family .NET
-ships) over UTF-16 code-unit pairs, seeded per-process from
-`crypto.getRandomValues`, shared across duplicate installs via a
-`Symbol.for('valsem.hashSeed.v1')` global. An attacker cannot precompute
-colliding inputs. `configureHasher()` swaps in a stronger keyed PRF (e.g.
-SipHash over `getHashSeed()`) — once, at startup. Hashes are **process-local by
-design**: they never cross the wire, and HAMT shapes derived from them (§8) are
-process-local too.
+Every string and number leaf goes through the active `Hasher`; the
+structural combiners (`mix`, the accumulators) are fixed. The default is
+**Marvin32** over UTF-16 code-unit pairs for strings and a seeded avalanche
+over the IEEE-754 bits for numbers (`-0` normalised to `+0`), keyed by the
+first two words of a 128-bit seed drawn once per process from
+`crypto.getRandomValues` and stored on `globalThis` under
+`Symbol.for('valsem.hashSeed.v1')` so duplicate installs agree. `configureHasher(hasher)` replaces both
+primitives once, before any leaf has been hashed, and throws afterwards;
+`getHashSeed()` exposes the seed for a keyed PRF such as SipHash.
+`createMarvin32Hasher(k0, k1)` builds the default with a chosen key. Hashes
+are process-local and never cross the wire. Why: D28.
 
-Web Crypto (`globalThis.crypto`) is a **platform requirement** — universal in
-every supported runtime (Node ≥ 19, all browsers, workers, Deno, Bun). The
-old existence check was removed together with the "lazy seeding" hardening
-item it motivated: its error text suggested `configureHasher()` as the
-escape, but the throw fired at module load, before any caller could run —
-incoherent by construction. Exotic hosts (e.g. bare React Native without the
-standard `getRandomValues` polyfill) fail at import, which is the honest
-place.
+### 3.4 Canonical meta and the incremental accumulators
 
-### 3.4 Incremental hashing
+Every canonical object has one entry in a single `WeakMap`: `{ h, a, n }`,
+its hash, its raw accumulator, and its defined-entry count (`n` is −1 for
+pooled value-type instances, which have no accumulator). The meta never
+refers back to its key (D11). The same map holds unique symbols' identity
+hashes.
 
-Collections keep hashing off the read path:
+The accumulators are sums modulo 2³² of independent per-entry terms:
 
-- **Records/maps/sets**: a commutative accumulator (`acc' = acc − entry(old) +
-  entry(new)`) is the scheme for record finalize-hashing under `produce`.
-  `ValueMap`/`ValueSet` formerly kept such a `rollingSum`; since the consed
-  HAMT swap their hash *is* the root node's consed hash — structural, cached
-  per node, and shared with every equal subtree.
-- **Arrays/lists**: for plain arrays (produce finalize-hashing), a polynomial
-  accumulator with odd multiplier `P` (invertible mod 2³²):
-  `h([a₀…aₙ]) = Σ hash(aᵢ)·Pⁱ`, composing over concatenation as
-  `hash(A ++ B) = hash(A) + P^|A| · hash(B)`. `ValueList` formerly kept such
-  an accumulator (`pPow`); since the vector rebuild its hash is derived from
-  its consed root and tail nodes — structural, cached per node.
+```
+record: acc = Σ scramble(mix(hash(key), hash(value)))      commutative
+array:  acc = Σ hash(element_i) · P^i                      positional, P odd
+hash    = mix(mix(TAG, count), acc)
+```
 
-Planned: cache the raw accumulators on canonical instances so `produce`
-finalization hashes in O(changes), not O(width) (§10.3).
+`P` is odd, hence invertible, so an entry can be removed as well as added.
+`produce`'s finalize delta-updates a canonical base's accumulator in
+O(changes) and interns the successor prehashed (§7.4). The helpers
+(`_entryTerm`, `_recordHashOf`, `_arrayHashOf`, `_powP`) are the single
+source for the from-scratch and the incremental paths.
+
+The collections do not use accumulators: a `ValueMap`/`ValueSet` hash is
+its consed root's hash, a `ValueList` hash is derived from its consed root
+and tail, computed once per novel node.
 
 ---
 
-## 4. Interning: the pool
+## 4. Interning
 
-### 4.1 Mechanics
+### 4.1 `intern`
 
-A global pool of `hash → bucket record` (the singleton `WeakRef` is inlined in
-the record; a true hash collision promotes it to an array) plus a
-`WeakMap<object, hash>` cache. `intern(value)`:
+`intern(value)` returns the canonical instance of a value:
 
-- primitives return as-is (`-0` as `+0`);
-- objects marked `[interned]` or already in the hash cache return immediately;
-- arrays and plain records are interned bottom-up (children first), then looked
-  up by hash; candidates compare by `childEqual` — **SameValueZero on
-  children** (`===` plus NaN-equals-NaN; plain `!==` would split the pool
-  forever on NaN-containing values — a real bug found and fixed);
-- value types (§5) — a class with an equality *and a hash*, by symbol or by
-  registration — are pooled by that equality, **without freezing** (the hash
-  declares them immutable; freezing a foreign type can break it);
-- everything else **throws**: the mutable built-in families naming the
-  replacement, any other class naming what it lacks. Nothing passes through
-  — a pass-through is a `HashMap` keyed by reference, missing silently.
+- A primitive returns as-is, except `-0` → `+0`.
+- An object marked `[interned]` (a class instance) or present in the hash
+  cache returns immediately.
+- An **array** is interned bottom-up: each own slot interned (a hole reads
+  as `undefined`, never through to `Array.prototype`), then the array is
+  hashed with its accumulator, looked up by shallow SameValueZero on the
+  interned children, and on a miss given meta, frozen, and registered.
+- A **record** is interned bottom-up, and the hash is folded from the
+  `(key, interned child)` pairs *without building the copy*; the pool
+  candidate is matched by key against the interned children (any layout).
+  Only on a miss is the canonical copy built: keys in the incoming order,
+  `undefined`-valued keys dropped, `__proto__` defined as an own data
+  property; by assignment up to 16 keys (sharing the raw object's hidden
+  class when the order matches), `Object.fromEntries` above that (D8,
+  D12). Then meta, freeze, register.
+- A **class instance** is checked against the mutable-built-in table first
+  (throw, naming the replacement). A **value type**, one with an equality
+  and a hash by symbol or by registration, is pooled by its own equality
+  and the constructor as the type, **unfrozen**. Anything less throws,
+  naming what is missing; nothing passes through.
 
-On a miss: the hash is cached, plain data is **frozen**, and a `WeakRef` enters
-the pool. The pool holds nothing alive: canonical instances are reclaimed when
-unreferenced. **Interning does not leak.**
+`intern` is depth-capped (§9). `createInterner()` is a deprecated wrapper
+returning `{ intern }`.
 
-Pool *metadata* (records, dead refs) is reclaimed by a global **incremental
-sweeper**: every pool's bucket records sit in one circular doubly-linked list,
-and a cursor advances around it under a strict budget. The cleanup bill splits
-three ways — **registrations pay a traffic tax** (a few slots of sweep credit
-each, batched so the fixed cost lands once per ~16 ops), **GC epochs pay the
-death tax** (ONE `FinalizationRegistry` sentinel — O(1) cells total, never per
-entry — fires after each GC, the only event that can create dead refs, and
-runs one bounded slice), and **lookups pay nothing**. An empty bucket unlinks
-itself and deletes its map entry through a per-pool shared `WeakRef` to the
-owning map, so a dropped pool's metadata unwinds wholesale as the cursor meets
-it. The guarantee: *dead metadata anywhere is reclaimed within O(metadata /
-budget) registrations or a few GC epochs, whichever comes first; nothing grows
-without traffic, everything shrinks with any traffic; no monolithic sweep
-pass, no per-entry finalizers, no timers.* Chosen over per-entry
-`FinalizationRegistry` and over monolithic threshold sweeps **on measurement**
-(`scripts/pool-gc-bench.mjs`): equal-or-better wall time, and both pause
-pathologies — 15–54 ms in-batch threshold-sweep passes, 10–18 ms post-GC
-finalization storms — flattened to baseline GC levels.
+### 4.2 The pool
 
-Canonical records are rebuilt with **sorted keys** and `__proto__`-safe field
-definition (a `__proto__` key from `JSON.parse` becomes an ordinary own data
-property — never a prototype swap).
+One `InternPool` per kind of thing: the global pool for plain data and
+value-type instances; two per trie configuration (bitmap and collision
+nodes; `ValueSet`, `ValueMap`, `OrderedSet` and `OrderedMap` each have
+their own configuration); `ValueList`'s node pool and its list pool; one
+each for `OrderedMap`, `OrderedSet`, `InternedString` and `ValueDate`; and
+any number created by `createInternPool`. (`ValueMap` and `ValueSet`
+wrappers need no pool: they canonicalise through a `WeakMap` keyed by root,
+§6.3.) A pool
+is a `Map` from a 30-bit key (`hash & 0x3fffffff`, so it is always a Smi)
+to a bucket: one `Slot`, or an array of slots when two keys collide. A
+`Slot` *is* the `WeakRef` to the pooled object (a subclass), carrying the
+full 32-bit hash and its pool; `lookup(hash, predicate)` pre-checks
+`slot.hash` before dereferencing. `register(value, hash)` prunes dead
+members of the bucket in passing. Why: D3.
 
-### 4.2 `internHash` (and the deletion of `internEqual`)
+Cleanup: one global `FinalizationRegistry` reports each death after the
+major GC that clears its `WeakRef`. The callback pushes the slot on a
+LIFO stack and schedules a drain: `requestIdleCallback` where it exists
+(deadline-bounded slices, at least 64 per call), else `setImmediate`
+(4096 per turn), else inline. The stack is bounded at 100k; beyond it,
+deaths are reclaimed inline. The registry is held from a module binding.
+The pool holds nothing alive; a dropped pool is retained only as long as
+its last live member. Why: D2.
 
-`internHash` returns the cached hash in O(1) for canonical values, computing
-structurally otherwise — pure, no side effects. `internEqual` was **deleted**:
-it was a side-effecting equality predicate (its fallback interned both
-arguments — freezing the caller's objects and pooling transients no equality
-check can retain), its fast paths are exactly `deepEqual`'s canonical
-short-circuit (which also resolved the old disagree-on-non-internables wart),
-and callers wanting adoption semantics can say so explicitly:
-`intern(a) === intern(b)`.
+`pool.intern(object)` is the high-level entry: returns `object` if marked,
+otherwise looks up by its `[hashCode]` and `[equals]`, and on a miss marks
+it `[interned]`, freezes it, and registers it.
 
-### 4.3 `HashMap`
+### 4.3 Probes
 
-A mutable `Map` whose **keys** are interned on the way in — structurally equal
-keys (any field order) address the same entry, because canonical keys make a
-native reference-keyed `Map` sufficient. `getOrCreate` avoids the
-has/get/set dance. Values are stored as-is.
+- `isCanonical(v)`: a primitive (not a function), or an object in the hash
+  cache, or a class instance marked `[interned]`. The probe behind every
+  canonical short-circuit.
+- `fastEquals(a, b)`: `a === b`, after verifying both sides canonical while
+  checks are on (a raw argument throws rather than yielding a silent
+  `false`).
+- `internHash(v)`: the cached hash in O(1) for canonical objects, `deepHash`
+  otherwise. Pure.
+
+### 4.4 Freezing and the two switches
+
+Plain records and arrays are frozen when they become canonical; valsem's
+own classes (the collections, `ValueDate`, `InternedString`, `RawArray`)
+freeze their instances unconditionally; user value-type instances pooled
+through `intern` are not frozen. Two one-way,
+process-wide switches, read live and independent of the environment:
+`skipChecks()` stops the *canonical only* verification in `fastEquals`;
+`skipFreezing()` stops freezing canonical records and arrays. Drafts
+copy-on-write through a canonical whether or not it is frozen
+(`isImmutable` is "frozen or canonical"). Why: D16.
 
 ---
 
 ## 5. Extension: making your own types values
 
-Three cross-realm registered symbols (namespace `valsem.*` — these are
-forever):
+### 5.1 The protocol
 
-| Symbol | Enables | Shape |
+The three value-protocol symbols, cross-realm registered as
+`Symbol.for('valsem.<name>.v1')` (D4); the fourth protocol symbol,
+`toDraft`, belongs to §7.1:
+
+| Symbol | Tier | Shape |
 | --- | --- | --- |
-| `equals` | `deepEqual` — *comparable* | `[equals](other): boolean` — also the kind discriminator |
-| `hashCode` | `deepHash` and pooling by `intern` — *a value* | number property (preferred) or method |
-| `interned` | intern fast path | `true` on canonical instances |
+| `equals` | **comparable**: `deepEqual` answers by content | `[equals](other): boolean` on the prototype; also the kind discriminator |
+| `hashCode` | **a value**: hashable, internable, a key, state | `[hashCode]: number` as property, getter or method; declares immutability (D26) |
+| `interned` | **auto-interning type**: every instance canonical by construction | `[interned]: true`; requires a private constructor (D27) |
 
-Registry for types you cannot edit:
+The registry form for types you cannot edit: `deepEqual.register(Type,
+equalsFn)` makes it comparable; `deepEqual.register(Type, equalsFn, hashFn)`
+makes it a value. Registering again replaces both handlers. Dispatch keys
+on the prototype's constructor. `register` refuses a hash for the mutable
+built-ins; an equality alone is accepted for them (the contained escape
+hatch: `deepEqual.register(Date, (a, b) => a.getTime() === b.getTime())`).
 
-```ts
-deepEqual.register(Type, equalsFn);          // comparable: deepEqual by content
-deepEqual.register(Type, equalsFn, hashFn);  // a value: hashable, internable
-```
+A class instance with `[equals]` alone is comparable and refused by every
+admitting operation with an error naming the missing hash.
 
-The hash is the gate for pooling, by symbol or by registration: a hash is
-only useful if it never changes, so supplying one *declares* immutability —
-"no reachable mutation", not "no obvious setter". An equality alone is the
-comparable tier, honest for a mutable object, and the only registration the
-mutable built-ins accept: `register` refuses a hash for `Date`, `RegExp`,
-`Map`, `Set` and the TypedArrays. (Earlier revisions carried a separate
-`{ immutable: true }` flag beside the hash; it was redundant, and it let a
-class with `[equals]` + `[hashCode]` fall through `intern` untouched and key a
-`HashMap` by reference. Removed.)
+### 5.2 `createInternPool`
 
-`createInternPool<T>()` gives a class its own typed weak pool (canonical `===`
-instances, the same deal the built-in collections get); per-class pools need no
-type tags in hashes.
+`createInternPool<T>()` gives a class its own typed weak pool (§4.2). The
+pattern: a private constructor, a static factory that builds the instance,
+sets `[hashCode]`, and returns `pool.intern(p)`; the class declares
+`[interned]: true`. Per-class pools need no type tag in their hashes.
 
-`valsem/temporal` (side-effect import) registers equality, hashing, and
-immutability for all eight Temporal kinds. `Duration` is the documented
-special case: it has no `equals()` and no total order (`compare(P1D, PT24H)` is
-0; `compare(P1M, P30D)` throws), so valsem compares it **field-wise on
-canonical `toString()`** — `P1D ≠ PT24H`, `PT0H = PT0M` — explicitly *not*
-`Duration.compare`.
+### 5.3 Temporal
+
+`import 'valsem/temporal'` registers, for `PlainDate`, `PlainDateTime`,
+`PlainTime`, `PlainYearMonth`, `PlainMonthDay`, `Instant`, `ZonedDateTime`
+and `Duration`, an equality and a hash. For six kinds the equality is
+Temporal's own `equals()` and the hash is over the canonical `toString()`.
+`Duration` compares field-wise over its ten fields and `ZonedDateTime` over
+`epochNanoseconds`, `timeZoneId` and `calendarId`, each hashed over the
+same fields (D5). Temporal values pool unfrozen. A kind absent from the
+runtime is skipped; a present kind whose prototype lacks `equals` makes
+registration throw; no `Temporal` global at all throws. `registerTemporal()`
+is the same registration, callable and idempotent. Without the import,
+Temporal values fall to reference semantics and `deepHash` throws naming
+the import.
 
 ---
 
@@ -352,808 +379,524 @@ canonical `toString()`** — `P1D ≠ PT24H`, `PT0H = PT0M` — explicitly *not*
 
 ### 6.1 The plain-data doctrine
 
-The Immutable.js lesson governs everything: it had the better data structures
-(HAMTs!) and lost to immer anyway, because `.get('email')`, wrapper-infected
-signatures, and `toJS()` tollbooths taxed every line. **For data, ergonomics is
-the contract; performance is the implementation.** Four rules:
+1. **Plain data by default.** Records and lists are plain frozen objects
+   and arrays; `produce` edits them with plain syntax.
+2. **Classes only where JavaScript lacks the primitive**: sets, value-keyed
+   maps, ordered maps, and even then duck-typed to the native readonly
+   interfaces.
+3. **Optimised types are opt-ins** for measured hot paths (`ValueList`,
+   `InternedString`, `RawArray`).
+4. **Optimisations are invisible.** Same syntax, same semantics.
 
-1. **Plain data by default.** Records and lists are plain frozen objects and
-   arrays; `produce` edits them with plain syntax; duck typing works
-   (`{ ...x, extra: 1 }` turns an X into a Y).
-2. **Classes only where JavaScript lacks the primitive** — sets and value-keyed
-   maps — and even then duck-typed to the native readonly interfaces.
-3. **Optimized types are opt-ins**, chosen knowingly for measured hot paths
-   (`ValueList`, `InternedString`).
-4. **Optimizations are invisible.** Same syntax, same semantics; if a user can
-   tell an optimization is on other than by timing it, it's a bug.
+No collection impersonates a native type: a `ValueList` is not an array
+and does not pretend to be (D29).
 
-### 6.2 `ValueMap` / `ValueSet`
+### 6.2 What every collection shares
 
-Persistent, immutable, canonical-instance collections on the hash-consed CHAMP
-trie (§8.2): two with equal contents are the same reference — **lineage-free**,
-since equal content converges on the same consed root however it was built —
-carry the root's hash as their precomputed `[hashCode]`, compare in O(1)
-(`[equals]` is a root pointer comparison), and update persistently
-(`set`/`delete`/`add` path-copy O(log n) nodes and share the rest; an
-unchanged write returns `this`).
+- **Canonical instances.** Equal content is one `===` object, lineage-free:
+  however a collection was built, it converges on the same instance. Each
+  class carries `[hashCode]` (a getter over a private field, so no own
+  symbol property exists and a spread copy carries no marker), `[interned]`
+  (`true`), and `[equals]` (`===`).
+- **Intern on entry.** Keys, values and members are interned as they
+  arrive; probes are interned before lookup; internally slots compare by
+  SameValueZero, which on canonical contents *is* structural equality
+  (D32).
+- **Encapsulated backing.** The trie or tree is a `#private` field; the
+  instance itself is frozen. The class *is* the readonly interface:
+  `ValueMap` and `OrderedMap` implement `ReadonlyMap`; `ValueSet` and
+  `OrderedSet` carry the `ReadonlySet` read API. `new Map(m)` / `new
+  Set(s)` for a mutable copy (D30).
+- **Persistent updates.** Mutators return the canonical successor; an
+  unchanged write returns `this`.
+- **Explicit-stack iterators** extending the global `Iterator` where it
+  exists, so the ES2025 helpers work (D6).
+- **Drafting** through `[toDraft]` (§7), with a mutable twin per class.
 
-- **They ARE the readonly interfaces**: `ValueMap implements ReadonlyMap`;
-  `ValueSet` has the whole `ReadonlySet` read API and is a `ReadonlySetLike`,
-  but its ES2025 set algebra returns **`ValueSet`s** — a value's operations
-  yield values — where the lib's `ReadonlySet` signature demands a native
-  `Set`, so it cannot spell `implements ReadonlySet`. Pass them anywhere the
-  read API is accepted; take a mutable copy with `new Map(m)` / `new Set(s)`.
-- **The backing store is a `#private` field, never exposed.** JavaScript cannot
-  make a `Map`/`Set` immutable at runtime (`Object.freeze` is a no-op on their
-  internal slots — verified: a "frozen" backing map could be mutated, corrupting
-  the pool). Encapsulation removes the hole instead of guarding it — and is
-  exactly what let the HAMT swap land invisibly. Instances themselves are
-  frozen; the trie root and size are `#private`.
-- **Keys, values, and members are interned on entry** — the invariant, not a
-  convention: everything stored is a canonical value or primitive, so
-  structurally equal raw inputs converge on one canonical collection, raw
-  plain data is frozen at the door (closing the mutation-poisoning hazard —
-  a mutable stored element could otherwise change under its cached hashes
-  and split canonicality), and lookups canonicalize their probe so
-  `get`/`has`/`delete` accept any structural equal. Internally slots compare
-  by SameValueZero, which — on canonical contents — *is* structural
-  equality. Stored `undefined` is legal in maps and distinct from absence
-  (`trieGet` returns a sentinel, never `undefined`, for a miss); the wrapper
-  canonicalizes through a `WeakMap<root, wrapper>` — ephemeron semantics, no
-  scan, no sweep. (Class instances carrying their own `[equals]`/`[hashCode]`
-but no pool are pooled by `intern` in the global pool, unfrozen and unmarked
-— the hash is their author's promise of immutability, and equality between
-such instances is the class's own `[equals]`, with the constructor as the
-type: a subclass is its own type.)
+### 6.3 `ValueMap` / `ValueSet`: the hash-consed CHAMP trie
 
-The representation-visibility rule: **`InternedString.value` is public because
-a primitive string is *genuinely* enforceable; the collections' backing trees
-are private because nothing else is.** The representation is public exactly
-where the platform can protect it. (`ValueList.array` was public under the
-flat-array backing for the same reason; the vector rebuild retired it —
-`toArray()` provides the frozen snapshot on demand.)
+`hamt.ts` is one trie shared by four classes at three strides: `ValueSet`
+(stride 1, member), `ValueMap` (2, key + value), `OrderedSet` (2, member +
+anchor), `OrderedMap` (3, key + value + anchor). Slot 0 of an entry is the
+key; trailing slots are opaque payload compared by SameValueZero.
 
-### 6.3 `ValueList` / `InternedString` — opt-in optimizations
+**Structure.** A bitmap node carries `dmap` (inline entries), `nmap` (child
+nodes), and one dense slot array indexed by popcount: entry slots (stride
+each, in bit order) followed by child slots. Five bits of the key hash per
+level, 32-way branching, at most seven levels; entries whose keys share a
+full 32-bit hash live in a collision node at the bottom. Every node also
+carries `h`, its consed content hash, and `n`, the entries in its subtree.
 
-`intern([1, 2])` already yields a canonical frozen `===`-comparable plain
-array; strings natively have value semantics. What the wrappers add is purely
-performance: `ValueList` is the hash-consed content-chunked tree of §8.3
-(O(log n) expected persistent `push`/`pop`/`set`/`insert`/`remove`/`splice`/
-`slice`/`concat` with structural sharing; equality is one pointer comparison,
-since instances are pooled; `toArray()` snapshots on demand), and
-`InternedString` precomputes a string's hash once. Accordingly they are
-**opt-ins for measured hot paths, not defaults** — and on the wire they are
-*hints* (`valsem.list`, `valsem.string`), not model types: a hint-blind
-endpoint decodes them as the plain model value.
+**Consing.** Every node allocation goes through an intern pool: before a
+node is created, an existing node with the same bitmaps and pairwise-same
+slots is returned instead. Children are consed before parents, so a shallow
+slot comparison is a deep one by induction, and two tries with equal content
+are the same root object. Consing is sound because the shape is a pure
+function of content: insertion order cannot matter (hash-directed shape);
+deletion restores exactly the shape insertion would build (a subtree
+collapsing to a single entry is inlined upward, unwinding prefix chains;
+a non-root node never has arity < 2); collision-node entries keep a
+canonical order (primitives by type and value, objects by a lazily assigned
+per-instance ordinal, sound because members are identities within a
+process). Why: D31.
+
+**The wrappers.** A `ValueMap` is `{ #root, #hash = root.h }`, canonicalised
+through a `WeakMap<root, wrapper>`: ephemeron semantics, no scan. `size` is
+`root.n`. `get`/`has` walk at most seven nodes; `set`/`delete` path-copy at
+most seven. The map's `[hashCode]` is the root hash.
+
+**Set algebra.** `union`, `intersection`, `difference`,
+`symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom` take
+any iterable of values, decide membership by this set's equality (never the
+argument's `has`), and return `ValueSet`s. Two `ValueSet`s merge at node
+level: where the tries share a node by pointer the result shares it too, so
+the cost is proportional to where the operands differ, O(1) for the same
+set. `ValueSet` is a `ReadonlySetLike` and does not spell `implements
+ReadonlySet` (the lib's algebra signatures return a native `Set`).
+
+**Iteration order** is the trie's structure: content-determined, arbitrary
+by design (§2.4).
+
+### 6.4 `ValueList`: the content-chunked tree
+
+A `ValueList` is `{ #root: CNode | null, #tail: unknown[], #hash }`. The
+closed runs form a tree of consed nodes; the open last run is a plain tail
+array, so `push` and `pop` are array copies and the tree is touched only
+when a run closes.
+
+**Chunking rule.** A leaf run ends after any element whose hash says
+"boundary" (`Math.imul(h, 0x9e3779b1) >>> 27 === 0`, one in 32) or at 64
+elements. A branch run ends after any node whose hash says so under the
+same test with a different salt, with at least two nodes per run so every
+level shrinks, and at 64. Because a boundary is a property of the elements
+beside it, the shape is a function of the sequence alone: equal content is
+the same node however it was built, and an edit disturbs only the runs
+around it, resynchronising with the untouched remainder at the next
+boundary. Why: D18.
+
+**Nodes.** `{ h, n, ht, kids, offsets, first }`: consed hash, elements
+covered, height (1 for a leaf), the kids (elements at height 1, nodes
+above), per-kid start offsets on branches, and the first element under the
+node (the anchor the ordered collections address a run by, §6.5). One node
+pool for all heights.
+
+**One algorithm, `merge`.** Given a left context (the path to a cut), head
+elements, and a cursor over a right context (the remainder of a list after
+a cut), re-chunk level by level until each level resynchronises with the
+right context's existing nodes, at which point the parent and everything
+after it are reused by pointer. `from`, `push`, `splice`, `concat` and
+`slice` are all calls to it. `insert` and `remove` are splices. `set` is a
+path copy when no boundary flips, else a local re-chunk. `setMany` applies
+a batch of point edits in one bottom-up pass. The bounds are expected on
+the seeded hash, with no amortised rebuild anywhere.
+
+**Reads.** `get(i)` walks size tables, with the last leaf cached so
+sequential reads stay in one leaf; `length` is `root.n + tail.length`;
+iteration streams leaves. `toArray()` is the **interned** flat array,
+weakly memoised per instance (`WeakMap<list, WeakRef<array>>`), with
+`toArray()[i] === get(i)` and `list.toArray() === intern([...sameContents])`
+(D33). `ValueList.diff(a, b)` returns the changed regions (`Hunk`s) between
+any two lists by descending both trees and skipping shared nodes by
+pointer.
+
+**Anchors** (used by §6.5). Each ordered collection keeps, per key, its
+anchor: the first element of the lowest node on the key's path that the key
+does not itself start (the list's first element anchors to `_ANCHOR_ROOT`,
+tail elements to `_ANCHOR_TAIL`). Following anchors upward yields the
+firsts of the non-first kids on the key's path, and a descent matching them
+against each node's kids finds the index in O(log n) (`_indexOf`). Every
+anchor a tree implies is contributed by the node whose kid it names, so
+after an operation the anchors that may have changed are exactly the
+contributions of the nodes it consed: `_record(fn)` collects those (pool
+hits included), and `_anchorUpdates(consed, next)` turns them into a
+key → anchor map, later nodes overriding superseded ones.
+
+### 6.5 `OrderedMap` / `OrderedSet`
+
+An `OrderedSet` is a `ValueList` of the members (the order, and the value:
+the set *is* its member sequence) plus a stride-2 trie from member to
+anchor. An `OrderedMap` is a `ValueList` of the keys, a parallel
+`ValueList` of the values, and a stride-3 trie from key to value and
+anchor. The trie is a function of the lists, so the wrapper pools on the
+lists alone (`OrderedMap`: hash of the two list hashes; hit when both lists
+are `===`). `keyList` and `valueList` are public: two maps with the same
+keys in the same order share one key list whatever their values did.
+
+Operations: `get`, `has`, `indexOf`, `at`, `keyAt`, `valueAt`, `first`,
+`last`, `set` (a present key keeps its position; a new key appends),
+`delete`, `insertAt`, all O(log n) expected. A structural edit runs the
+list operation under `_record`, sets or removes the trie entry (a new key
+anchors to the tail), then applies the anchor updates the consed nodes imply
+(`applyAnchorUpdates`: keys the trie no longer holds are skipped, and so
+are unchanged anchors, at one lookup each). Iteration is in order. `OrderedSet` has no set algebra (a union has
+no single natural order); `ValueSet.from(orderedSet)` for that. Why: D23.
+
+### 6.6 `HashMap`, `HashSet`, `memoize`
+
+`HashMap` is a native `Map` keyed by canonical keys: every key is
+`intern`ed on `set` and on every lookup, values are stored as-is,
+`getOrCreate` avoids the has/get/set dance, and iteration yields canonical
+keys. `HashSet` is its twin. Values stored as-is is the point: `HashMap` is
+where value keys meet live mutable objects (D15).
+
+`memoize(fn, { maxSize = 1 })` caches results keyed on the argument tuple by
+value: each argument is `internHash`ed (raw arguments are walked), the
+hashes are folded, and a bucket in a private strong `HashTable` is matched
+by `deepEqual` per argument against the stored, interned arguments (a
+pointer compare when the caller's argument is canonical). On a miss the
+arguments are interned and stored. Results are interned; a result `intern`
+refuses is rejected. Eviction is LRU through a doubly linked list;
+the cache holds arguments and results strongly. `clear()` and `size` are on
+the memoized function. Why: D14.
+
+### 6.7 `InternedString`, `ValueDate`, `RawArray`
+
+`InternedString.for(text)` is an opaque, pooled wrapper holding `value` (the
+string, public because a primitive is genuinely immutable) and its hash,
+paid once per distinct text; `toJSON` returns the text (D17).
+
+`ValueDate.of(x)` accepts what `new Date(x)` accepts, parses it the same
+way, rejects an invalid date, and pools on epoch milliseconds. `epochMs`,
+`toDate()` (a fresh mutable `Date`), `valueOf()` (the epoch, so `<` and
+subtraction work), `toJSON()` (the ISO string, as with a `Date`).
+
+`RawArray.from(rawArray)` holds a raw array and admits elements on demand:
+`get(i)` returns one canonical element, `slice(a, b)` the canonical array
+of a range, each element interned once and memoised per slot; raw slots
+are released as they are admitted. It has no iteration. Its value is its
+identity: an identity `[hashCode]`, `[equals]` is `===`, marked
+`[interned]`, so it sits in canonical state as an opaque leaf that `intern`
+and `produce` return as-is (D21).
 
 ---
 
-## 7. `produce` — the mutation story — **shipped**
-
-> Built after a source-level study of immer and mutative (both ~3k lines;
-> notes in the decision log). As-built deviations from the sketch below, all
-> recorded there: collection drafts are overlays (base + edits/ops) rather
-> than trie transients — the transient upgrade is Phase-2 perf work; DraftList
-> materializes its working array on first write (the immer/mutative cost,
-> accepted for v1); patches ship as a typed vocabulary (record.set/delete,
-> list.set/splice, map.set/delete, set.add/delete, replace) with inverse
-> patches and `applyPatches` implemented ON TOP of produce; the curried
-> `produce(recipe)` form is included.
-
-### 7.1 One operation
+## 7. `produce`
 
 ```ts
 produce(base, draft => { draft.user.email = 'x@y.dk'; draft.tags.add('vip'); });
 ```
 
-`intern` is the degenerate case: `intern(x) ≡ produce(x, () => {})`. This
-unification is *forced*, not chosen: recipes graft foreign data into drafts
-(`draft.config = JSON.parse(str)`) constantly, so finalize must already handle
-non-canonical subtrees — accepting a foreign *base* costs nothing extra. One
-canonicalization engine; `adopt(x)` (or retained `intern`) is the named sugar
-for the empty recipe, because intent at system boundaries deserves a name.
+`intern(x) ≡ produce(x, () => {})`. Finalize cost is proportional to the
+drafted spine plus grafted foreign material, never to what is already
+canonical. `produce(canonical, noop)` returns the same reference;
+`produce(foreign, noop)` returns the canonical equivalent; a recipe whose
+edits net out returns the base and emits zero patches. Why: D35.
 
-> **Finalize cost ∝ drafted spine + foreign material.** You pay for what you
-> changed and for what isn't yet canonical — never for what is.
+### 7.1 The protocol and the scope
 
-Coherence checks: `produce(canonical, noop)` returns the same reference;
-`produce(foreign, noop)` returns the canonical equivalent;
-`produceWithPatches(anything, noop)` emits **zero patches** — canonicalization
-changes representation, never value.
+A `produce` call opens a **scope**; every draft state created inside it is
+recorded there and revoked when the recipe returns (a proxy's `revoke` is
+called; a class draft checks `revoked` on every operation). A draft from
+another scope cannot be assigned in (`assertAssignable`).
 
-### 7.2 Pool membership is the marker
+A value becomes draftable by implementing `[toDraft](parent)` on its
+prototype, returning a `DraftState` built with `createDraftState`:
 
-Immer overloads `Object.freeze` as its "already processed" marker — which is
-why disabling its auto-freeze makes it *slower* (up to 50× on large states):
-without frozen markers it re-walks everything. Mutative decouples tracking from
-freezing with private per-produce bookkeeping. valsem has the strictly stronger
-third option: **pool membership** — O(1)-checkable, and *global* (a shared
-subtree is skippable in every produce everywhere, forever). One marker drives
-three decisions: finalize skipping, draft-wrapping (below), and later HAMT node
-canonicalization.
+| Field | Role |
+| --- | --- |
+| `kind`, `base`, `parent`, `scope` | identity and position |
+| `modified` | set by `markChanged`, bubbles to the root |
+| `draft` | what the recipe receives |
+| `finalize(state, path, recorder)` | the canonical result; emits this container's patches when `path` is not null |
+| `applyPatch?`, `childAt?` | how `applyPatches` reaches and navigates through this kind |
+| `snapshot?` | the value as it stands now, for `current()` |
+| `revoke?` | proxies revoke; classes need not |
+| `result`, `finalized`, `revoked` | memoisation and lifecycle |
 
-### 7.3 Draft architecture
+Plain objects and arrays are the two kinds `produce` itself registers with
+`draft-core` at import (`_setCoreDraftFactories`); every other kind,
+the built-in collections included, arrives through the protocol. The
+toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
+`assertUnrevoked`, `assertAssignable`, `createChildDraft`, `resolve`,
+`restoreValue`, `snapshotOf`, `isDraftable`, `isDraft`, `stateOf`,
+`isImmutable`, `same`, and the sequence-patch helpers `emitSeqOps`,
+`retractSeqPatches`, `seqTailProfile`. Why: D7.
 
-- **Plain records and arrays: proxies**, immer-style — plain syntax
-  (`draft.a.b = 1`, `draft.rows.push(x)`), lazy copy-on-read, per-location.
-  This is the non-negotiable default path (rule 1).
-- **Collections: hand-written draft counterpart classes** (`DraftMap`,
-  `DraftSet`, `DraftList`) — no proxies, exact TypeScript types, natural
-  mutable verbs (`set`/`add`/`splice`) that native Map/Set users already write,
-  so no syntax is lost. *Why not context-gated mutators on the canonical
-  classes*: interning maximizes aliasing — the same canonical instance may sit
-  at ten paths, so `this` cannot identify a location; ambient draft context
-  leaks across `await`; sometimes-throwing methods on frozen types are an API
-  smell. Draft wrappers are bound per-location, which dissolves all three.
-- **Per-path semantics**: editing `draft.a` never affects `draft.b` even when
-  `base.a === base.b` (interning makes such sharing common). Set members have
-  no location — draft sets are `add`/`delete` only. Read-your-writes inside
-  the draft. Every draft object is **revoked at finalize** (escape = throw).
-- **Foreign grafts stay raw**: data the recipe just created is private —
-  mutate it bare, no proxy, no protection needed (an optimization immer
-  cannot make: it drafts everything it touches).
-- **Patch emission**: draft verbs are *semantic operations* — `splice(2, 1)`
-  is recorded as a splice, set `add`/`delete` as membership deltas — so
-  `produceWithPatches` emits exact minimal wire patches with **no diff
-  inference at all** (immer's proxied array patches are notoriously poor; and
-  this sidesteps the O(n·m) LCS diff entirely for the produce path).
-  This is what upgrades `produce` from sugar to infrastructure: a live-query
-  server updating state through `produce` gets its wire deltas as a
-  by-product.
-- Later, invisibly (rule 4): **schema-compiled accessor drafts** for
-  closed-schema records — real `get`/`set` accessors per known field, fixed
-  hidden-class shape, cached by schema content-address, proxy-free — with
-  automatic fallback to the proxy path for anything exotic. (The
-  serializable-lambda trick — HOAS / LINQ-expression-tree style — keeps
-  higher layers' constructs out of closures.)
-- Adopted from Mutative: per-call options (no global config), strict-in-dev /
-  loose-in-prod toggle, an explicit decision pending on async recipes (async
-  is where draft escapes breed), and its `immer-non-support.test.ts` corpus as
-  a free adversarial test suite.
+### 7.2 Draft kinds
 
-### 7.4 Hot loops: three tiers, cheapest first
+- **Plain records: revocable `Proxy`** over the base, with a shallow copy
+  made on first write (§7.3), an `assigned` map (key → set/deleted) and a
+  `drafted` set (keys whose base value was child-drafted on read). Reads of
+  a draftable base value hand out a child draft; reads of the recipe's own
+  assigned material return it raw (the immer rule), except frozen or
+  canonical assignments, which are drafted copy-on-write so mutating
+  through the read never throws. Writing a protocol symbol is rejected.
+- **Plain arrays: `Proxy`** with a **virtual mode**: point edits
+  (`vEdits`) plus an appended tail (`vTail`) over the base; index reads and
+  writes and `push` never copy, and `pop` stays virtual while the appended
+  tail is non-empty; iteration and the read-only methods work virtually
+  through prototype dispatch. Any other structural op (`shift`, `unshift`,
+  `splice`, `sort`, `reverse`, `fill`, `copyWithin`, `length` writes,
+  sparse growth, a `pop` reaching the base) and an `ownKeys` read
+  materialise a working copy. Mutating methods are intercepted and recorded
+  as `SeqOp`s
+  (`set` and `splice`) while intent is capturable; `ops` becomes null once
+  it is not. `opaqued` marks that base elements may sit at foreign indices,
+  after which any draftable read is drafted.
+- **`DraftMap`**: an overlay of edits (canonical key → draft or raw value)
+  and an `assigned` map over the base; finalize sets the resolved edits
+  into the base map. **`DraftSet`**: `added`, `removed`, `cleared`;
+  members have no location, so `add`/`delete`/`clear` only.
+- **`DraftList`**: never materialises. A persistent working `ValueList`
+  tracks positions (every structural op applied at O(log n) as it happens,
+  with placeholders where new elements went) and an overlay from current
+  index to what the recipe sees there; a splice re-indexes the overlay in
+  O(edits); finalize resolves the overlay onto the working list.
+- **`DraftOrderedMap` / `DraftOrderedSet`**: a persistent working
+  collection with every structural op applied as it happens, a value
+  overlay (map only), and an op log in operation order for patches.
 
-1. **Batch inside one `produce`** — drafts amortize; the pool sees one
-   transaction per recipe, not per edit.
-2. **Transient inside, canonical at the edges** — don't canonicalize every
-   120 Hz drag tick; keep in-flight state plain/mutable and canonicalize at
-   commit boundaries (drag-end, debounce, frame commit). This is the produce
-   design at a larger timescale.
-3. **Opt-in O(log n) structures** (§8–9) when the *committed* value is huge
-   and edits are frequent.
+Each draft class stores its state under a non-enumerable `DRAFT_STATE`
+property; `isDraft`/`stateOf` read it. Why: D36, D39.
 
-Most applications never leave tier one.
+### 7.3 Plain-record copies
+
+The first write to a record draft copies the latest base with
+`Object.assign({}, base)`, not spread: a library's single copy site sees
+every shape in the application and object spread's inline cache degrades
+past four shapes, while `Object.assign`'s builtin fast path keys on the
+source map (D8). A base with an own `__proto__` key is spread instead,
+because `Object.assign`'s [[Set]] would swallow that key. Membership tests
+use own properties only, never `in`.
+
+### 7.4 Finalize: the intern walk
+
+`resolve(value, path, recorder)` is the one function every kind calls on
+its children: a draft finalizes (memoised per state, so aliased drafts
+converge on one canonical); anything else `adopt`s. `adopt` passes
+primitives (with `-0` → `+0`), recognises canonical material in O(1) by the
+hash cache or the `[interned]` marker, and otherwise walks foreign plain
+data for embedded drafts and interns the result (a value type pools; any
+other class or a mutable built-in throws its teaching error). `adopt` is
+depth-capped under the `produce` name. `finalizeState` interns the base of
+an unmodified state and delegates a modified one to its kind.
+
+**Record finalize** builds the successor from the copy, resolving each
+assigned or drafted key, restores `base[key]` where a child netted out,
+delta-updates the base's accumulator by the changed entries, and interns
+the successor prehashed (`_internPrehashed`: pool lookup by shallow
+equality, then meta, freeze, register). Records without a cached
+accumulator go through `intern`.
+
+**Array finalize** has a fast path when the base has an accumulator and the
+recorded ops keep positions stable below a low-water mark
+(`seqTailProfile`: point sets plus tail splices): resolve the touched
+indices below the mark and the rewritten region above it, delta-update the
+accumulator, and, before building anything O(n), consult the **transition
+cache**: a `WeakMap` from canonical base to its 16 most recent transitions
+`{ hash, length, touched indices, their values, appended region, WeakRef
+successor }`. A match on base identity and exact delta *proves* the result
+with no hash trust and no walk; a miss builds the successor with `copyArr`
+and interns it prehashed, then stores the transition. Everything netting
+out returns the base and retracts this container's patches. The slow path
+materialises, resolves every slot, interns, and, when intent was lost,
+emits a net index diff. `copyArr` keeps an unfrozen **shadow** of a frozen
+base of 64+ elements in a `WeakMap`, built on the second copy of the same
+base, because V8's `slice` fast path excludes frozen-elements arrays. Why:
+D38.
+
+### 7.5 Patches and `applyPatches`
+
+`produceWithPatches` returns `[result, patches, inverse]`. The vocabulary
+(`PatchKinds`, extensible by declaration merging for exact narrowing):
+
+| Kind | Fields |
+| --- | --- |
+| `replace` | `path`, `value` (a recipe returned a replacement) |
+| `record.set` / `record.delete` | `path`, `key`, (`value`) |
+| `list.set` / `list.splice` | `path`, `index`, (`value`) / `remove`, `insert` |
+| `map.set` / `map.delete` | `path`, `key`, (`value`) |
+| `set.add` / `set.delete` | `path`, `value` |
+| `omap.set` / `omap.delete` / `omap.insert` | `path`, `key`, (`value`), (`index`) |
+| `oset.add` / `oset.delete` / `oset.insert` | `path`, `value`, (`index`) |
+
+Paths are record keys, sequence indices, or under a map the canonical key
+value itself. Record, map and set patches are net per container
+(assignment maps); sequence patches replay recorded ops; ordered patches
+replay the recipe's operations in order. Forward values are canonical;
+inverse values resolve drafts to their base (`restoreValue`). Emission
+precedes result knowledge, so a container that finalizes to its base
+retracts its own entries. Symbol keys appear in patches as symbols, and are
+not serialisable.
+
+`applyPatches(base, patches)` runs each maximal run of non-`replace`
+patches as one `produce` whose recipe walks each path through the live
+draft (own keys, in-range integer indices, a kind's `childAt`; anything
+else throws), type-checks keys and indices, and calls the kind's
+`applyPatch` or edits the core draft; a root `replace` ends a run and
+starts the next on its value. Patch values are interned on application.
+`applyPatches(base, patches) === produce(base, recipe)`. Why: D37.
+
+### 7.6 `current` and `original`
+
+`original(draft)` is the state's base. `current(draft)` is `intern` of
+`snapshotOf(draft)`: an unmodified draft snapshots to its base; a modified
+one calls its kind's `snapshot` (the core object/array snapshots are
+registered from `current.ts`, so a `produce`-only bundle carries neither);
+foreign material is walked for embedded drafts. Both throw on a non-draft
+and on a revoked draft; `current` also throws on a kind without
+`snapshot`. Why: D13.
+
+### 7.7 Types
+
+`Draft<T>`: a `[toDraft]` implementer maps to its draft class; a record or
+array maps member-wise and writable; a type with any function-typed member
+(symbol-keyed methods included) is a class instance and maps to itself, an
+opaque leaf. `Undraft<D>` is the inverse, read from the draft's
+`DRAFT_STATE`. `RecipeReturn<T>` is `void | undefined | T | Draft<T>`, plus
+`nothing` where `T` admits `undefined`. The curried overload reads the
+producer's type off the recipe (`_CurriedFromRecipe`), accepting a frozen
+spelling of the state. A recipe that returns a thenable is rejected as
+`async` (D39); one that both mutates and returns is rejected.
 
 ---
 
-## 8. Performance architecture: HAMTs and hash-consing (designed)
+## 8. Performance model
 
-### 8.1 Complexity model
-
-Finalize cost = Σ over drafted containers along changed spines (the **spine
-property**: children compare `===` and have cached hashes — cost is container
-*width*, never subtree size):
+Finalize cost is the sum over drafted containers along changed spines; a
+child compares `===` and has a cached hash, so cost is container *width*,
+never subtree size:
 
 | Container | finalize per drafted container |
 | --- | --- |
-| plain record / array | O(width) — floor is the copy itself |
-| HAMT-backed map/set | O(edits · log₃₂ n) |
-| content-chunked list | O(edits · log n) expected (`setMany`, one bottom-up pass); push is a tail-array copy |
+| plain record / array | O(width): the copy itself; the hash is O(changes) |
+| CHAMP-backed map / set | O(edits · log₃₂ n) |
+| content-chunked list | O(edits · log n) expected; `push` is a tail-array copy |
 
-> **Plain data scales with depth; optimized structures scale with width.**
-> Records are schema-narrow by nature (declared fields) — plain is
-> asymptotically safe for them forever. Sets/maps are the model's unbounded
-> collections and are already the class-typed citizens — the type system's
-> plain/classed boundary coincides with the narrow/wide complexity boundary by
-> construction. Lists are the one manual call (until schemas select backings).
+Plain data scales with depth; the optimised structures scale with width.
+Records are schema-narrow by nature, so plain is safe for them; sets and
+maps are the unbounded collections and are already the class-typed
+citizens; lists are the one manual choice.
 
-Opt in when *width × edit-frequency* crosses the copy-cost threshold
-(empirically tens-to-hundreds of elements; benchmark-gated).
-
-### 8.2 HAMT with hash-consed nodes — **shipped** for `ValueMap`/`ValueSet`
-
-`ValueMap`/`ValueSet` are backed by a hash-consed CHAMP trie (`hamt.ts`,
-stride 2 for maps, 1 for sets), swapped in **invisibly** behind the
-encapsulated API (the payoff of §6.2's private fields). The deferred piece is
-the adaptive flat small-map representation — low urgency, since a ≤32-entry
-collection is already a single root node unless hashes share a 5-bit prefix.
-CHAMP canonical form (non-root arity ≥ 2; deletes inline single-entry
-subtrees upward, unwinding prefix chains; collision nodes keep a canonical
-member order via type rank + per-instance ordinals) makes the shape a pure
-function of content, which is what licenses the distinctive step: **intern
-the trie nodes themselves** (the pool stops being a cache in front of the
-data structure and becomes the data structure):
-
-- HAMT shape is a function of the key-hash set — history-independent — so with
-  node interning, equal maps are the same nodes to the root: **equality is
-  O(1)** (the O(n) pool predicate ceases to exist).
-- Normalization is per-edit, worst-case bounded: each edit pools O(log₃₂ n)
-  nodes; with transients (= drafts), pooling happens once at finalize for the
-  changed frontier only.
-- **Memory hits the distinct-subtree floor**: maximal sharing process-wide,
-  weakly held, GC'd. (Pedigree: hash-consing → ROBDD unique tables → Merkle
-  DAGs; the incremental pool sweeper provides what BDD engines hand-roll.)
-- **Diff becomes Δ-proportional**: pointer-pruned descent — a 100k-entry map
-  with 3 changes diffs in ~3·log n. End-to-end: edit → O(Δ log n) finalize →
-  O(Δ log n) diff → minimal wire patch. The live-query dream, made asymptotic.
-- Caveats: a per-node pool-transaction constant (tunable fringe threshold if
-  benchmarks demand); shapes are process-local (seeded hashes — nodes never
-  cross the wire); iteration order becomes content-determined (an honesty
-  *upgrade* over pool-history order).
-
-### 8.3 Lists: a content-chunked tree, not a radix vector or RRB — **shipped**
-
-RRB's O(log n) concat/slice comes from history-*dependent* relaxed nodes —
-which breaks canonical shape and with it hash-consing, O(1) equality, and
-pointer-pruned diffs. The first shipped backing was a dense radix vector
-(Clojure `PersistentVector`): shape-canonical (a pure function of length),
-but every insert, remove, slice and concat rebuilt O(n). It was replaced at
-v0.0.2 (DECISIONS.md D18) by a **content-chunked tree**: a leaf run ends
-after any element whose seeded hash says so (1 in 32, runs capped at 64), and
-branch runs follow the same rule on node hashes (with at least two nodes per
-run, so every level shrinks), so the shape is a function
-of the *content* — still canonical, still hash-consed, equal content is one
-node however built — and an edit re-chunks only the runs beside it,
-resynchronising with the untouched remainder at the next boundary. The
-closed runs form the tree; the open last run is a plain tail array. The
-contract table (bounds are expected, on the seeded hash):
-
-| op | plain `Array` | `ValueList` |
-| --- | --- | --- |
-| `get(i)` | O(1) | O(log n) size-table walk; sequential reads stay in one cached leaf |
-| `set(i)` → new | O(n) | O(log n) (a path copy when no boundary flips; `setMany` batches) |
-| `push`/`pop` → new | O(n) | a tail-array copy; the tree is touched when a run closes |
-| iterate | O(n) | O(n) via **leaf-streaming iterator** (near-array locality) |
-| `insert`/`remove`/`splice`/`slice`/`concat` | O(n) | **O(log n)** — a path of local re-chunks |
-| equality | O(n) | **O(1)** |
-| `diff(a, b)`, any two lists | O(n) | **O(c log n)** for c changes — shared nodes are skipped by pointer |
-
-Exotic structures (ropes, RRB) are **userland value types** via
-`createInternPool` + the symbols + a wire hint — first-class without being
-shipped.
-
-### 8.4 `toArray()` and the cache laws
-
-- `toArray(): readonly T[]` — explicitly O(n), returns the **interned** flat
-  array, weakly memoized per instance; the *consumer* owns the lifetime by
-  holding or dropping the result. Cross-representation unity holds:
-  `list.toArray() === intern([...sameContents])` — one canonical flat per
-  list value, process-wide — and `toArray()[i] === get(i)` always, because
-  elements are already canonical (interned on entry). Safe in render by
-  construction (Immutable.js's `toJS()` with the curse removed). (History:
-  the first vector landing skipped the interning on an element-identity
-  fidelity argument — valid only under the identity-membership semantics
-  that intern-on-entry then replaced; see the decision log.)
-- The `.array` property is retired on vector backing (**done**): **properties
-  are O(1); methods may cost.**
-- **Per-instance caches on canonical values inherit canonical lifetimes** —
-  interning makes values long-lived by design, so: O(1)-sized caches may be
-  strong; **O(n)-sized caches must be evictable or must not exist** (the
-  history-memory lesson: sticky flats would turn an undo history from
-  O(n log n) into O(n²)). Iteration never materializes; only `toArray()` does.
-- No `toMap()`/`toSet()`: native Map/Set are non-values; `new Map(m)` is the
-  explicit mutable-copy escape.
-
-### 8.5 No proxy facade — values may not lie about their kind
-
-A perfect array-impersonating proxy (measured: `Array.isArray` true via the
-array-target trick; 86 ns/element indexed vs 2 ns flat; 22 ns iteration with a
-leaf-streaming iterator; `structuredClone` throws) was considered and
-**rejected on identity grounds**: if the facade duck-types as an array, then
-either equal-looking arrays are unequal (structural equality becomes dependent
-on an invisible brand) or one value has two canonical objects (the pool's
-founding invariant dies). The visible wrapper is the type distinction being
-honest. Representation freedom lives instead **behind owned access paths**
-(signals, the UI layer's tables, diff internals) — layers that own the door may
-use any backing they like, because no raw value escapes.
+Three tiers for hot loops, cheapest first: batch edits inside one
+`produce` (one pool transaction per recipe); keep in-flight state plain and
+canonicalise at commit boundaries (drag end, debounce, frame); opt into
+the O(log n) structures when the *committed* value is wide and edits are
+frequent. What the design buys is downstream of the write: `===` memo hits
+on refetched data, O(1) hashing, one copy of equal data process-wide, and
+history that costs its distinct states (D40). Numbers: BENCHMARKS.md.
 
 ---
 
-## 9. The frontend story
+## 9. Hardening
 
-### 9.1 Automatic deduplication is the product
+- **Records are their own keys.** Every walk (equality, hashing,
+  interning, drafting, snapshots) enumerates own enumerable keys and reads
+  with `hasOwn`, never `in` or `for…in`; a `__proto__` key in input becomes
+  an own data property (`defineRecordField`); holes canonicalise to
+  `undefined`; registry dispatch keys on the prototype's constructor.
+- **Patches are validated.** Paths follow own keys, in-range integer
+  indices and a kind's `childAt` only; keys and indices are type-checked;
+  values are interned on application.
+- **Depth cap.** `intern`, `deepHash`, `produce`'s adopt and `current`'s
+  snapshot walk are capped by `configureLimits({ maxDepth })`, default 512,
+  reconfigurable at any time, with a teaching error; cyclic input hits the
+  cap. `deepEqual` is uncapped and total over admitted values; on raw cyclic
+  input it recurses until the engine throws. There are no size limits.
+- **Seeded hashing** (§3.3) closes hash flooding; `configureHasher` is
+  one-shot.
+- **Weak pools** hold nothing alive (§4.2).
 
-Construction happens at *arrival rate* (network, user input — tens of events/s,
-milliseconds of budget). Duplication costs are paid at **data × UI surface ×
-frame rate**: one equal-but-not-`===` object defeats every memo, effect
-dependency, selector, and reconciliation downstream, every frame, for as long
-as it lives.
-
-> Mutative optimizes the write path; valsem optimizes everything that happens
-> after the write — and frontends read thousands of times per write.
-> *Your app doesn't have a construction problem; it has an equality problem,
-> and equality problems compound.*
-
-Three distinct dividends: **identity dedup** (exact memo/effect skipping — the
-framework's cheapest equality check becomes *correct*, framework-agnostically:
-React memo and Solid/Vue signals all gate on reference equality),
-**memory dedup** (one copy of equal data), **cache dedup** (values as `Map`
-keys; hash-addressed caches).
-
-Honest differentiation from immer/mutative: they already provide
-*within-lineage* reference stability (path-copying preserves `===` for
-untouched subtrees of one evolving tree). valsem's unique claims are
-**lineage-free**: two independent fetches of the same rows are `===`; a
-WebSocket message equals the cached value it duplicates; a recomputed selector
-output equals last frame's. TanStack Query's `structuralSharing`
-(`replaceEqualDeep`) is the ecosystem's hand-rolled, JSON-only, per-query
-admission that this is needed; the React Compiler and the withdrawn
-Records & Tuples proposal price the problem. The wire-to-memo demo: refetch
-200 rows, 3 changed → exactly 3 components re-render, zero memoization code.
-
-The honest boundary: never-repeating, write-dominated, never-compared data
-(canvas ticks, unique sensor streams) pays hashing for nothing — use tier-2
-commit boundaries, or don't use valsem for that state.
-
-### 9.2 Benchmark posture
-
-Measured against immer 11 and mutative 1.3 in-repo (`pnpm bench:produce`,
-`scripts/produce-bench.mjs`; canonical 10k-scale bases, novel state per op;
-libraries at shipped defaults). After the Phase-2 pass (incremental
-accumulator hashing + prehashed interning, replay finalize, virtual DraftList,
-frozen-aware copies):
-
-| arena | valsem | immer (default) | mutative | standing |
-| --- | --- | --- | --- | --- |
-| 10k-entry map, one set | **3.5 µs** | 474 µs | 400 µs | **~120× ahead** (their drafts copy the container) |
-| 10k-element list, set+push | **4.8 µs** | 9.6 µs | 9.0 µs | **~2× ahead** |
-| 1000-key record, one set | **180 µs** | 208 µs | 208 µs | ahead; spread-copy floor is 153 µs |
-| 10k plain array, one item edit | 28 µs | 575 µs / 3.0 µs (no freeze) | 3.4 µs | 8× behind the unfrozen libs — the measured floor decomposes as: drafting ~1 µs (virtual), successor copy ~7 µs (shadowed slice), and ~18 µs of **GC lifecycle for an 80 KB short-lived pooled value** (old-space promotion + major-GC collection + ephemeron cache entries) — invariant under ref strategy (eager WeakRef vs strong-nursery-then-weaken measured equal; the retention itself is the bill, not the ref). Their 3 µs array dies in the scavenger nursery untouched. `ValueList` is the designed answer: no 80 KB monolith per state |
-| 3-key record churn | 1.3 µs | 0.8 µs | 0.6 µs | ~2× behind at the floor |
-| recurrent states (10 held configurations) | **1.5 µs** | 531 µs | 3.3 µs | **fastest — and the only `===` results.** Transition memoization: a successor is a pure function of (canonical base, exact delta), so a repeat produce is O(touched) with no copy, no hash walk, no compare |
-
-**The arena of record** (`scripts/big-array-bench.mjs`: results held in a
-50-ring, one op per scheduling unit, one contender×mode per process):
-
-| mode | valsem | immer (no freeze) | mutative |
-| --- | --- | --- | --- |
-| sync burst | 32 µs | 7.5 µs | 7.8 µs |
-| microtask per op | 36 µs | 7.3 µs | 7.6 µs |
-| **macrotask per op** (event-driven) | **18 µs** | 9.8 µs | 10.1 µs |
-
-Findings: (1) with results held, the unfrozen libraries' realistic cost is
-~8–10 µs, not 3; (2) valsem's event-driven cost is 18 µs — **a <2× gap** for
-plain arrays; (3) V8 clears the kept-objects list only at MACROTASK
-checkpoints — microtask-spaced produces retain like a sync burst, so many
-produces inside one event turn should be batched into one recipe (or use
-`ValueList`).
-
-**The job-regime correction** (`scripts/yield-bench.mjs`,
-`scripts/yield-bisect.mjs`): the spec's `AddToKeptObjects` retains every
-`new WeakRef` target until the END OF THE CURRENT JOB — so a synchronous
-bench loop of 2,000 produces force-retains all 2,000 80 KB results at once
-(mass promotion, majors mid-loop), which is what the "~18 µs GC lifecycle"
-mostly was. Under one-produce-per-task (the actual application regime),
-every piece normalizes: WeakRef creation free, freeze free, cache entries
-free, pool machinery ≈ +1.3 µs — full produce ≈ **13–19 µs vs their
-~6 µs: a ~2–3× gap**, decomposed as ~6 µs copy (a cost class everyone
-pays) + ~1.5 µs pool + ~5 µs draft machinery. The 27 µs sync number
-remains true for batch loops — whose answer is batching edits into one
-recipe, or `ValueList`. No code fix exists for in-job WeakRef retention;
-it is spec semantics, now documented.
-
-**Retention-pattern audit** (`scripts/retention-bench.mjs`, one scenario per
-process — heap cross-pollution otherwise corrupts every number): the
-discarded-result arena flatters the unfrozen libraries, whose results die in
-the scavenger nursery. Under realistic patterns — results held by
-subscribers/history, or the reducer chain `current = produce(current, …)` —
-their cost rises 1.5–2× (mutative 3.4 → 5–7 µs, immer 3 → 6–12 µs) while
-valsem's ~27 µs is retention-invariant (its bill was never the caller's
-retention; it is the pooling infrastructure per novel big flat array). Net:
-plain-array stays ~4–5× behind under real usage — and the reducer chain over
-`{ list: ValueList }`, the designed shape, runs at **5.5 µs — inside their
-band, with canonical `===` results**. Under realistic retention the
-migration story closes the gap entirely.
-
-The historical 18×→2–3× target is met and beaten where the design says hot
-data belongs (the collections); flat plain arrays keep an honest 8× novelty
-tax that buys `===` equality, O(1) hashing, and process-wide dedup.
-Engineering note earned by measurement: **V8's `Array.prototype.slice` fast
-path excludes frozen-elements arrays (65× slower); spread is 9 µs** — every
-copy of a possibly-canonical array must be frozen-aware (`copyArr`).
-- Delicious footnote: the benchmark's 50,000 array elements are structurally
-  identical; interning collapses them to **1** object. The metric scores the
-  defining feature zero while the dataset showcases it.
-- Current flat `ValueList.push`: 2.5× naive (copy-bound, O(1) hash);
-  vector-backed would top the chart by asymptotics — and must **never lead the
-  marketing** (the Immutable.js trap: winning a plain-data benchmark with a
-  class type convinces no one).
-
-Positioning doctrine: category, not comparison ("canonical values"), complement
-framing; **publish losses first** in BENCHMARKS.md (the 18× with its roadmap);
-define the counter-arena (refetch-equality memo-hit-rate 0% vs 100%;
-update→detect→patch pipeline; memory-under-history; opt-in large-collection
-ops, clearly labeled).
+Why: D19, D28. Tested in `src/hardening.test.ts` and `src/adversarial.test.ts`.
 
 ---
 
-## 10. Design laws (the short list)
+## 10. Package layout
 
-1. **Companion invariant**: every equality ships a hash; `equal ⟹ same hash`.
+### 10.1 `valsem/binding`
+
+The stable surface for binding authors: `defineRecordField(record, key,
+value)`, the `__proto__`-safe record-field writer; `mutableBuiltinReason(
+ctor)`, the shared rejection text. No "is this type a value" probe exists;
+a binding calls `intern` and learns the answer per instance (D41).
+
+### 10.2 Module map
+
+| Module | Responsibility |
+| --- | --- |
+| `shared.ts` | `same` (SameValueZero), `sameSlots`, `IteratorBase`; a leaf with no imports |
+| `hasher.ts` | seed, `mix`, Marvin32, `configureHasher`, `getHashSeed` |
+| `limits.ts` | the depth cap |
+| `checks.ts` | `skipChecks`, `skipFreezing`, `_freeze` |
+| `deep-equal.ts` | protocol symbols, the registry, the mutable-built-in table, `deepEqual`, the dev warning |
+| `deep-hash.ts` | the hash cache and canonical meta, accumulators, symbol hashes, `deepHash` |
+| `intern-pool.ts` | `InternPool`, slots, the registry and idle drain, `createInternPool` |
+| `intern.ts` | `intern`, `isCanonical`, `fastEquals`, `internHash`, `_internPrehashed` |
+| `hamt.ts` | the consed CHAMP trie at strides 1–3, node-level set algebra |
+| `value-map.ts`, `value-set.ts` | wrappers over the trie |
+| `value-list.ts` | the content-chunked tree, `merge`, `diff`, anchors |
+| `ordered-core.ts`, `ordered-map.ts`, `ordered-set.ts` | the ordered collections |
+| `hash-map.ts`, `hash-set.ts`, `hash-table.ts`, `memoize.ts` | the mutable side |
+| `interned-string.ts`, `value-date.ts`, `raw-array.ts` | the opt-in leaves |
+| `draft-core.ts` | scope, `DraftState`, `resolve`/`adopt`/`finalizeState`, snapshots, sequence-patch helpers; the surface of `valsem/draft` |
+| `produce.ts` | record and array proxies, array finalize with transitions, `produce`, `produceWithPatches`, `applyPatches`, the types |
+| `current.ts` | `current`, `original`, the core snapshots |
+| `draft-map.ts`, `draft-set.ts`, `draft-list.ts`, `draft-ordered-map.ts`, `draft-ordered-set.ts` | the collection drafts |
+| `temporal.ts`, `binding.ts`, `draft.ts`, `index.ts` | the entry points |
+
+Dependency direction: `shared`, `hasher`, `limits`, `checks` and
+`deep-equal` are leaves; `deep-hash` and `intern-pool` sit over them as
+independent siblings; `intern` is the first module to import both; then
+`hamt`, the collections and `draft-core`; then `produce`; then `current`.
+`produce` never imports a collection; a collection never imports `produce`
+(it imports `draft-core` and its own draft module).
+
+### 10.3 Tests and benchmarks
+
+Vitest suites sit beside the modules. Property suites (fast-check):
+`property-laws` (companion invariant, intern idempotence over shuffled
+clones), `property-values`, `property-set-algebra`, `property-ordered`,
+and `property-produce`, which runs an op interpreter against a draft and a
+frozenness-preserving mirror of the base with every oracle `===`, the
+executable specification of `produce` (D39). `produce-corpus*.test.ts`
+carry the immer and mutative adversarial corpora. `hamt-collisions` runs
+the trie under a degenerate hasher. `duplicate-install` pins the
+two-copies behaviour (D4).
+
+`bench/suites/*.mjs` are the suites `pnpm bench` runs on Node and Bun;
+`bench/report.mjs` renders BENCHMARKS.md from their JSON; the methodology is
+D20. `scripts/experiments/` holds the one-off experiments behind decisions
+(pool cleanup strategies, retention regimes, the in-job `WeakRef` effect).
+
+### 10.4 Documentation
+
+The guide is a VitePress site under `docs/` (`pnpm docs:build`, after
+`pnpm build`: the demo imports the compiled `dist/`), published to GitHub
+Pages by `.github/workflows/docs.yml`. `docs/benchmarks.md` includes
+BENCHMARKS.md and `docs/guide/getting-started.md` includes the README's
+sixty-seconds region, so each text exists once. `docs/demo.md` is the
+undo-tree demo: a document editor whose history is an identity `Map` keyed
+by canonical states. TSDoc on the exports is the per-symbol reference.
+
+---
+
+## 11. Design laws
+
+1. **Companion invariant**: every equality ships a hash; `equal ⟹ same
+   hash`.
 2. **Only immutable things get value identity**; `Object.freeze` is not a
-   proof of immutability.
+   proof of immutability, and a hash is the declaration.
 3. **`undefined` is not a value in records; `null` is.**
-4. **Order is never semantic.**
+4. **Order is semantic exactly where the type says so**: never on records,
+   `ValueMap`, `ValueSet`; always on arrays, `ValueList`, `OrderedMap`,
+   `OrderedSet`.
 5. **Ergonomics is the contract; performance is the implementation.** Plain
-   data by default; classes only where JS lacks the primitive; optimized types
-   are opt-ins; optimizations are invisible.
-6. **Values may not lie about their kind** (no structural liars; no proxy
-   facades; visible wrappers are honest type distinctions).
+   data by default; classes only where JavaScript lacks the primitive;
+   optimised types are opt-ins; optimisations are invisible.
+6. **Values may not lie about their kind**: no structural liars, no proxy
+   facades; visible wrappers are honest type distinctions.
 7. **Properties are O(1); methods may cost.**
-8. **O(1) caches may be strong; O(n) caches must be evictable** (canonical
-   lifetimes are long by design).
-9. **Pool membership is the universal marker** (finalize skip, draft scoping,
-   node canonicalization).
-10. **Finalize cost ∝ drafted spine + foreign material**; depth is free, width
-    is the enemy.
-11. **Fail loud at the boundary, never silently downstream** (rejection with
-    teaching errors; `__proto__`-safe record building; strict draft
-    revocation).
+8. **O(1) caches may be strong; O(n) caches must be evictable**, because
+   canonical lifetimes are long by design.
+9. **Pool membership is the universal marker**: finalize skipping, draft
+   scoping, node canonicalisation.
+10. **Finalize cost ∝ drafted spine + foreign material**; depth is free,
+    width is the cost.
+11. **Fail loud at the boundary, never silently downstream**: rejection
+    with teaching errors; `__proto__`-safe record building; strict draft
+    revocation; `deepEqual` alone stays total.
 12. **Representation is public exactly where the platform can enforce
-    immutability** (frozen arrays and strings yes; Map/Set backing no).
-
----
-
-## 11. Roadmap
-
-| Phase | Content | Gate |
-| --- | --- | --- |
-| 0 | ~~Reserve `valsem` on npm~~ done — `valsem@0.0.1` published 2026-09-05; ~~promote `valsem/internal` → `valsem/binding` (semver'd)~~ done; ~~repo split~~ done (this repository); ~~docs site with the frontend-first pitch~~ done (VitePress under `docs/`, GitHub Pages via `.github/workflows/docs.yml`; hero landing, seven guide pages, BENCHMARKS.md included by reference, and the undo-tree demo as the flagship — canonical history with an identity-`Map` structural index, revisit collapse, `===` dirty checks) | name reserved; the wire binding green against `valsem/binding` |
-| 1 | ~~**`produce`/`adopt`**: proxy drafts for plain data, draft classes for collections, semantic patch emission~~ done; ~~Mutative-derived test corpus~~ done (collection-draft transients remain) | all existing suites green; patch-emission property tests ✓ |
-| 2 | ~~Incremental finalize hashing (cached accumulators; polynomial append) — the 18×→2-3× work~~ done (records + stable-position arrays; §9.2 table). Remaining perf backlog: mid-splice array deltas, trie transients for bulk collection drafts, withPatches overhead, small-state floor | Mutative-shape benchmark hits target ✓ |
-| 3 | ~~HAMT backing for `ValueMap`/`ValueSet` (invisible)~~ done (adaptive flat small form deferred) | conformance + property suites; benchmark wins on large collections |
-| 4 | ~~Hash-consed nodes: O(1) equality~~ done for map/set; Δ-proportional diff and transient finalize arrive with `produce` | equality/diff benchmarks; memory-floor demonstration |
-| 5 | ~~Vector-backed `ValueList`: leaf iteration, `toArray()` weak memo, retire `.array`~~ done | contract table holds empirically |
-| 6 | ~~Hardening backlog~~ complete: ~~lazy hash seeding~~ closed (Web Crypto declared a platform requirement — see §3.3); ~~decode-boundary depth limits~~ done (`configureLimits({ maxDepth })`, default 512, guarding intern/deepHash/adopt — deepEqual stays total and uncapped; size limits judged the transport layer's job); ~~property-based testing (fast-check) for the companion invariant, intern idempotence, and applyPatches convergence~~ done (see the decision log: five produce bugs found and fixed) | — |
-
-Non-goals, permanently: mutable built-ins as values; cycle support; wire
-formats (a separate layer's job); schemas (higher layers); framework adapters
-(the point is needing none).
-
----
-
-## 12. Decision log (abbreviated)
-
-- **Removed Date/RegExp/Map/Set, then TypedArrays** — mutability, freeze
-  ineffectiveness, and measured silent HashMap misses; teaching errors added.
-- **The hash is the immutability declaration** — `[hashCode]` (or a registered
-  `hashFn`) makes a class a value and poolable; an equality alone is comparable
-  only. Replaced the earlier `{ immutable: true }` flag, under which a class
-  with `[equals]`/`[hashCode]` passed through `intern` and keyed `HashMap` by
-  reference — a silent miss. The mutable built-ins refuse a hash outright;
-  Temporal pools unfrozen. `intern` now throws for every class it cannot pool.
-- **Record `undefined` normalization; ValueMap keeps stored `undefined`** —
-  accident vs TS-typed intent.
-- **Encapsulated Map/Set backing; classes carry the ReadonlyMap/ReadonlySet
-  read API** — freeze is a no-op on internal slots; interop preserved by
-  *being* the interface. `ValueSet`'s set algebra returns `ValueSet`s (it
-  first returned native `Set`s, per the lib signature — but a value's
-  operations should yield values).
-- **Symbols renamed to `valsem.*`** before first publish (cross-realm keys are
-  forever).
-- **NaN pool-split bug fixed** (`childEqual` = SameValueZero) — found by a
-  cross-syntax wire property test.
-- **`produce` unified with `intern`** — grafts force it; pool membership as the
-  marker.
-- **Draft classes over context-gated mutators** — interning-induced aliasing
-  makes `this` location-ambiguous.
-- **Content-chunked tree over RRB (and over the dense radix vector it
-  replaced)** — history-independence required for hash-consing; content
-  chunking keeps it while making mid-list edits and diff sublinear (D18).
-- **`toArray()` over auto-materialization** — the n² history-memory argument;
-  consumer-owned lifetime via the returned reference.
-- **Proxy array facade rejected** — the structural-liar dichotomy (break
-  `equal ⟹ ===` or break looks-equal ⟹ equal).
-- **Positioning: dedup and lineage-free equality, not update throughput** —
-  measured 18× loss on Mutative's arena, published honestly; the arena we
-  define is the one the frontend actually runs.
-- **Replaced per-entry `FinalizationRegistry` and threshold sweeps with the
-  global incremental circle sweeper + O(1) GC-epoch sentinel** — decided on
-  measurement, not argument (`scripts/pool-gc-bench.mjs`): per-entry FR was
-  *not* slower on throughput (refuting the initial argument) but storms
-  10–18 ms in post-GC tasks; threshold sweeps pause 15–54 ms in-batch; the
-  circle+backstop matched or beat both on wall time with both pause shapes at
-  baseline. Two measured traps now baked into the design: deref the owner
-  only on the removal path (owner-deref per visit cost 2.4×), and hold the
-  backstop registry from a module binding (an unreferenced
-  `FinalizationRegistry` is collected and its callbacks silently stop).
-- **Shipped the hash-consed CHAMP backing for `ValueMap`/`ValueSet`** —
-  equality became a root pointer comparison and canonicality became
-  lineage-free at the node level; the collection hash became the consed root
-  hash (replacing the rolling sums); iteration order upgraded from
-  pooled-first to content-determined; wrappers canonicalize via
-  `WeakMap<root, wrapper>` ephemerons. Canonical form pinned by fuzz suites
-  (shuffled builds, op-walk mirrors, per-run seed variation) plus a
-  total-collision suite under a degenerate `configureHasher` — which also
-  fixed a latent NaN-value pool split (predicates used `!==`; the trie uses
-  SameValueZero throughout). Deferred: the adaptive flat small-map form (a
-  ≤32-entry collection is already one root node). Node-level set algebra
-  shipped since: nodes carry their entry count, and `ValueSet`'s algebra
-  merges two tries sharing by pointer, at a cost proportional to the
-  difference; the argument is any iterable of values, never a foreign `has`.
-- **The first-contact gap closed: development warnings on mutable-builtin
-  comparison** — the totality settlement (below) left one real hazard:
-  `deepEqual(new Set(), new Set()) === false` is correct and silent, and a
-  newcomer's first probe meets it. Resolution consistent with both prior
-  settlements: LOUD WITHOUT THROWING — comparing two distinct instances of
-  the same mutable-builtin type logs a once-per-type development warning
-  (the shared teaching text, plus the tier-1 registration pointer), gated
-  on NODE_ENV via structural globalThis access (the module stays
-  runtime-neutral), fired only on the cold class-instance fallthrough.
-  Totality, memo-gate safety, and production silence all intact.
-- **Should deepEqual throw on incomparable input? No — settled** — asked
-  directly and answered on three grounds. Principled: for mutable objects
-  reference equality IS the correct equality (substitutability — two Dates
-  with equal time are not substitutable; one setTime later they diverge;
-  content comparison over independently-mutable objects asserts a sameness
-  mutability falsifies), and identity comparison of unregistered class
-  instances in state records is a feature, not a fallback. Structural:
-  throwing belongs at the boundaries that ADMIT data into value-land
-  (deepHash/intern/collections/produce — all throw, with teaching text);
-  deepEqual is a passive query, not an admission point. Practical: equality
-  predicates sit in memo comparators and dedup gates that must not throw on
-  stray foreign data; every peer is total for the same reason. README
-  reframed from "cannot throw" to the substitutability argument.
-- **deepEqual benchmarked against fast-deep-equal; record branch
-  restructured** (`pnpm bench:equal`) — verdict-agreement asserted per pair
-  (corpus avoids the two semantic divergences: NaN and undefined-valued
-  keys, where valsem answers true and fast-deep-equal false). Results: raw
-  arrays ≥100 elements 2.5–2.9× faster; raw records at parity on equal
-  walks (was 1.6–1.8× behind — the undefined-dropping semantics was paying
-  for…in + double hasOwnProperty + an unconditional second pass; now
-  Object.keys iteration, one hasOwn on the b side as the
-  prototype-pollution guard, deferred b-key snapshot, and a single-pass
-  common case) and 1.6–1.8× faster on unequal records; tiny records ~1.2×
-  behind (Object.keys allocation floor, ~300 ns absolute); canonical pairs
-  20–33 ns flat regardless of size — 9× to 1200× — and mixed-boundary
-  inequality 5.6×. The semantics cost of undefined-dropping is now one
-  deferred Object.keys, only on successful matches.
-- **`[interned]` clarified as a TYPE contract; deepEqual's marker check
-  strengthened (supersedes the marked-vs-unmarked test of the previous
-  entry)** — the original intent, restated by the author: `[interned]`
-  marks *auto-interning types* — no publicly reachable constructor, every
-  instance canonical by construction (the collections and the
-  `createInternPool` pattern with its private constructor). Under that
-  contract, a non-identical pair with EITHER side marked is unequal: same
-  type would imply both marked, so a mixed pair is cross-kind. deepEqual
-  now concludes on `aMarked || bMarked` — one or two property reads, no
-  map lookups, and mixed marked/raw pairs skip the dispatch entirely. The
-  earlier "fresh unmarked instance equals its marked canonical" behavior
-  is reclassified as a contract violation (a type exposing non-interning
-  construction must not carry the marker) and the regression test inverted
-  to pin the contract instead.
-- **internEqual deleted; [hashCode] pre-filter added to deepEqual** — the
-  audit of the new fast path surfaced that `internEqual` was a
-  side-effecting predicate: its fallback interned both arguments, FREEZING
-  the caller's objects and pooling transients an equality check cannot
-  retain (unheld canonicals die; the pool churns). Its legitimate fast
-  paths were exactly what canonical-aware `deepEqual` now does without side
-  effects, so it went; `intern(a) === intern(b)` states adoption
-  explicitly. The audit also added the one genuinely missing hash use:
-  distinct precomputed `[hashCode]`s on class instances prove inequality
-  (companion invariant) before running a potentially O(n) `[equals]`.
-- **deepEqual consults canonicality** — after the primitive checks, if both
-  sides are canonical (the `[interned]` marker, or membership in the
-  interner's hash cache, injected into the leaf module the same way
-  deepHash's cache is), a `!==` pair is structurally distinct by the
-  canonicality invariant: O(1) false, no walk. Measured: distinct canonical
-  1000-key records 74 µs → 0.04 µs (~1800×); mixed raw trees terminate at
-  every canonical boundary; worst-case raw-vs-raw walk overhead +1.3%.
-  Trust note: the `[interned]` marker and the hash (then a separate
-  `{ immutable: true }` flag) were always
-  contracts — stamping them on non-canonical data has always broken
-  equality, and now does so faster.
-- **Freeze-disable experiment: measured, not shipped (negative result
-  three of the phase)** — a temporary `_setFreezing(false)` switch was A/B'd
-  across every arena. Event-driven big-array: zero. Collections, recurrent,
-  small-churn: zero. Sync-burst big-array: −9–15%. The one genuine,
-  regime-independent cost found: `Object.freeze` on records is ~38 ns per
-  property (−21% on the 1000-key arena — where `ValueMap` is 30× faster
-  than either freeze setting anyway). Conclusion: the phase-2 optimizations
-  (shadow copies, transition memoization, virtual drafts) removed every
-  path where frozenness was expensive — freezing is now effectively free
-  where the library's shapes and regimes live, so no escape hatch ships and
-  the safety invariant stands without a performance caveat. The switch was
-  reverted; the produce bench gained the honest big-array scenario
-  (held results, one produce per macrotask) as a permanent in-suite arena.
-- **The AddToKeptObjects correction (amending the entry below)** — pressed
-  on whether 26 µs could be real ("do we re-hash the entire array?" — no:
-  hashing is O(1) delta), the bisection was redone under a
-  one-produce-per-task regime, and the previous "memory-system physics"
-  attribution partly dissolved: `new WeakRef(target)` performs
-  AddToKeptObjects, retaining the target until the current JOB ends, so a
-  synchronous bench loop force-retains every result at once — that was the
-  "promotion pathology", and why the StrongCell nursery measured identical
-  (strong retention ≡ kept-objects retention in-job). Event-driven
-  decomposition: copy ~6 µs + pool ~1.5 µs + draft machinery ~5 µs ≈ 13–19
-  vs their ~6 — a 2–3× plain-array gap in real regimes, not 8×. Three
-  benchmark-methodology lessons now on file: discarded results flatter
-  unfrozen libraries; in-process scenario order corrupts numbers; and
-  synchronous produce loops trip AddToKeptObjects.
-- **Retention-pattern audit** — prompted by the observation that real
-  applications HOLD the state they produce: benched discarded vs held vs
-  reducer-chain vs chain-with-history, each in a fresh process (in-process
-  section order corrupted results by whole multiples — a benchmark lesson
-  worth the entry alone). Findings: the discarded arena flatters the
-  unfrozen libraries ~1.5–2×; valsem's plain-array cost is
-  retention-invariant; the gap under realistic patterns is ~4–5×, closed
-  entirely by the ValueList chain at 5.5 µs. Also fixed en route: the
-  shadow-copy cache built a shadow on FIRST copy, double-copying one-shot
-  bases (reducer chains) — now engages only on the second copy of the same
-  base (chain scenario 47.8 → 25.9 µs).
-- **Big-array floor investigated; nursery-deferred WeakRefs tried and
-  REVERTED (negative result, recorded)** — isolates showed
-  `new WeakRef(freshBigArray)` costs ~24 µs (vs 0.04 µs on an old object,
-  ~0 for fresh small objects, ~0 for WeakMap keys) — apparently forced
-  early promotion. A strong-nursery that deferred WeakRef creation to the
-  GC-epoch backstop was built — and measured **exactly nothing**: the bill
-  is the retention lifecycle itself (any pooled 80 KB short-lived value gets
-  promoted, collected by major GC, and drags ephemeron cache entries),
-  identical whichever ref holds it. Reverted per the measured-optimizations
-  law. What stayed: the unfrozen shadow cache for large frozen bases
-  (repeat copies at slice speed, WeakMap-keyed per the §8.4 cache law).
-  The durable finding: valsem's plain-array novelty tax at 10k scale is
-  ~18 µs of memory-system physics for materializing a *findable* 80 KB
-  state; the fix is structural (ValueList), not micro.
-- **Transition memoization + virtual array drafts (Phase-2, second pass)** —
-  the recurrent arena was 17× behind mutative (48 µs vs 2.9) because
-  recognizing a recurring successor cost O(n): a draft-time copy of the 10k
-  base plus a frozen-read-taxed structural compare on the pool hit. Two
-  changes: plain-array drafts gained DraftList's virtual mode (point edits +
-  appended tail; push/pop/index ops never copy; iteration and read-only
-  methods work virtually via prototype dispatch through the traps; only
-  ownKeys/mid-splices/sort materialize), and finalize now memoizes
-  **transitions** — `WeakMap<canonical base, recent {delta, WeakRef
-  successor}>` — sound because a successor is a pure function of (base
-  identity, exact delta), so a repeat produce verifies O(touched) with no
-  hash trust and builds nothing. Result: recurrent 48 µs → **1.5 µs — the
-  fastest in the arena, 2× ahead of mutative — returning `===` pooled
-  instances**. Two instructive misses en route: the bench originally
-  discarded its results, so the weakly-pooled states died under GC and every
-  lookup missed (real recurrence means the states are held — the bench now
-  holds them); and a transition cap of 8 thrashed against the 10-state cycle
-  (now 16).
-- **Phase-2 performance pass, measure-first** — built the in-repo bench
-  against immer/mutative before touching code. Changes: array deepHash moved
-  to a positional polynomial accumulator (the chained mix could not be
-  delta-updated); canonicalization now caches raw accumulators
-  (`accCache`), and produce's finalize delta-updates them —
-  `_internPrehashed` skips rehash and child walks for records with no added
-  keys and sequences whose ops keep positions stable (sets + tail splices);
-  DraftList gained a virtual mode (point edits + appended tail over the
-  base, no materialization) with persistent-replay finalize; child-drafting
-  restricted everywhere to base-positioned values (the immer rule), which
-  also fixed a patch/result divergence for drafted-after-insert material.
-  The find of the pass: **V8's `slice` fast path excludes frozen-elements
-  arrays** — 229 µs vs 3.5 µs at 10k — discovered only because the profiler
-  lied and a bisection script didn't. Every copy of possibly-canonical
-  arrays is now frozen-aware. Results in §9.2's table: three arenas ahead
-  of both libraries, the plain-array arena at an honest 8× novelty tax.
-- **Shipped `produce` after a source-level study of immer and mutative** —
-  the study (repos read in full) found both share one skeleton: lazy
-  copy-on-write proxy drafts, assignment maps, net patches; immer's costs are
-  default deep-freezing and callback-heavy finalize (reverse maps for
-  aliased drafts); mutative's speed comes from opt-in freezing and a flat
-  LIFO finalize stack; both copy whole Map/Set containers on first write and
-  neither recovers array splice intent (index-wise patches, confirmed in
-  source). Our resolution: **finalize is an intern walk** — both libraries
-  work to avoid a walk that interning must do anyway, so draft replacement,
-  graft adoption, and patch emission ride it; aliased drafts converge by
-  memoization because the walk interns. Canonicality detection is the pool
-  marker, not `isFrozen` (which would wrongly prune frozen-but-foreign
-  data). DraftList records splices as intent (method API — no proxy
-  ambiguity); plain arrays intercept mutating methods for the same, falling
-  back to net index-diff on sort/reverse/fill/length. Inverse-patch law:
-  forward values resolve drafts to their final canonical, restore values
-  resolve drafts to their base. v1 costs accepted and earmarked: overlay
-  collection drafts (not yet trie transients), DraftList materializes on
-  first write, changed nodes rehash from scratch (assignment maps retained
-  so incremental hashing can drop in).
-- **Shipped the hash-consed dense radix vector for `ValueList`** — trunk of
-  full 32-wide consed leaves + consed tail (the tail is itself a leaf node,
-  so wrapper equality is two pointer comparisons); trunk/tail split and tree
-  height are pure functions of length, so push-building, `from()`, and
-  set/pop detours converge instance-exactly (pinned across the 32/1024
-  boundaries and height collapse). `.array` retired in favor of `get(i)`,
-  index-order iteration, and `toArray()`. (The first landing skipped
-  interning the snapshot on an identity-fidelity argument — superseded one
-  step later by intern-on-entry, below.)
-- **Keys, values, and members intern on entry (identity → structural
-  membership)** — prompted by the observation that under identity
-  membership the collections could not keep their own canonicality promise:
-  a mutable raw element could be mutated after insert, changing its hash
-  under the cached node hashes and splitting equal content into distinct
-  "canonical" instances (`ValueList.of(o) !== ValueList.of(o)` after
-  `o.a = 2`) — the same silent-wrong-answer genus that expelled Date and
-  native Map/Set. Interning at the door makes canonical-all-the-way-down an
-  invariant: raw structural equals converge, stored plain data is frozen,
-  probes canonicalize, and `toArray()` is the interned flat with
-  `toArray()[i] === get(i)` — restoring the original §8.4 sketch, whose
-  fidelity objection only held under the replaced semantics.
-- **Renamed `Intern{Map,Set,Array}` → `ValueMap`/`ValueSet`/`ValueList`** —
-  type names name model kinds; mechanism vocabulary (interning) belongs to
-  operations (`intern`, pools, the `interned` symbol). "List", not "Array":
-  names may not lie about their kind — the class has no subscript access, and
-  "list" is the model kind. The string wrapper keeps a mechanism name: its
-  value is the wrapped *string* (not a distinct kind), so a `Value*` name
-  would overclaim — the class *is* the mechanism (cached hash, pooled
-  identity), and its name honestly says so. (Initially kept verbatim as
-  `InternString`; renamed `InternedString` shortly after — the adjective is
-  the grammatical form, "an interned string".) `HashMap` stays: a mutable
-  lookup structure named by mechanism is the established convention.
-- **`HashMap` kept; `HashSet` and a `MutableMap` rename both rejected — the
-  boundary criterion** — revisited during the standalone review. A mutable
-  companion type earns its place only if it has an **un-internable side** —
-  a slot no `Value*` type can serve. `HashMap` has one: its values are
-  stored as-is, so it can index *live, mutable* objects by structural key
-  (`HashMap<Coord, HTMLElement>`, `HashMap<QueryKey, Subscription>`) — the
-  boundary where value keys meet the mutable world. A `HashSet` has no such
-  side: a set's elements are its keys, all interned, so it would hold
-  nothing but values — mere sugar over a native `Set` fed `intern()`ed
-  elements (canonical identity already makes native `Set` semantics
-  correct: `seen.add(intern(pos))` is the visited-set idiom) or `ValueSet`
-  behind a rebinding variable. The rename was rejected because
-  `MutableMap` names the wrong axis: native `Map` is equally mutable —
-  structural keys are why the class exists, and `HashMap` says exactly
-  that to anyone arriving from Java/Rust, with interning playing the role
-  of overridden equals/hashCode. Guard for the future: "mutable twin of a
-  `Value*` type for ergonomics" is a slope that ends at `MutableList`;
-  capability, not convenience, is the bar for new mutable surface.
-- **fast-check property suites shipped (roadmap phase 6) and the second
-  corpus pass (mutative) mined — five produce bugs found and fixed, one
-  semantics doctrine settled** — The suites: companion invariant and intern
-  canonicality over `shuffledClone` derived equals (shuffled key insertion,
-  shuffled collection entries, random construction paths, add-then-delete
-  detours); collection build-order/history independence; and produce
-  convergence — one op interpreter run against BOTH a draft and a
-  frozenness-preserving mirror of the canonical base, with every oracle
-  `===` (canonicality upgrades property oracles from "equal" to pointer
-  checks). The finds: (1) relocated base refs, tracked-splice edition —
-  shift/unshift/mid-splice relocate surviving positions like sort/reverse
-  but did not mark `opaqued`; (2) netted-out sequences leaked their op
-  patches (emission precedes result knowledge because children patch
-  against post-splice indices; finalize now retracts this node's entries on
-  every `=== base` outcome); (3) a read-but-unchanged child draft leaked
-  into the interned successor via the materialized copy (netted-out branch
-  now restores `base[i]`); from the mutative corpus: (4) the #18 family —
-  an assigned canonical is frozen, so mutating through a read threw a raw
-  TypeError; all read paths (object/array traps, DraftMap.get,
-  DraftList.get) now copy-on-write frozen stateless values; (5) an `async`
-  recipe leaked its raw Promise out as the "result" (root intern passes
-  unregistered class instances through); thenable replacements now throw a
-  teaching error. The doctrine, forced by copyWithin duplicating a frozen
-  canonical into two slots: **identity exists only where mutability does**
-  — canonical occupants copy-on-write PER SLOT (canonicalization collapses
-  equal objects, so reference aliasing of canonicals is unrepresentable),
-  while the caller's own unfrozen objects keep plain-JS aliasing (fill
-  writes ONE object into many slots; mutating it shows everywhere). The
-  mirror encodes exactly this — frozen nodes thaw per-slot on write — and
-  is thereby the executable specification of produce: `produce(base, ops)
-  === intern(mirror-apply(ops))`. Harness lessons recorded in the suites:
-  op payloads clone per insertion site (a shared instance mutated across
-  the two passes can build cyclic values — the value domain excludes
-  cycles, and the hang looked like a library bug until traced), and
-  `structuredClone` flattens `InternedString` leaves.
-- **Decode-boundary depth cap shipped; size limits declined** — `intern`,
-  `deepHash`, and produce's `adopt` walk foreign input recursively, so
-  hostile or cyclic input had a stack-exhaustion lever the seeded hasher
-  does not close. A depth counter (default cap 512 — far beyond honest
-  data, far below engine stack limits) turns that into a teaching error at
-  the admission boundary; cyclic input now teaches instead of throwing a
-  bare RangeError. Reconfigurable at any time via
-  `configureLimits({ maxDepth })` — unlike the hasher, the cap is not baked
-  into values. `deepEqual` is deliberately uncapped: it is total, and a cap
-  would change verdicts on honestly deep equal structures. Size/node-count
-  limits were considered and declined: admission is O(n) with no
-  amplification, any default would misclassify honest large arrays, and
-  byte-budget enforcement belongs to the transport layer (a JSON body
-  limit). Implementation note for the guard pattern: never zero the
-  counter at the throw site — the try/finally chain unwinds it, and doing
-  both drove the counter negative, silently disabling the guard (caught by
-  the suite's guard-reset test).
-- **Publication surface assembled** — BENCHMARKS.md distilled from §9.2
-  under the positioning doctrine (losses first, arena-of-record numbers,
-  the counter-arena, reproduction commands, methodology rules);
-  package.json gained `repository`/`bugs`/`homepage` and a `sideEffects`
-  list naming `dist/temporal.js` (its import registers handlers — a
-  tree-shaken bare import would silently drop Temporal support).
+    immutability**: frozen arrays and strings yes; trie and tree backing no.
+13. **Nothing that affects an answer reads the environment.** The two
+    switches are the user's; the one thing gated on `NODE_ENV` is the
+    development warning in `deepEqual`, which changes no verdict.

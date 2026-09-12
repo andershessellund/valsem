@@ -1,6 +1,9 @@
 // ---------------------------------------------------------------------------
 // hamt — hash-consed CHAMP trie core, shared by ValueMap (stride 2, key+value
-// slots per entry) and ValueSet (stride 1).
+// slots per entry), ValueSet (stride 1), and the ordered collections
+// (OrderedSet at stride 2: member+anchor; OrderedMap at stride 3:
+// key+value+anchor). The key is always slot 0 of an entry; the trailing
+// slots are opaque payload compared by SameValueZero.
 //
 // Two layers of one idea:
 //
@@ -67,8 +70,10 @@ export interface CNode {
 
 export type HNode = BNode | CNode;
 
+export type Stride = 1 | 2 | 3;
+
 export interface TrieConfig {
-  readonly stride: 1 | 2;
+  readonly stride: Stride;
   readonly bpool: InternPool<BNode>;
   readonly cpool: InternPool<CNode>;
   readonly empty: BNode;
@@ -114,9 +119,9 @@ function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
   return cfg.cpool.register({ t: 1, h, n: slots.length / cfg.stride, khash, slots }, h);
 }
 
-export function createTrieConfig(stride: 1 | 2): TrieConfig {
+export function createTrieConfig(stride: Stride): TrieConfig {
   const cfg: {
-    stride: 1 | 2;
+    stride: Stride;
     bpool: InternPool<BNode>;
     cpool: InternPool<CNode>;
     empty: BNode;
@@ -201,7 +206,9 @@ function memberCompare(a: unknown, b: unknown): number {
 /**
  * The value stored under `key` (for stride 1, the stored member itself), or
  * {@link NOT_FOUND}. A stored `undefined` comes back as `undefined`, distinct
- * from the sentinel. `shift` is the level of `node` — 0 for a root.
+ * from the sentinel. `shift` is the level of `node` — 0 for a root. `offset`
+ * selects the entry slot to return (default: the last one); the ordered
+ * collections read their anchor slot with it.
  */
 export function trieGet(
   cfg: TrieConfig,
@@ -209,6 +216,7 @@ export function trieGet(
   khash: number,
   key: unknown,
   shift = 0,
+  offset = cfg.stride - 1,
 ): unknown {
   const stride = cfg.stride;
   let n = node;
@@ -217,7 +225,7 @@ export function trieGet(
     if (n.dmap & bit) {
       const i = popcount(n.dmap & (bit - 1)) * stride;
       if (!same(n.slots[i], key)) return NOT_FOUND;
-      return n.slots[i + stride - 1];
+      return n.slots[i + offset];
     }
     if (!(n.nmap & bit)) return NOT_FOUND;
     const dataEnd = popcount(n.dmap) * stride;
@@ -226,9 +234,22 @@ export function trieGet(
   }
   if (n.khash !== khash) return NOT_FOUND;
   for (let i = 0; i < n.slots.length; i += stride) {
-    if (same(n.slots[i], key)) return n.slots[i + stride - 1];
+    if (same(n.slots[i], key)) return n.slots[i + offset];
   }
   return NOT_FOUND;
+}
+
+/** Whether the payload slots of the entry at `slots[i]` equal `entry`'s (SameValueZero each). */
+function samePayload(slots: readonly unknown[], i: number, entry: unknown[], stride: number): boolean {
+  for (let t = 1; t < stride; t++) if (!same(slots[i + t], entry[t])) return false;
+  return true;
+}
+
+/** `slots` with the payload of the entry at `i` replaced by `entry`'s. */
+function withPayload(slots: readonly unknown[], i: number, entry: unknown[], stride: number): unknown[] {
+  const out = slots.slice();
+  for (let t = 1; t < stride; t++) out[i + t] = entry[t];
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,10 +287,10 @@ function mergeTwo(
 }
 
 /**
- * Insert (or update) `key` → the last element of `entry`. `entry` is the full
- * slot group: `[key]` for stride 1, `[key, value]` for stride 2. Returns
- * `null` when the trie already holds this exact entry (SameValueZero on the
- * stored value).
+ * Insert (or update) `key` → the payload of `entry`. `entry` is the full slot
+ * group: `[key]` for stride 1, `[key, value]` for stride 2, `[key, value,
+ * anchor]` for stride 3. Returns `null` when the trie already holds this
+ * exact entry (SameValueZero on every payload slot).
  */
 export function trieInsert(
   cfg: TrieConfig,
@@ -286,10 +307,8 @@ export function trieInsert(
     // only routes us here when the path is exhausted, hence hashes agree).
     for (let i = 0; i < node.slots.length; i += stride) {
       if (same(node.slots[i], key)) {
-        if (same(node.slots[i + stride - 1], entry[stride - 1])) return null;
-        const slots = node.slots.slice();
-        slots[i + stride - 1] = entry[stride - 1];
-        return { node: consC(cfg, node.khash, slots), added: false };
+        if (samePayload(node.slots, i, entry, stride)) return null;
+        return { node: consC(cfg, node.khash, withPayload(node.slots, i, entry, stride)), added: false };
       }
     }
     // New member — splice at its canonical position.
@@ -312,10 +331,8 @@ export function trieInsert(
     const i = popcount(node.dmap & (bit - 1)) * stride;
     const existingKey = node.slots[i];
     if (same(existingKey, key)) {
-      if (same(node.slots[i + stride - 1], entry[stride - 1])) return null;
-      const slots = node.slots.slice();
-      slots[i + stride - 1] = entry[stride - 1];
-      return { node: consB(cfg, node.dmap, node.nmap, slots), added: false };
+      if (samePayload(node.slots, i, entry, stride)) return null;
+      return { node: consB(cfg, node.dmap, node.nmap, withPayload(node.slots, i, entry, stride)), added: false };
     }
     // Two distinct keys claim one position: push both down a level.
     const existing = node.slots.slice(i, i + stride);
@@ -353,19 +370,25 @@ export function trieInsert(
 
 /**
  * The canonical trie holding `keys` (with `vals`, for stride 2; `null` for
- * stride 1), built bottom-up: entries are partitioned by hash bits level by
+ * stride 1; and `vals2` as the third slot for stride 3), built bottom-up: entries are partitioned by hash bits level by
  * level and every node of the result is consed exactly once, where n
  * sequential inserts would path-copy and re-cons O(log n) nodes each. Keys
  * are canonical (so `-0` never arrives: `intern` stores zero as `+0`); a key
  * given twice keeps its last value, as sequential insertion would. The result
  * is the trie that insertion would build — the same root object.
  */
-export function trieFrom(cfg: TrieConfig, keys: unknown[], vals: unknown[] | null): HNode {
+export function trieFrom(
+  cfg: TrieConfig,
+  keys: unknown[],
+  vals: unknown[] | null,
+  vals2: unknown[] | null = null,
+): HNode {
   // Dedupe (last write wins) on SameValueZero — the native Map's key rule.
   // Keys are canonical, so identity is value equality, and the seen-map
   // costs a hash-table probe per entry, not a trie walk.
   const ks: unknown[] = [];
   const vs: unknown[] | null = vals === null ? null : [];
+  const vs2: unknown[] | null = vals2 === null ? null : [];
   const hs: number[] = [];
   const seen = new Map<unknown, number>();
   for (let i = 0; i < keys.length; i++) {
@@ -376,17 +399,22 @@ export function trieFrom(cfg: TrieConfig, keys: unknown[], vals: unknown[] | nul
       ks.push(k);
       hs.push(internHash(k));
       if (vs !== null) vs.push(vals![i]);
-    } else if (vs !== null) {
-      vs[at] = vals![i];
+      if (vs2 !== null) vs2.push(vals2![i]);
+    } else {
+      if (vs !== null) vs[at] = vals![i];
+      if (vs2 !== null) vs2[at] = vals2![i];
     }
   }
   if (ks.length === 0) return cfg.empty;
   if (ks.length === 1) {
-    return consB(cfg, 1 << (hs[0]! & 31), 0, vs === null ? [ks[0]] : [ks[0], vs[0]]);
+    const slots = [ks[0]];
+    if (vs !== null) slots.push(vs[0]);
+    if (vs2 !== null) slots.push(vs2[0]);
+    return consB(cfg, 1 << (hs[0]! & 31), 0, slots);
   }
   const ids = new Array<number>(ks.length);
   for (let i = 0; i < ids.length; i++) ids[i] = i;
-  return buildNode(cfg, ks, vs, hs, ids, 0);
+  return buildNode(cfg, ks, vs, vs2, hs, ids, 0);
 }
 
 /**
@@ -400,6 +428,7 @@ function buildNode(
   cfg: TrieConfig,
   ks: unknown[],
   vs: unknown[] | null,
+  vs2: unknown[] | null,
   hs: number[],
   ids: number[],
   shift: number,
@@ -412,6 +441,7 @@ function buildNode(
       const id = ids[i]!;
       slots.push(ks[id]);
       if (vs !== null) slots.push(vs[id]);
+      if (vs2 !== null) slots.push(vs2[id]);
     }
     return consC(cfg, hs[ids[0]!]!, slots);
   }
@@ -435,9 +465,10 @@ function buildNode(
       dmap |= 1 << b;
       data.push(ks[g[0]!]);
       if (vs !== null) data.push(vs[g[0]!]);
+      if (vs2 !== null) data.push(vs2[g[0]!]);
     } else {
       nmap |= 1 << b;
-      kids.push(buildNode(cfg, ks, vs, hs, g, shift + 5));
+      kids.push(buildNode(cfg, ks, vs, vs2, hs, g, shift + 5));
     }
   }
   return consB(cfg, dmap, nmap, kids.length === 0 ? data : data.concat(kids));
@@ -535,12 +566,12 @@ export function trieRemove(
 
 /** Explicit-stack traversal shared by the three iterators: `next()` yields slot indices. */
 abstract class TrieIterator<T> extends IteratorBase implements IterableIterator<T> {
-  readonly #stride: 1 | 2;
+  readonly #stride: Stride;
   readonly #nodes: HNode[] = [];
   readonly #idx: number[] = [];
   #depth = -1;
 
-  constructor(stride: 1 | 2, root: HNode) {
+  constructor(stride: Stride, root: HNode) {
     super();
     this.#stride = stride;
     if (root.slots.length > 0) {

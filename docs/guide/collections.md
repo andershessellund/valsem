@@ -81,6 +81,53 @@ amortised rebuild anywhere. `InternedString` *does* expose its datum —
 is a primitive. The rule: the representation is public exactly where the
 runtime can actually protect it.
 
+## `OrderedMap` and `OrderedSet` — insertion order as part of the value
+
+`ValueMap` and `ValueSet` iterate in a content-determined order, which is
+right for a value whose order means nothing. When the order *is* part of the
+meaning — rows as the server sent them, tabs in the order they were opened,
+an LRU — `OrderedMap` and `OrderedSet` keep it and make it part of the value:
+`OrderedMap.from([['a', 1], ['b', 2]])` and the map built the other way round
+are two different values, and equal sequences are one `===` instance however
+they were built, like every other valsem collection.
+
+```ts
+import { OrderedMap, OrderedSet } from 'valsem';
+
+const rows = OrderedMap.from([['r2', { title: 'b' }], ['r1', { title: 'a' }]]);
+rows.get('r1');                    // { title: 'a' }
+rows.indexOf('r1');                // 1
+rows.at(0);                        // ['r2', { title: 'b' }]
+rows.set('r1', { title: 'A' });    // r1 keeps its position — native Map semantics
+rows.delete('r2').set('r2', { title: 'b' }); // …and a deleted-then-set key moves to the end
+rows.insertAt(1, 'r3', { title: 'c' });      // r2, r3, r1 — what a native Map cannot do
+[...rows.keys()];                  // ['r2', 'r1'] — always insertion order
+
+OrderedSet.of('x', 'y').add('x') === OrderedSet.of('x', 'y'); // true — a present member stays put
+```
+
+Every operation is O(log n): `get`, `has`, `set`, `delete`, `indexOf`, `at`,
+`first`, `last`, `insertAt`. Underneath are three canonical structures — a
+`ValueList` of the keys, a `ValueList` of the values, and a trie from key to
+value — and the trick that makes `delete` and `indexOf` logarithmic is one
+extra pointer per key in the trie: its **anchor**, the first element of the
+run of the key list it sits in (or, for a key that starts its run, of the
+lowest enclosing run it does not start). Following anchors upward gives the
+path to the key; an edit moves only the anchors of the runs it re-chunked. (Immutable.js
+keeps order with holes in a list that it compacts now and then — a shape that
+depends on delete history, which hash consing cannot allow.) The two lists
+are public as `keyList` and `valueList`: two maps with the same keys in the
+same order share one key list whatever their values did, so "did the row
+order change" is a pointer compare, separately from "did any row change".
+
+`OrderedMap` is a `ReadonlyMap`; `OrderedSet` has the `ReadonlySet` read API.
+There is no set algebra on `OrderedSet` — a union has no single natural order —
+so take `ValueSet.from(orderedSet)` for that. Inside `produce` they draft as
+`DraftOrderedMap` / `DraftOrderedSet` with the same verbs plus `clear()`, and
+their patches replay the recipe's operations in order: a delete's inverse is
+an insert at the index it had, and a key deleted and set back to the same
+value still yields two patches, because it moved.
+
 ## Things you are unlikely to need — but if you do
 
 Two tools for the ends of the scale, each solving one problem the core
@@ -164,3 +211,37 @@ For the last few nanoseconds: once keys are canonical, `===` already *is*
 value equality, so a native `Map` keyed by interned values is a map keyed by
 value at native speed, with nothing to add. `HashMap` is that map plus the
 interning of every key you hand it.
+
+## `memoize` — a pure function, remembered by content
+
+```ts
+import { memoize } from 'valsem';
+
+const visible = memoize(
+  (todos: ValueList<Todo>, filter: { done: boolean }) =>
+    todos.toArray().filter((t) => t.done === filter.done).map((t) => t.text),
+  { maxSize: 8 },
+);
+
+visible(state.todos, { done: false }); // runs
+visible(state.todos, { done: false }); // ~40 ns, and the SAME array instance — a fresh literal is the same value
+```
+
+`memoize` caches results keyed on the argument tuple **by value**: two
+calls with structurally equal arguments are one call, whatever the
+references. It is built on the premise the rest of valsem runs on: you
+interned your state when it was constructed, so a hit on canonical
+arguments is O(1) at any size, about 40 ns, because the hash is already on
+the value and equality is `===`. A small config literal built fresh each
+call still hits, matched by value, the case reference-keyed memoizers miss
+every time. Hand it raw payloads instead and it is **slow**: a full
+hash-and-compare walk per call, easily dearer than recomputing. Memoize
+canonical state, not raw data.
+
+Arguments must be values (a function or a mutable built-in is rejected with
+the usual teaching error). Results are interned, so equal calls return
+`===` results, and a function returning something valsem cannot
+canonicalise is rejected rather than shared. `maxSize` is an LRU bound
+(default 1, the "same call as last time" memo, as in reselect); the cache
+holds its arguments and results strongly, so a size-N cache pins N argument
+graphs. `clear()` and `size` live on the memoized function.

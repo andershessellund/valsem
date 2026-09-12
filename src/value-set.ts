@@ -60,7 +60,7 @@ type ReadonlySetReads<T> = Pick<
  * not part of the value — `{1, 2}` and `{2, 1}` are the *same* canonical
  * instance — so equal sets iterate identically, in an order driven by
  * (per-process, seeded) element hashes. Never attach meaning to it; if order
- * carries meaning, use a `ValueList`.
+ * carries meaning, use an `OrderedSet` (or a `ValueList`).
  *
  * The backing trie is a private field — never exposed. The ValueSet has the
  * whole `ReadonlySet` read API and the ES2025 set algebra, with two

@@ -35,7 +35,7 @@ comparable entry points of those libraries. Node only.
       const buf = readFileSync(out);
       rows.push(row(name, { minified: buf.length, gzipped: gzipSync(buf, { level: 9 }).length }));
     };
-    for (const names of ['produce', 'produce, current, original', 'deepEqual', 'intern', 'HashMap', 'ValueMap', 'ValueList', 'memoize']) {
+    for (const names of ['produce', 'produce, current, original', 'deepEqual', 'intern', 'HashMap', 'ValueMap', 'ValueList', 'OrderedMap', 'memoize']) {
       measure(`valsem: ${names}`, `import { ${names} } from 'valsem'; console.log(${names});`);
     }
     measure('valsem: everything', "import * as v from 'valsem'; console.log(v);");

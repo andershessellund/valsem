@@ -76,6 +76,15 @@ export interface PatchKinds {
   'map.delete': { kind: 'map.delete'; path: PatchPath; key: unknown };
   'set.add': { kind: 'set.add'; path: PatchPath; value: unknown };
   'set.delete': { kind: 'set.delete'; path: PatchPath; value: unknown };
+  // Ordered collections: order is part of the value, so these replay the
+  // recipe's operations in order (a `set` of a new key appends; an `insert`
+  // places it; the inverse of a `delete` is an `insert` at its index).
+  'omap.set': { kind: 'omap.set'; path: PatchPath; key: unknown; value: unknown };
+  'omap.delete': { kind: 'omap.delete'; path: PatchPath; key: unknown };
+  'omap.insert': { kind: 'omap.insert'; path: PatchPath; index: number; key: unknown; value: unknown };
+  'oset.add': { kind: 'oset.add'; path: PatchPath; value: unknown };
+  'oset.delete': { kind: 'oset.delete'; path: PatchPath; value: unknown };
+  'oset.insert': { kind: 'oset.insert'; path: PatchPath; index: number; value: unknown };
 }
 
 /** A semantic patch — one of {@link PatchKinds}. */

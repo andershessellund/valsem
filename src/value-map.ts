@@ -57,7 +57,7 @@ const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
  * not part of the value — `{a→1, b→2}` and `{b→2, a→1}` are the *same*
  * canonical instance — so equal maps iterate identically, in an order driven
  * by (per-process, seeded) key hashes. Never attach meaning to it; if order
- * carries meaning, use a `ValueList` of `[key, value]` pairs.
+ * carries meaning, use an `OrderedMap`.
  *
  * The backing trie is a private field — never exposed. The ValueMap **is** a
  * `ReadonlyMap` itself: pass it anywhere one is accepted, and take a mutable

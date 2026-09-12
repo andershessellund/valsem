@@ -7,7 +7,7 @@ Every number below is produced by `pnpm bench`, which runs the suites in `bench/
 | | node 26.3.0 (V8) | bun 1.4.2 (JavaScriptCore) |
 | --- | --- | --- |
 | machine | Apple M2 Pro, darwin arm64 | Apple M2 Pro, darwin arm64 |
-| date, commit | 2026-09-09, `f2cbb25` | 2026-09-09, `f2cbb25` |
+| date, commit | 2026-09-09, `5798e32` | 2026-09-09, `f2cbb25` |
 | valsem | 0.0.2 | 0.0.2 |
 | immer / mutative / immutable / fast-deep-equal | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 |
 
@@ -299,6 +299,58 @@ leaf and ancestor once) and the tail as one splice. The last row is the direct p
 | reference: direct set | 7.8 µs / 3.7 µs |
 | reference: direct insert | 7.2 µs / 6.8 µs |
 
+## OrderedMap, OrderedSet — against Immutable.js
+
+Insertion-ordered collections with canonical instances. Immutable's `OrderedMap` keeps a map from key to list
+index and leaves holes in the list on delete, compacting when holes outnumber entries — a representation that
+depends on delete history, which hash consing cannot allow. valsem keeps, per key, one content-derived ANCHOR
+(the first element of the run the key sits in — or, for a key that starts its run, of the lowest enclosing run it
+does not start) in the key trie, and finds a key's position through it in O(log n); the price is anchor maintenance
+on the runs an edit re-chunks. Primitive keys and values, so
+intern-on-entry is a no-op and the structures are what is timed; every row asserts both libraries agree.
+
+- **build**, **get**, **set existing** (novel value), **append** (a new key), **delete** (a middle key),
+  **indexOf** (Immutable: `keySeq().indexOf`, a scan), **insert at n/2** (valsem only — Immutable has no positional
+  insert), **iterate**.
+- **equals =**: two independently built equal maps — valsem's pointer compare; Immutable's `is()` walks.
+- **draft, k edits**: one `produce` with k sets on present keys and k/10 deletes, against `withMutations`.
+
+|  | valsem | Immutable | Immutable ÷ valsem |
+| --- | --- | --- | --- |
+| OrderedMap 100: build from entries | 36.3 µs / — | 16.6 µs / — | 1/2.2× / — |
+| OrderedMap 100: get | 74 ns / — | 47 ns / — | 1/1.6× / — |
+| OrderedMap 100: set existing key → novel value | 4.6 µs / — | 441 ns / — | 1/10.4× / — |
+| OrderedMap 100: append a new key | 6.6 µs / — | 1.4 µs / — | 1/4.7× / — |
+| OrderedMap 100: delete a middle key | 11.6 µs / — | 266 ns / — | 1/43.5× / — |
+| OrderedMap 100: indexOf a middle key | 222 ns / — | 1.7 µs / — | 7.8× / — |
+| OrderedMap 100: insert at n/2 | 22.5 µs / — | — | — / — |
+| OrderedMap 100: iterate entries | 6.0 µs / — | 4.5 µs / — | 1/1.3× / — |
+| OrderedMap 100: equals = (from vs set chain) | 18 ns / — | 4.9 µs / — | 270.3× / — |
+| OrderedMap 100: draft, 10 sets + 1 deletes | 63.8 µs / — | 1.6 µs / — | 1/41.1× / — |
+| OrderedMap 10000: build from entries | 3.95 ms / — | 1.84 ms / — | 1/2.1× / — |
+| OrderedMap 10000: get | 96 ns / — | 118 ns / — | 1.2× / — |
+| OrderedMap 10000: set existing key → novel value | 7.7 µs / — | 300 ns / — | 1/25.5× / — |
+| OrderedMap 10000: append a new key | 6.3 µs / — | 393 ns / — | 1/16.0× / — |
+| OrderedMap 10000: delete a middle key | 59.8 µs / — | 483 ns / — | 1/123.9× / — |
+| OrderedMap 10000: indexOf a middle key | 572 ns / — | 296.0 µs / — | 517.1× / — |
+| OrderedMap 10000: insert at n/2 | 38.3 µs / — | — | — / — |
+| OrderedMap 10000: iterate entries | 262.9 µs / — | 386.2 µs / — | 1.5× / — |
+| OrderedMap 10000: equals = (from vs set chain) | 26 ns / — | 593.8 µs / — | 23262.5× / — |
+| OrderedMap 10000: draft, 10 sets + 1 deletes | 176.5 µs / — | 2.2 µs / — | 1/79.7× / — |
+| OrderedMap 10000: draft, 100 sets + 10 deletes | 1.35 ms / — | 21.9 µs / — | 1/61.7× / — |
+| OrderedSet 100: build from members | 24.7 µs / — | 16.4 µs / — | 1/1.5× / — |
+| OrderedSet 100: has | 46 ns / — | 41 ns / — | 1/1.1× / — |
+| OrderedSet 100: add a new member | 3.3 µs / — | 687 ns / — | 1/4.8× / — |
+| OrderedSet 100: delete a middle member | 11.3 µs / — | 228 ns / — | 1/49.7× / — |
+| OrderedSet 100: indexOf a middle member | 220 ns / — | 2.2 µs / — | 9.9× / — |
+| OrderedSet 100: iterate members | 970 ns / — | 2.9 µs / — | 2.9× / — |
+| OrderedSet 10000: build from members | 3.21 ms / — | 1.81 ms / — | 1/1.8× / — |
+| OrderedSet 10000: has | 94 ns / — | 108 ns / — | 1.1× / — |
+| OrderedSet 10000: add a new member | 4.5 µs / — | 347 ns / — | 1/12.8× / — |
+| OrderedSet 10000: delete a middle member | 52.8 µs / — | 455 ns / — | 1/115.9× / — |
+| OrderedSet 10000: indexOf a middle member | 458 ns / — | 277.0 µs / — | 604.9× / — |
+| OrderedSet 10000: iterate members | 81.8 µs / — | 260.4 µs / — | 3.2× / — |
+
 ## Frozen arrays — what the engine charges for the frozen state
 
 valsem freezes the plain arrays it canonicalises. The `Object.freeze` call is a map transition (~0.1 µs at any size);
@@ -350,15 +402,16 @@ comparable entry points of those libraries. Node only.
 
 |  | minified | gzipped |
 | --- | --- | --- |
-| valsem: produce | 23.9 KB / — | 8.6 KB / — |
-| valsem: produce, current, original | 25.1 KB / — | 8.9 KB / — |
-| valsem: deepEqual | 3.1 KB / — | 1.5 KB / — |
-| valsem: intern | 11.0 KB / — | 4.5 KB / — |
-| valsem: HashMap | 11.6 KB / — | 4.6 KB / — |
-| valsem: ValueMap | 22.8 KB / — | 8.2 KB / — |
-| valsem: ValueList | 28.0 KB / — | 10.2 KB / — |
-| valsem: memoize | 13.1 KB / — | 5.3 KB / — |
-| valsem: everything | 60.2 KB / — | 19.7 KB / — |
+| valsem: produce | 25.1 KB / — | 9.0 KB / — |
+| valsem: produce, current, original | 26.3 KB / — | 9.3 KB / — |
+| valsem: deepEqual | 3.5 KB / — | 1.6 KB / — |
+| valsem: intern | 12.3 KB / — | 4.8 KB / — |
+| valsem: HashMap | 12.9 KB / — | 5.0 KB / — |
+| valsem: ValueMap | 24.9 KB / — | 9.0 KB / — |
+| valsem: ValueList | 30.1 KB / — | 10.9 KB / — |
+| valsem: OrderedMap | 47.3 KB / — | 15.4 KB / — |
+| valsem: memoize | 14.6 KB / — | 5.7 KB / — |
+| valsem: everything | 79.2 KB / — | 24.6 KB / — |
 | immer: produce | 9.1 KB / — | 3.7 KB / — |
 | immer: produce + enableMapSet | 12.0 KB / — | 4.6 KB / — |
 | mutative: create | 18.7 KB / — | 6.2 KB / — |

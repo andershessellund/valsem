@@ -26,6 +26,25 @@ intern({ at: new Date(0) });  // throws
 intern(new Set([1]));         // throws — names ValueSet.from
 ```
 
+### `ValueDate` — the value a `Date` stands for
+
+A `Date` can be re-timed, so it is not a value. What it *means* is one
+number, and `ValueDate` holds exactly that — canonical, comparable, and
+serialisable the way a `Date` is:
+
+```ts
+import { ValueDate } from 'valsem';
+
+const at = ValueDate.of('2026-09-05T10:00:00Z');  // accepts what new Date(x) accepts
+at === ValueDate.of(new Date(at.epochMs));         // true — one instant, one instance
+at < ValueDate.of(Date.now());                     // valueOf() is the epoch: comparisons work
+at.toDate().setHours(0);                           // a fresh mutable Date; `at` is unchanged
+JSON.stringify({ at });                            // {"at":"2026-09-05T10:00:00.000Z"} — as with a Date
+```
+
+Inside `produce` a `ValueDate` is an opaque leaf: assign a new one into its
+slot (`d.at = ValueDate.of(later)`) rather than editing it.
+
 `Object.freeze` is not a way around this. It does not reach the internal slots
 of a `Date` or a `Map`; on a `RegExp` it makes `lastIndex` read-only, which
 makes `.exec()` throw; and on a non-empty `TypedArray` it throws outright —

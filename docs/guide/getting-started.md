@@ -41,40 +41,17 @@ valsem provides value semantics as a small, composable toolkit:
 - **`produce`** — mutate a draft with ordinary syntax, receive the canonical
   result (plus optional semantic patches): the immer ergonomics, ending in
   interned values.
-- **Value collections** — `HashMap` keyed by structure, and the persistent
-  `ValueList` / `ValueMap` / `ValueSet` / `InternedString` whose *instances*
-  are canonical (equal contents ⟹ same reference).
+- **Value collections** — `HashMap` / `HashSet` keyed by structure, and the
+  persistent `ValueList` / `ValueMap` / `ValueSet`, the insertion-ordered
+  `OrderedMap` / `OrderedSet`, `ValueDate`, `InternedString` and `RawArray`,
+  whose *instances* are canonical (equal contents ⟹ same reference).
 - **Extension points** — the `equals` / `hashCode` / `interned` symbols,
   `deepEqual.register`, and `createInternPool` let any type become a
   first-class value.
 
 ## Sixty seconds of valsem
 
-```ts
-import { intern, produce, deepEqual, ValueList } from 'valsem';
-
-// Interning: equal content is the same object.
-const a = intern({ city: 'Aarhus', zip: '8000' });
-const b = intern({ zip: '8000', city: 'Aarhus' });
-a === b; // true
-
-// produce: mutable syntax, canonical result.
-const state = intern({ count: 1, todos: ValueList.of('a') });
-const next = produce(state, (draft) => {
-  draft.count++;
-  draft.todos.push('b');
-});
-next === intern({ count: 2, todos: ValueList.of('a', 'b') }); // true
-
-// Edits that net out converge on the base — literally.
-produce(state, (d) => {
-  d.count++;
-  d.count--;
-}) === state; // true
-
-// deepEqual works on raw data too, and exploits canonicality when present.
-deepEqual({ x: [1, 2] }, { x: [1, 2] }); // true
-```
+<!--@include: ../../README.md#sixty-seconds-->
 
 Where to go next:
 

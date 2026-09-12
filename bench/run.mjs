@@ -18,6 +18,7 @@ const SUITES = [
   'memoize',
   'list',
   'list-draft',
+  'ordered',
   'frozen-array',
   'record-copy',
   'bundle-size',

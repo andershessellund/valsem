@@ -5,7 +5,7 @@
 //     next === intern({ ...state, count: state.count + 1 });   // canonical
 //
 // Architecture (measured against the immer and mutative sources — see
-// DESIGN.md §7 and the decision log):
+// DESIGN.md §7 and DECISIONS.md D35–D38):
 //
 // * **Drafts are lazy copy-on-write.** Plain objects and arrays get revocable
 //   Proxies created on read, a shallow copy plus assignment bookkeeping on
@@ -306,8 +306,8 @@ function createObjectDraft(base: Rec, parent?: DraftState): ObjectState {
 /**
  * Unfrozen shadows of large frozen bases, so repeat copies run at unfrozen
  * slice speed (~2 µs vs ~9 µs spread at 10k). WeakMap-keyed: a shadow lives
- * and dies with its base (the §8.4 cache law — O(n) caches must be
- * evictable), and is private to copyArr, never mutated, only sliced.
+  * and dies with its base (the cache law, DESIGN.md §6.4 — O(n) caches must
+ * be evictable), and is private to copyArr, never mutated, only sliced.
  */
 const shadows = new WeakMap<object, unknown[]>();
 const copiedOnce = new WeakSet<object>();

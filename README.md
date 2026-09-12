@@ -58,8 +58,9 @@ cache.get({ page: 2, path: '/users' });        // hits the entry stored under { 
 ```
 
 The collections agree with all of this: `ValueMap`, `ValueSet`, `ValueList`
-are immutable collections with structural sharing; `HashMap` and `HashSet`
-are mutable and keyed by content.
+(and the insertion-ordered `OrderedMap`, `OrderedSet`) are immutable
+collections with structural sharing whose equal instances are the same
+object; `HashMap` and `HashSet` are mutable and keyed by content.
 
 **Extensible.** Your own classes become values with two members — `[equals]`
 and a companion `[hashCode]` — or one registration, `deepEqual.register`,
@@ -70,28 +71,27 @@ does not know — is rejected with an error that names the fix, never silently
 compared by reference. See [Extending](#extending).
 
 **Fast.** Here is exactly what is fast, and what is not. Comparing two
-canonical values is a pointer check — about 20 ns for a three-key record and
-for a three-million-key state alike — and everything built on comparison
-inherits that: `fastEquals`, `HashMap` and `HashSet` lookups on canonical
-keys, `memoize` hits, and hashing, which is a cached property read.
+canonical values is a pointer check — tens of nanoseconds for a three-key
+record and for a three-million-key state alike — and everything built on
+comparison inherits that: `fastEquals`, `HashMap` and `HashSet` lookups on
+canonical keys, `memoize` hits, and hashing, which is a cached property read.
 
 ```ts
 import { fastEquals, HashMap } from 'valsem';
 
-fastEquals(current, saved);            // 20 ns at any size
+fastEquals(current, saved);            // a pointer compare, at any size
 const derived = new HashMap<State, Derived>();
 derived.get(state);                    // a native Map lookup plus one probe — the key is canonical, so === is value equality
 ```
 
 What is *not* fast is building: every value is hashed and canonicalised when
-it is created, so constructing and updating cost more than a plain copy — an
-edit to a 10k-item array runs 13–19 µs against immer's ~6, admitting a
-1,000-record API response with `intern` costs ~2 ms (5× parsing it; an
-unchanged refetch ~0.8 ms), and a
-lookup with a raw (uncanonicalised) key walks it. That is the trade: a win for state that
-is compared, memoized, keyed, or kept in history more often than it is built,
-and a loss for state built once and thrown away. The [benchmarks](#benchmarks)
-show both sides.
+it is created, so constructing and updating cost more than a plain copy. An
+edit to a large plain array costs a few times what immer charges, admitting
+a large API response costs a few times parsing it, and a lookup with a raw
+(uncanonicalised) key walks it. That is the trade: a win for state that is
+compared, memoized, keyed, or kept in history more often than it is built,
+and a loss for state built once and thrown away.
+[BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first.
 
 ## Coming from immer
 
@@ -118,6 +118,7 @@ produce(next, () => {}) === next; // true — no edits, same value (and the same
 
 ## Value semantics in sixty seconds
 
+<!-- #region sixty-seconds -->
 A value is its *content*. Two records with the same keys and values are equal
 regardless of key order; a key set to `undefined` is the same as no key at
 all; `NaN` equals `NaN`.
@@ -137,6 +138,23 @@ Object.isFrozen(intern({ a: 1 }));                            // true
 deepEqual(intern(bigTree), intern(otherBigTree)); // O(1) if either is canonical
 ```
 
+`produce` gives you mutable syntax over those values, and its result is
+canonical too — edits that net out converge back to the very same base
+object:
+
+```ts
+import { produce, ValueList } from 'valsem';
+
+const state = intern({ count: 1, todos: ValueList.of('a') });
+const next = produce(state, (draft) => {
+  draft.count++;
+  draft.todos.push('b');
+});
+next === intern({ count: 2, todos: ValueList.of('a', 'b') }); // true
+
+produce(state, (d) => { d.count++; d.count--; }) === state;   // true — literally the base
+```
+
 Things that can change after construction are not values, and valsem says so
 rather than guessing:
 
@@ -149,162 +167,48 @@ intern({ at: new Date() });
 deepEqual(new Date(0), new Date(0)); // false — reference semantics for mutable objects
                                      // (a development-mode warning explains why, once)
 ```
+<!-- #endregion sixty-seconds -->
 
 ## Collections
 
-### `HashMap`, `HashSet` — mutable, keyed by value
+Every operation on a value collection returns the canonical instance for
+the resulting content, so two collections with equal content are one
+object, however they were built:
 
 ```ts
-import { HashMap } from 'valsem';
-
-const cache = new HashMap<{ table: string; id: number }, Row>();
-cache.set({ table: 'users', id: 1 }, row);
-cache.get({ id: 1, table: 'users' }); // row — key order irrelevant
-
-// The idiomatic memoised lookup: the factory runs once per distinct key.
-const rows = cache.getOrCreate({ table: 'users', id: 2 }, (key) => loadRow(key));
-
-// Keys that are your state are already canonical: one probe over a native Map lookup.
-const byState = new HashMap<State, Derived>();
-byState.set(state, derive(state));
-byState.get(produce(state, () => {})); // the same value → the same key
-```
-
-`HashMap` and `HashSet` are native `Map` and `Set` keyed by canonical
-values: every key is interned on the way in, on `set` and on every lookup.
-A canonical key costs one probe over the native lookup (~20 ns); a raw key
-is interned first (~300 ns for a small record). The stored key is the
-canonical copy, so a key mutated after insertion changes nothing, and
-iteration yields canonical keys. Values are stored as-is, so a `HashMap` can
-index live objects by value.
-
-### `memoize` — a pure function, remembered by content
-
-```ts
-import { memoize } from 'valsem';
-
-const visible = memoize(
-  (todos: ValueList<Todo>, filter: { done: boolean }) =>
-    todos.toArray().filter((t) => t.done === filter.done).map((t) => t.text),
-  { maxSize: 8 },
-);
-
-visible(state.todos, { done: false }); // runs
-visible(state.todos, { done: false }); // ~40 ns, and the SAME array instance — a fresh literal is the same value
-```
-
-Built on the premise the rest of valsem runs on: you interned your state when
-it was constructed, so a hit on canonical arguments is **O(1) at any size**,
-about 40 ns, because the hash is already on the value and equality is `===`.
-A small config literal built fresh each call still hits, matched by value
-(~200 ns for a few keys) — the case reference-keyed memoizers miss every
-time. Hand it raw payloads instead and it is **slow**: a full hash-and-compare
-walk per call, easily dearer than recomputing. Memoize canonical state, not
-raw data. Results are interned: equal calls return `===` results, and a
-function returning something valsem cannot canonicalise is rejected rather
-than shared. `maxSize` is an LRU bound (default 1, the "same call as last
-time" memo).
-
-### `ValueMap`, `ValueSet`, `ValueList` — canonical immutable collections
-
-Every operation returns the canonical instance for the resulting content. Build
-a map two different ways and you hold one object:
-
-```ts
-import { ValueMap, ValueSet, ValueList } from 'valsem';
+import { ValueMap, ValueSet, ValueList, OrderedMap, HashMap } from 'valsem';
 
 const m1 = ValueMap.from([['a', 1], ['b', 2]]);
 const m2 = ValueMap.empty<string, number>().set('b', 2).set('a', 1);
-m1 === m2;                          // true — different history, same value
-m1.set('a', 1) === m1;              // true — a no-op edit is the same value
-m1.get('a');                        // 1
-[...m1];                            // [['a', 1], ['b', 2]] in a content-determined order
+m1 === m2;                                                   // true — different history, same value
+m1.set('a', 1) === m1;                                       // true — a no-op edit is the same value
+ValueSet.from([1, 2, 3]) === ValueSet.from([3, 2, 1]);       // true — order is not part of a set
+OrderedMap.from([['a', 1], ['b', 2]]) === OrderedMap.from([['b', 2], ['a', 1]]); // false — here it is
+ValueList.of(1, 2, 3) === ValueList.empty<number>().push(1).push(2).push(3);      // true
 
-ValueSet.from([1, 2, 3]) === ValueSet.from([3, 2, 1]);            // true
-ValueList.of(1, 2, 3) === ValueList.empty<number>().push(1).push(2).push(3); // true
+const cache = new HashMap<{ table: string; id: number }, Row>();
+cache.set({ table: 'users', id: 1 }, row);
+cache.get({ id: 1, table: 'users' });                        // row — mutable map, keyed by value
 ```
 
-`ValueList` is a content-chunked tree, so `insert`, `remove`, `splice`,
-`slice` and `concat` are O(log n) — a mid-list insert into 100k items is
-under 10 µs, not a rebuild — and `ValueList.diff(a, b)` finds what changed
-between *any* two lists, a refetched one included, in O(c log n): three
-changed items in 100k cost ~4 µs to locate.
-
-Elements are interned on entry, so structurally equal raw objects converge too:
-
-```ts
-const s = ValueSet.from([{ x: 1 }]);
-s.has({ x: 1 });               // true
-s.add({ x: 1 }) === s;         // true — already present, by content
-```
-
-Inside `produce`, they are drafted as mutable twins — `DraftMap`, `DraftSet`,
-`DraftList` — with the native-looking API:
-
-```ts
-const state = intern({ users: ValueMap.from([['anders', { role: 'admin' }]]), tags: ValueSet.from(['a']) });
-
-const next = produce(state, (d) => {
-  d.users.get('anders')!.role = 'owner'; // nested values are drafted lazily
-  d.users.set('marie', { role: 'admin' });
-  d.tags.add('b');
-});
-next.users.get('marie'); // { role: 'admin' } — canonical, frozen
-```
-
-Updates path-copy O(log n) nodes and share the rest — so a one-key change to a
-10,000-entry `ValueMap` is a few microseconds, where a drafted native `Map`
-copies the whole container.
-
-### `ValueDate` — the value a `Date` stands for
-
-A `Date` can be re-timed, so it is not a value. What it *means* is one number,
-and `ValueDate` holds exactly that — canonical, comparable, serialisable the
-way a `Date` is:
-
-```ts
-import { ValueDate } from 'valsem';
-
-const at = ValueDate.of('2026-09-05T10:00:00Z');  // accepts what new Date(x) accepts
-at === ValueDate.of(new Date(at.epochMs));         // true — one instant, one instance
-at < ValueDate.of(Date.now());                     // valueOf() is the epoch: comparisons work
-at.toDate().setHours(0);                           // a fresh mutable Date; `at` is unchanged
-JSON.stringify({ at });                            // {"at":"2026-09-05T10:00:00.000Z"} — as with a Date
-```
+Inside `produce` the collections draft as mutable twins (`DraftMap`,
+`DraftSet`, `DraftList`, …) with the native-looking API, and an update
+path-copies O(log n) nodes and shares the rest. The
+[collections guide](https://andershessellund.github.io/valsem/guide/collections)
+covers each of them: the persistent `ValueMap`/`ValueSet`/`ValueList`, the
+insertion-ordered `OrderedMap`/`OrderedSet`, the mutable `HashMap`/`HashSet`,
+`memoize`, and the two tools for the ends of the scale, `InternedString` and
+`RawArray`.
 
 ## Benchmarks
 
-Generated by `pnpm bench`, which runs every suite on Node and on Bun and
-renders [BENCHMARKS.md](BENCHMARKS.md) with a description of exactly what
-each row measures. The two tables below are the Node numbers of the rows
-that matter most; the reasoning behind the design they reflect is in
-[DECISIONS.md](DECISIONS.md).
-
-**Against immer and mutative** — the update libraries this API replaces:
-
-| | valsem | immer | mutative |
-| --- | --- | --- | --- |
-| 10k-entry map, one `set` through the draft | **6.5 µs** | 468 µs | 403 µs |
-| 10k-element list, `set` + `push` through the draft | 11.7 µs | **9.3 µs** | **9.0 µs** |
-| recurrent states (10 held configurations) | **1.6 µs** | 536 µs | 2.9 µs |
-| memo hit rate on refetched, equal data | **100 %** | 0 % | 0 % |
-| 3-key record, one field | 1.2 µs | **0.4 µs** | **0.5 µs** |
-| 10k plain array, one element, one produce per macrotask | 9.9 µs | **6.6 µs** | **6.6 µs** |
-
-**Against Immutable.js** — the same persistent structures without canonical
-instances:
-
-| | valsem | Immutable.js |
-| --- | --- | --- |
-| equality of two equal 10k-entry maps | **11 ns** | 627 µs |
-| equality, differing in one entry | **41 ns** | 101 µs cold / 34 ns hashes cached |
-| iterate 10k entries / elements | **147 / 60 µs** | 180 / 202 µs |
-| `get` / `has` | parity | parity |
-| one `Map.set` | 4.2 µs | **0.25 µs** |
-| build a 10k-entry map | 12 ms | **0.9 ms** |
-
-A constant-factor cost on every construction and update buys an asymptotic
-win on every comparison; it pays off in proportion to how often values are
+`pnpm bench` runs every suite on Node and on Bun and renders
+[BENCHMARKS.md](BENCHMARKS.md), with a description of exactly what each row
+measures: `produce` against immer and mutative, the collections against
+Immutable.js, `deepEqual` against fast-deep-equal, the cost of admitting an
+API response, and what frozen arrays cost in each engine. The short version:
+a constant-factor cost on every construction and update buys an asymptotic
+win on every comparison. It pays off in proportion to how often values are
 compared, memoised, or recur, and not for data built once and compared once.
 
 ## Extending
@@ -329,91 +233,22 @@ intern(new Money(5, 'EUR')) === intern(new Money(5, 'EUR')); // true — pooled,
 new HashMap().set(new Money(5, 'EUR'), 'x').get(new Money(5, 'EUR')); // 'x' — keyed by content
 ```
 
-`[hashCode]` is the declaration that makes it a value. A hash is only useful
-if it never changes, so carrying one says the instance is immutable after
-construction — and with that promise valsem pools it, keys by it, and stores
-it in state. A class with `[equals]` alone is *comparable*: `deepEqual`
-answers by content, which is fine even for a mutable object, but hashing or
-interning it throws, naming the missing hash.
-
-Types you do not own are registered instead, with the same two tiers — an
-equality alone, or an equality and a hash:
-
-```ts
-import { deepEqual, deepHash } from 'valsem';
-
-deepEqual.register(
-  Money,
-  (a, b) => a.amount === b.amount && a.currency === b.currency,
-  (m) => deepHash([m.amount, m.currency]), // omit the hash for "comparable only"
-);
-```
-
-To give your own class canonical instances (equal contents ⟹ the same
-object, like the built-in collections), give it a pool:
-
-```ts
-import { createInternPool, equals, hashCode, interned } from 'valsem';
-
-const pool = createInternPool<Point>();
-
-class Point {
-  declare readonly [hashCode]: number;
-  declare readonly [interned]: true;
-  private constructor(readonly x: number, readonly y: number) {}
-  [equals](o: unknown) { return o instanceof Point && o.x === this.x && o.y === this.y; }
-  static of(x: number, y: number): Point {
-    const p = new Point(x, y);
-    (p as any)[hashCode] = deepHash([x, y]);
-    return pool.intern(p); // frozen, deduplicated: Point.of(1, 2) === Point.of(1, 2)
-  }
-}
-```
-
-[Temporal](https://tc39.es/proposal-temporal/) values become values with one
-import — `PlainDate`, `ZonedDateTime`, `Duration`, all of them:
-
-```ts
-import 'valsem/temporal';
-deepEqual(Temporal.PlainDate.from('2026-09-05'), Temporal.PlainDate.from('2026-09-05')); // true
-```
-
-### Bring your own draftable
-
-`produce` drafts plain objects and arrays itself. Everything else — the
-built-in `ValueMap`/`ValueSet`/`ValueList` included — arrives through one
-protocol: a class implements `[toDraft](parent)`, returning a draft state
-built with the `valsem/draft` toolkit. The state carries the mutable draft the
-recipe receives and a `finalize` that turns it back into the canonical value
-(emitting patches); `Draft<T>` infers the draft type from it, so
-`produce(interval, (d) => { d.hi = 5; })` is fully typed:
-
-```ts
-import { toDraft, createDraftState, markChanged, assertUnrevoked, type DraftState } from 'valsem/draft';
-
-class Interval {
-  // …a canonical value type, as above…
-  [toDraft](parent?: DraftState): IntervalState {
-    const state = createDraftState<IntervalState>({
-      kind: 'interval', parent, base: this, lo: this.lo, hi: this.hi,
-      draft: null!, finalize: (s) => Interval.of(s.lo, s.hi),
-    });
-    state.draft = new IntervalDraft(state); // getters/setters that call assertUnrevoked + markChanged
-    return state;
-  }
-}
-```
-
-The [guide](https://andershessellund.github.io/valsem/guide/extending#bring-your-own-draftable)
-has the complete worked example — nested drafting, custom patch kinds with
-exact narrowing, `applyPatches` support — which is also a test in the repo.
+The hash is the declaration that makes it a value: carrying one says the
+instance never changes, and with that promise valsem pools it, keys by it,
+and stores it in state. The
+[extending guide](https://andershessellund.github.io/valsem/guide/extending)
+has the rest: the comparable-only tier, registering types you do not own,
+canonical instances by construction with `createInternPool`, Temporal via
+`import 'valsem/temporal'`, and
+[bringing your own draftable](https://andershessellund.github.io/valsem/guide/extending#bring-your-own-draftable)
+so `produce` can edit your type in place, with patches.
 
 ## Guarantees
 
 - **Immutable.** Everything `produce`, `intern` and the collections return is
   frozen, all the way down — unless you call `skipFreezing()`, which trades
   that enforcement for unfrozen (faster to iterate) canonical arrays; see
-  the hardening guide.
+  the [hardening guide](https://andershessellund.github.io/valsem/guide/hardening).
 - **Canonical.** Equal values are the same object — lineage-free: however a
   value was built, it converges on one instance.
 - **Compared by content.** `deepEqual` never throws on a *type* — mutable
@@ -421,11 +256,10 @@ exact narrowing, `applyPatches` support — which is also a test in the repo.
   pointer compare.
 - **Loud at the boundary.** `Date`, `RegExp`, `Map`, `Set`, `TypedArray`s,
   unknown class instances, and cyclic or absurdly deep input are rejected
-  with errors that name the fix. (`deepEqual` on its own never throws: a
-  mutable object or unknown instance simply compares by reference.)
+  with errors that name the fix.
 - **Hardened for untrusted input.** Hashing is seeded per process (no
   hash-flooding), nesting is depth-capped, `__proto__` keys are handled as
-  data. See the [hardening guide](https://andershessellund.github.io/valsem/guide/hardening).
+  data.
 - **No leaks.** Pools hold values weakly; what you stop referencing is
   collected, and the bookkeeping is cleaned up in idle time.
 
@@ -433,7 +267,7 @@ exact narrowing, `applyPatches` support — which is also a test in the repo.
 
 - **Iteration order of `ValueMap`/`ValueSet` is not part of the value.** Equal
   maps iterate identically, but the order is hash-driven, not insertion. If
-  order matters, it is a `ValueList` of pairs.
+  order matters, use `OrderedMap`/`OrderedSet`, where it is.
 - **`{ a: undefined }` is `{}`.** Records drop undefined-valued keys; use
   `null` for "present but empty". (`ValueMap` is the opposite: storing
   `undefined` is a real entry.)
@@ -442,10 +276,17 @@ exact narrowing, `applyPatches` support — which is also a test in the repo.
 ## Documentation
 
 The [guide](https://andershessellund.github.io/valsem/) covers each area in
-depth — including the [mutable boundary](https://andershessellund.github.io/valsem/guide/boundary),
+depth: [getting started](https://andershessellund.github.io/valsem/guide/getting-started),
 [what exactly "the value" is](https://andershessellund.github.io/valsem/guide/values),
-patches, Temporal's edge cases, and the extension points for wire-format
-bindings (`valsem/binding`).
+[the collections](https://andershessellund.github.io/valsem/guide/collections),
+[`produce` and patches](https://andershessellund.github.io/valsem/guide/produce),
+[the mutable boundary](https://andershessellund.github.io/valsem/guide/boundary),
+[extending](https://andershessellund.github.io/valsem/guide/extending),
+[hardening](https://andershessellund.github.io/valsem/guide/hardening), and the
+[API reference](https://andershessellund.github.io/valsem/api). For working
+on the library itself: [DESIGN.md](DESIGN.md) describes how it is built,
+[DECISIONS.md](DECISIONS.md) why, and [BENCHMARKS.md](BENCHMARKS.md) what
+it costs.
 
 ### API at a glance
 
@@ -457,16 +298,16 @@ bindings (`valsem/binding`).
 | `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
+| `OrderedMap`, `OrderedSet` | the same, insertion-ordered — order is part of the value; `indexOf`, `at`, `insertAt` in O(log n) (`DraftOrderedMap`/`DraftOrderedSet` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
+| `InternedString`, `RawArray` | a string with its hash paid once; a large response admitted slice by slice |
 | `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
 | `toDraft`, `valsem/draft` | making types draftable — the protocol `produce` uses for everything but plain objects and arrays |
 | `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches you own |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |
+| `valsem/binding` | the two helpers a wire or storage binding needs; not for application code |
 
 Runs on Node ≥ 22 and current browsers, with TypeScript ≥ 5.6 for the types.
-`ValueSet` has the ES2025 set algebra (`union`, `isSubsetOf`, …), taking any
-iterable and returning `ValueSet`s, merged at node level: two sets cost what
-they differ by, not what they hold.
 
 ## License
 

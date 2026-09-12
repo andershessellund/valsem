@@ -9,7 +9,7 @@
     "platform": "darwin arm64"
   },
   "date": "2026-09-09",
-  "commit": "f2cbb25",
+  "commit": "5798e32",
   "valsem": "0.0.2",
   "libraries": {
     "immer": "11.1.18",
@@ -1245,6 +1245,253 @@
       ]
     },
     {
+      "id": "ordered",
+      "title": "OrderedMap, OrderedSet — against Immutable.js",
+      "description": "\nInsertion-ordered collections with canonical instances. Immutable's `OrderedMap` keeps a map from key to list\nindex and leaves holes in the list on delete, compacting when holes outnumber entries — a representation that\ndepends on delete history, which hash consing cannot allow. valsem keeps, per key, one content-derived ANCHOR\n(the first element of the run the key sits in — or, for a key that starts its run, of the lowest enclosing run it\ndoes not start) in the key trie, and finds a key's position through it in O(log n); the price is anchor maintenance\non the runs an edit re-chunks. Primitive keys and values, so\nintern-on-entry is a no-op and the structures are what is timed; every row asserts both libraries agree.\n\n- **build**, **get**, **set existing** (novel value), **append** (a new key), **delete** (a middle key),\n  **indexOf** (Immutable: `keySeq().indexOf`, a scan), **insert at n/2** (valsem only — Immutable has no positional\n  insert), **iterate**.\n- **equals =**: two independently built equal maps — valsem's pointer compare; Immutable's `is()` walks.\n- **draft, k edits**: one `produce` with k sets on present keys and k/10 deletes, against `withMutations`.\n",
+      "columns": [
+        "valsem",
+        "Immutable"
+      ],
+      "unit": "ns",
+      "ratio": [
+        "valsem",
+        "Immutable"
+      ],
+      "rows": [
+        {
+          "name": "OrderedMap 100: build from entries",
+          "values": {
+            "valsem": 36300.167,
+            "Immutable": 16594.416
+          }
+        },
+        {
+          "name": "OrderedMap 100: get",
+          "values": {
+            "valsem": 74.05444718756256,
+            "Immutable": 46.570928137719356
+          }
+        },
+        {
+          "name": "OrderedMap 100: set existing key → novel value",
+          "values": {
+            "valsem": 4594.086335735255,
+            "Immutable": 441.1362423271951
+          }
+        },
+        {
+          "name": "OrderedMap 100: append a new key",
+          "values": {
+            "valsem": 6557.051107552709,
+            "Immutable": 1393.3480117427275
+          }
+        },
+        {
+          "name": "OrderedMap 100: delete a middle key",
+          "values": {
+            "valsem": 11560.904323458766,
+            "Immutable": 265.85161462503333
+          }
+        },
+        {
+          "name": "OrderedMap 100: indexOf a middle key",
+          "values": {
+            "valsem": 222.13418295856408,
+            "Immutable": 1731.4241676119304
+          }
+        },
+        {
+          "name": "OrderedMap 100: insert at n/2",
+          "values": {
+            "valsem": 22547.27662129704,
+            "Immutable": null
+          }
+        },
+        {
+          "name": "OrderedMap 100: iterate entries",
+          "values": {
+            "valsem": 5999.459,
+            "Immutable": 4507.584
+          }
+        },
+        {
+          "name": "OrderedMap 100: equals = (from vs set chain)",
+          "values": {
+            "valsem": 18,
+            "Immutable": 4865.22925
+          }
+        },
+        {
+          "name": "OrderedMap 100: draft, 10 sets + 1 deletes",
+          "values": {
+            "valsem": 63810.52,
+            "Immutable": 1552.7075
+          }
+        },
+        {
+          "name": "OrderedMap 10000: build from entries",
+          "values": {
+            "valsem": 3949658.35,
+            "Immutable": 1838485.4
+          }
+        },
+        {
+          "name": "OrderedMap 10000: get",
+          "values": {
+            "valsem": 96.24775762407813,
+            "Immutable": 117.60846455385024
+          }
+        },
+        {
+          "name": "OrderedMap 10000: set existing key → novel value",
+          "values": {
+            "valsem": 7658.74966781823,
+            "Immutable": 299.8493223491895
+          }
+        },
+        {
+          "name": "OrderedMap 10000: append a new key",
+          "values": {
+            "valsem": 6265.413234121711,
+            "Immutable": 392.6276906723359
+          }
+        },
+        {
+          "name": "OrderedMap 10000: delete a middle key",
+          "values": {
+            "valsem": 59839.55620515546,
+            "Immutable": 482.9590752059527
+          }
+        },
+        {
+          "name": "OrderedMap 10000: indexOf a middle key",
+          "values": {
+            "valsem": 572.3927978207428,
+            "Immutable": 295969.34037605475
+          }
+        },
+        {
+          "name": "OrderedMap 10000: insert at n/2",
+          "values": {
+            "valsem": 38339.01355301621,
+            "Immutable": null
+          }
+        },
+        {
+          "name": "OrderedMap 10000: iterate entries",
+          "values": {
+            "valsem": 262927.1,
+            "Immutable": 386160.45
+          }
+        },
+        {
+          "name": "OrderedMap 10000: equals = (from vs set chain)",
+          "values": {
+            "valsem": 25.525,
+            "Immutable": 593775.525
+          }
+        },
+        {
+          "name": "OrderedMap 10000: draft, 10 sets + 1 deletes",
+          "values": {
+            "valsem": 176483.96,
+            "Immutable": 2215
+          }
+        },
+        {
+          "name": "OrderedMap 10000: draft, 100 sets + 10 deletes",
+          "values": {
+            "valsem": 1352002.075,
+            "Immutable": 21897.9
+          }
+        },
+        {
+          "name": "OrderedSet 100: build from members",
+          "values": {
+            "valsem": 24653.291,
+            "Immutable": 16398.708
+          }
+        },
+        {
+          "name": "OrderedSet 100: has",
+          "values": {
+            "valsem": 45.57423100020017,
+            "Immutable": 40.61576699806499
+          }
+        },
+        {
+          "name": "OrderedSet 100: add a new member",
+          "values": {
+            "valsem": 3281.2472644782492,
+            "Immutable": 686.5659194021885
+          }
+        },
+        {
+          "name": "OrderedSet 100: delete a middle member",
+          "values": {
+            "valsem": 11336.324526287697,
+            "Immutable": 228.2826261008807
+          }
+        },
+        {
+          "name": "OrderedSet 100: indexOf a middle member",
+          "values": {
+            "valsem": 219.9475545472743,
+            "Immutable": 2173.7450457062787
+          }
+        },
+        {
+          "name": "OrderedSet 100: iterate members",
+          "values": {
+            "valsem": 970.083,
+            "Immutable": 2850.208
+          }
+        },
+        {
+          "name": "OrderedSet 10000: build from members",
+          "values": {
+            "valsem": 3210002.1,
+            "Immutable": 1807168.75
+          }
+        },
+        {
+          "name": "OrderedSet 10000: has",
+          "values": {
+            "valsem": 94.49538236662016,
+            "Immutable": 108.01328815361106
+          }
+        },
+        {
+          "name": "OrderedSet 10000: add a new member",
+          "values": {
+            "valsem": 4463.327132606963,
+            "Immutable": 347.44007440871644
+          }
+        },
+        {
+          "name": "OrderedSet 10000: delete a middle member",
+          "values": {
+            "valsem": 52770.92745150146,
+            "Immutable": 455.4544246611746
+          }
+        },
+        {
+          "name": "OrderedSet 10000: indexOf a middle member",
+          "values": {
+            "valsem": 457.90425885323236,
+            "Immutable": 276974.8300445153
+          }
+        },
+        {
+          "name": "OrderedSet 10000: iterate members",
+          "values": {
+            "valsem": 81812.5,
+            "Immutable": 260439.6
+          }
+        }
+      ]
+    },
+    {
       "id": "frozen-array",
       "title": "Frozen arrays — what the engine charges for the frozen state",
       "description": "\nvalsem freezes the plain arrays it canonicalises. The `Object.freeze` call is a map transition (~0.1 µs at any size);\nthe cost is the frozen **state**: engines have fast paths for frozen elements in some builtins and not in others.\nThe first row is the freeze call itself — a map transition on V8, an O(n) walk on JavaScriptCore, where it is the\ndominant cost of canonicalising a large array. Each following row is one operation over a 10,000-element array,\nunfrozen and then frozen, with one function per call site so the keyed loads stay monomorphic. Three element kinds: integers (Smi), doubles, and objects. This is the cost\n`skipFreezing()` buys back in the user's own loops; `ValueList` never pays it (its leaves are unfrozen inside a frozen\nwrapper).\n",
@@ -1464,64 +1711,71 @@
         {
           "name": "valsem: produce",
           "values": {
-            "minified": 24458,
-            "gzipped": 8784
+            "minified": 25719,
+            "gzipped": 9182
           }
         },
         {
           "name": "valsem: produce, current, original",
           "values": {
-            "minified": 25706,
-            "gzipped": 9161
+            "minified": 26970,
+            "gzipped": 9557
           }
         },
         {
           "name": "valsem: deepEqual",
           "values": {
-            "minified": 3196,
-            "gzipped": 1486
+            "minified": 3571,
+            "gzipped": 1630
           }
         },
         {
           "name": "valsem: intern",
           "values": {
-            "minified": 11297,
-            "gzipped": 4563
+            "minified": 12590,
+            "gzipped": 4962
           }
         },
         {
           "name": "valsem: HashMap",
           "values": {
-            "minified": 11890,
-            "gzipped": 4760
+            "minified": 13184,
+            "gzipped": 5152
           }
         },
         {
           "name": "valsem: ValueMap",
           "values": {
-            "minified": 23321,
-            "gzipped": 8420
+            "minified": 25475,
+            "gzipped": 9216
           }
         },
         {
           "name": "valsem: ValueList",
           "values": {
-            "minified": 28683,
-            "gzipped": 10471
+            "minified": 30858,
+            "gzipped": 11206
+          }
+        },
+        {
+          "name": "valsem: OrderedMap",
+          "values": {
+            "minified": 48405,
+            "gzipped": 15789
           }
         },
         {
           "name": "valsem: memoize",
           "values": {
-            "minified": 13441,
-            "gzipped": 5391
+            "minified": 14935,
+            "gzipped": 5794
           }
         },
         {
           "name": "valsem: everything",
           "values": {
-            "minified": 61689,
-            "gzipped": 20192
+            "minified": 81052,
+            "gzipped": 25143
           }
         },
         {

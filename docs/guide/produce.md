@@ -20,7 +20,8 @@ next.todos === produce(state, (d) => void d.todos.push('b')).todos; // lineage-f
 
 Plain objects and arrays draft through proxies (any syntax works, including
 array methods); `ValueMap`/`ValueSet`/`ValueList` slots hand out
-`DraftMap`/`DraftSet`/`DraftList` — mutable twins with the native-collection
+`DraftMap`/`DraftSet`/`DraftList` (and `OrderedMap`/`OrderedSet` slots
+`DraftOrderedMap`/`DraftOrderedSet`) — mutable twins with the native-collection
 API. Raw material assigned into a draft is **adopted**: interned on the way
 into the result, exactly like the collections' intern-on-entry. Drafts are
 revoked when `produce` returns — using a leaked draft throws.
@@ -104,8 +105,9 @@ immer's two inspectors, with valsem's guarantee attached. `original(draft)`
 is the value the draft was made from; `current(draft)` is the **canonical**
 value of what the draft holds right now — exactly what `produce` would
 return if the recipe ended here — and the draft stays live afterwards.
-Both work on any draft: plain objects and arrays, `DraftMap`/`DraftSet`/
-`DraftList`, and your own draftables.
+Both work on any draft: plain objects and arrays, the collection drafts
+(`DraftMap`, `DraftSet`, `DraftList`, `DraftOrderedMap`, `DraftOrderedSet`),
+and your own draftables.
 
 ```ts
 import { produce, current, original } from 'valsem';

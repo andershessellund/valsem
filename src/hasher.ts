@@ -41,7 +41,7 @@ function readSeed(): Uint32Array {
   const existing = g[SEED_KEY];
   if (existing !== undefined) return existing;
   // Web Crypto is a platform requirement: globalThis.crypto is universal in
-  // every supported runtime (Node \u2265 19, all browsers/workers/Deno/Bun), so
+  // every supported runtime (Node \u2265 22, all browsers/workers/Deno/Bun), so
   // there is no existence check \u2014 an exotic environment without it fails
   // here at import, which is the honest place. (Structural type instead of
   // the DOM `Crypto` name: valsem does not compile against the DOM lib.)

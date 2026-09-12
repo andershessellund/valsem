@@ -4,9 +4,10 @@
 // Structural equality (`deepEqual`), companion hashing (`deepHash`), and global
 // interning (`intern` — structurally-equal values collapse to a single `===`
 // canonical instance), plus value collections (`ValueList`/`ValueMap`/
-// `ValueSet`/`ValueDate`/`InternedString`, `HashMap`) and the extension points
-// (`equals`/`hashCode`/`interned` symbols, `createInternPool`) that let any
-// type participate.
+// `ValueSet`, the insertion-ordered `OrderedMap`/`OrderedSet`, `ValueDate`/
+// `InternedString`/`RawArray`, the mutable `HashMap`/`HashSet`), `produce`
+// and `memoize`, and the extension points (`equals`/`hashCode`/`interned`
+// symbols, `createInternPool`, `toDraft`) that let any type participate.
 //
 // Temporal value semantics live behind the `valsem/temporal` subpath; the
 // stable surface for binding authors (wire formats, storage layers) behind
@@ -23,6 +24,8 @@ export { ValueList } from './value-list.js';
 export type { Hunk } from './value-list.js';
 export { ValueMap } from './value-map.js';
 export { ValueSet } from './value-set.js';
+export { OrderedMap } from './ordered-map.js';
+export { OrderedSet } from './ordered-set.js';
 export { InternedString } from './interned-string.js';
 export { ValueDate } from './value-date.js';
 export { RawArray } from './raw-array.js';
@@ -40,3 +43,5 @@ export type { Undraft } from './current.js';
 export { DraftMap } from './draft-map.js';
 export { DraftSet } from './draft-set.js';
 export { DraftList } from './draft-list.js';
+export { DraftOrderedMap } from './draft-ordered-map.js';
+export { DraftOrderedSet } from './draft-ordered-set.js';

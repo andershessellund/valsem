@@ -38,7 +38,7 @@ import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
 /** A consed node: `kids` are elements (height 1) or nodes (height > 1). */
-interface CNode {
+export interface CNode {
   readonly h: number;
   /** Elements covered. */
   readonly n: number;
@@ -47,7 +47,15 @@ interface CNode {
   readonly kids: readonly unknown[];
   /** Branch only: start offset of each kid. */
   readonly offsets: readonly number[] | null;
+  /** The first element under this node — the anchor the ordered collections address a run by. */
+  readonly first: unknown;
 }
+
+/**
+ * Nodes consed by the operation in progress (hits and misses alike), when an
+ * ordered collection asked to be told — see {@link ValueList._record}.
+ */
+let consLog: CNode[] | null = null;
 
 const MAX_RUN = 64;
 
@@ -66,8 +74,9 @@ function consLeaf(items: unknown[], hashes: number[]): CNode {
   let h = mix(0xc1ea, items.length);
   for (let i = 0; i < hashes.length; i++) h = mix(h, hashes[i]!);
   const found = cpool.lookup(h, (c) => c.ht === 1 && sameSlots(c.kids, items));
-  if (found !== undefined) return found;
-  return cpool.register({ h, n: items.length, ht: 1, kids: items, offsets: null }, h);
+  const node = found !== undefined ? found : cpool.register({ h, n: items.length, ht: 1, kids: items, offsets: null, first: items[0] }, h);
+  if (consLog !== null) consLog.push(node);
+  return node;
 }
 
 function consBranch(kids: CNode[]): CNode {
@@ -82,8 +91,9 @@ function consBranch(kids: CNode[]): CNode {
   }
   const ht = kids[0]!.ht + 1;
   const found = cpool.lookup(h, (c) => c.ht === ht && sameSlots(c.kids, kids));
-  if (found !== undefined) return found;
-  return cpool.register({ h, n, ht, kids, offsets }, h);
+  const node = found !== undefined ? found : cpool.register({ h, n, ht, kids, offsets, first: kids[0]!.first }, h);
+  if (consLog !== null) consLog.push(node);
+  return node;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +107,7 @@ interface Frame {
 
 /** A synthetic parent above a root, so the root is an element like any other. */
 function superRoot(root: CNode): CNode {
-  return { h: 0, n: root.n, ht: root.ht + 1, kids: [root], offsets: [0] };
+  return { h: 0, n: root.n, ht: root.ht + 1, kids: [root], offsets: [0], first: root.first };
 }
 
 /**
@@ -287,6 +297,15 @@ export interface Hunk {
   readonly bStart: number;
   readonly bEnd: number;
 }
+
+/**
+ * Anchor sentinels for the ordered collections (see {@link ValueList._indexOf}):
+ * the anchor of the list's first element, and of every element in the open tail.
+ */
+export const _ANCHOR_ROOT: unique symbol = Symbol('valsem.anchor.root');
+export const _ANCHOR_TAIL: unique symbol = Symbol('valsem.anchor.tail');
+/** What an `anchorOf` callback returns for a key the collection does not hold (`undefined` is a legitimate key). */
+export const _ANCHOR_NONE: unique symbol = Symbol('valsem.anchor.none');
 
 /** Is a leaf holding `items` closed — does its run end on its own, not merely at the list end? */
 function leafClosed(items: readonly unknown[]): boolean {
@@ -662,6 +681,121 @@ export class ValueList<T> implements Iterable<T> {
     const ht = A.length !== 0 ? A[0]!.ht : B.length !== 0 ? B[0]!.ht : 0;
     if (ht !== 0) diffRuns(A, B, ht, 0, 0, out);
     return out;
+  }
+
+  // -------------------------------------------------------------------------
+  // Anchors — how OrderedMap/OrderedSet find a key's POSITION in O(log n).
+  //
+  // The ordered collections keep, per key, one pointer: its ANCHOR, the first
+  // element of the lowest node on its path that the key does not itself
+  // start (the list's first element anchors to _ANCHOR_ROOT; elements of the
+  // open tail to _ANCHOR_TAIL). A leaf's first element is fixed by the
+  // element before it, so an edit inside a run moves no anchor, and a
+  // boundary flip moves only the anchors of the direct kids of the runs it
+  // merged or split — never their deeper descendants. Following anchors
+  // upward yields the firsts of the non-first kids on the key's path; the
+  // descent matches them against each node's kids. Every anchor a tree
+  // implies is contributed by the node whose kid it names, so after an
+  // operation the anchors that may have changed are exactly the
+  // contributions of the nodes it consed — which `_record` collects.
+  // -------------------------------------------------------------------------
+
+  /**
+   * @internal Run one list operation and collect the nodes it consed (pool
+   * hits included — a consed node is in the result, or superseded by a
+   * later one in the log, whose contributions then override it).
+   */
+  static _record<R>(fn: () => R): { result: R; consed: CNode[] } {
+    const outer = consLog;
+    const consed: CNode[] = [];
+    consLog = consed;
+    try {
+      return { result: fn(), consed };
+    } finally {
+      consLog = outer;
+    }
+  }
+
+  /**
+   * @internal The anchor updates implied by `consed` for the list `next`:
+   * every non-first kid of a consed node anchors to that node's first, in
+   * log order (later nodes override superseded ones), then the root's first
+   * to `_ANCHOR_ROOT` and the tail's elements to `_ANCHOR_TAIL`. Applying
+   * these to entries that still exist (and skipping unchanged ones) brings
+   * an ordered collection's anchors up to date.
+   */
+  static _anchorUpdates(consed: readonly CNode[], next: ValueList<unknown>): Map<unknown, unknown> {
+    const out = new Map<unknown, unknown>();
+    for (let c = 0; c < consed.length; c++) {
+      const node = consed[c]!;
+      const kids = node.kids;
+      if (node.ht === 1) {
+        for (let i = 1; i < kids.length; i++) out.set(kids[i], node.first);
+      } else {
+        for (let i = 1; i < kids.length; i++) out.set((kids[i] as CNode).first, node.first);
+      }
+    }
+    if (next.#root !== null) out.set(next.#root.first, _ANCHOR_ROOT);
+    const tail = next.#tail;
+    for (let i = 0; i < tail.length; i++) out.set(tail[i], _ANCHOR_TAIL);
+    return out;
+  }
+
+  /**
+   * @internal The index of `key` given its anchors (`anchorOf` returns the
+   * anchor of a key, or `_ANCHOR_NONE` for a key the collection does not
+   * hold), or -1 when the anchors do not lead to it. O(log n): one lookup
+   * per non-first kid on the path, then one node scan per level.
+   */
+  static _indexOf(list: ValueList<unknown>, key: unknown, anchorOf: (k: unknown) => unknown): number {
+    let a = anchorOf(key);
+    if (a === _ANCHOR_NONE) return -1;
+    const root = list.#root;
+    const trunk = root === null ? 0 : root.n;
+    if (a === _ANCHOR_TAIL) {
+      const tail = list.#tail;
+      for (let i = 0; i < tail.length; i++) if (same(tail[i], key)) return trunk + i;
+      return -1;
+    }
+    if (root === null) return -1;
+    // The chain: the key, then its anchors upward — together the firsts of
+    // the non-first kids on the path, bottom-up (the key itself may start
+    // one), ending with the root's first (whose anchor is _ANCHOR_ROOT).
+    const chain: unknown[] = [key];
+    while (a !== _ANCHOR_ROOT) {
+      chain.push(a);
+      a = anchorOf(a);
+      if (a === _ANCHOR_NONE || a === _ANCHOR_TAIL || chain.length > 64) return -1;
+    }
+    if (chain.length !== 0 && same(chain[chain.length - 1], root.first)) chain.pop();
+    let node = root;
+    let pos = 0;
+    let ci = chain.length - 1;
+    while (node.ht > 1) {
+      const kids = node.kids as readonly CNode[];
+      let j = 0;
+      if (ci >= 0) {
+        const target = chain[ci];
+        for (let jj = 1; jj < kids.length; jj++) {
+          if (same(kids[jj]!.first, target)) {
+            j = jj;
+            ci--;
+            break;
+          }
+        }
+      }
+      pos += node.offsets![j]!;
+      node = kids[j]!;
+    }
+    const kids = node.kids;
+    for (let i = 0; i < kids.length; i++) if (same(kids[i], key)) return pos + i;
+    return -1;
+  }
+
+  /** @internal The tree shape — nested arrays of elements — and the tail, for the chunking tests. */
+  _structure(): { tree: unknown; tail: readonly unknown[] } {
+    const walk = (n: CNode): unknown => (n.ht === 1 ? [...n.kids] : (n.kids as CNode[]).map(walk));
+    return { tree: this.#root === null ? null : walk(this.#root), tail: this.#tail };
   }
 
   /** @internal */
