@@ -125,6 +125,38 @@ copied and hashed, so `current()` in a hot loop costs what a produce costs.
 Both throw outside the recipe, like any other use of an escaped draft.
 `Undraft<D>` is their return type — the inverse of `Draft<T>`.
 
+## Editing material from elsewhere: `draft()`
+
+A recipe often brings in a value that is not reachable through its draft —
+another store's state, a signal read inside a `computed`, a fetched record —
+and wants to edit it before it has a slot. `draft(value)` hands out a
+**detached** draft: a second root in the same recipe, with no location yet.
+Edit it, then attach it anywhere — assign it, push it, set it into a
+collection, embed it in a literal, return it as the replacement — and it
+resolves to its canonical value where it landed. Attached at several places,
+every place receives the same instance. Never attached, it is dropped.
+
+```ts
+import { produce, draft } from 'valsem';
+
+const view = computed(() =>
+  produce(state(), (d) => {
+    const cfg = draft(settings());     // a canonical from another signal
+    cfg.enabled = flags().has('beta'); // edit before it has a slot
+    d.config = cfg;                    // attach; finalize resolves it here
+  }),
+);
+```
+
+Material already reachable through the draft needs no `draft()`: reads hand
+out child drafts, and an assigned canonical is drafted on read-back (`d.c =
+other; d.c.x = 1` works). `draft(x)` and `d.k` with `base.k === x` are two
+independent states over one base — edits to one do not appear in the other.
+A detached draft is revoked with the recipe like every other draft, throws
+outside one, and attaches as a whole-value patch (a `record.set`, a
+`list.splice`, …), the same as any graft. Non-draftables return themselves,
+and a draft of the running recipe returns itself.
+
 ## Identity in a draft: the aliasing doctrine
 
 Inside a recipe you are writing plain mutable JavaScript, and valsem preserves

@@ -661,10 +661,10 @@ methods on frozen types are an API smell. Per-location wrappers dissolve
 all three, and editing `draft.a` never affects `draft.b` even when `base.a
 === base.b`. Set members have no location, so draft sets are `add`/`delete`
 only. Every draft is revoked when its `produce` ends. Foreign grafts stay
-raw inside the recipe (the recipe's own material needs no proxy), except
-frozen ones: an assigned canonical is drafted copy-on-write on read, so
-mutating through it never throws on the frozen object (mutative's #18
-family). **Decided, unbuilt:** schema-compiled accessor drafts for
+raw inside the recipe by default (the recipe's own material needs no
+proxy), except frozen ones: an assigned canonical is drafted copy-on-write
+on read, so mutating through it never throws on the frozen object
+(mutative's #18 family); `draft(value)` opts material in explicitly (D42). **Decided, unbuilt:** schema-compiled accessor drafts for
 closed-schema records (real `get`/`set` accessors per known field, a fixed
 hidden-class shape, cached by schema content, proxy-free) with automatic
 fallback to the proxy path; invisible by rule 4 of D29. DESIGN.md §7.2.
@@ -850,6 +850,31 @@ the underscores and is covered by semver. **Rejected:** a type-level
 field `[hashCode]` nor verify immutability; `intern` answers per instance,
 and a binding learns the answer the same way: it returns the canonical
 instance or throws naming what the class lacks. DESIGN.md §10.
+
+### D42. `draft(value)` is a detached root inside the recipe's scope; there is no `finishDraft`
+
+`draft(value)`, called inside a recipe, returns a draft of any draftable
+with no location in the recipe's draft. It resolves wherever it is attached
+or returned, is dropped if neither, and is revoked with the recipe.
+
+**Why.** A recipe that brings material in from elsewhere — another store, a
+signal read inside a `computed` — and wants to edit it before it has a slot
+had two routes: assign first and edit through the read-back, which needs a
+slot to exist, or a nested `produce`, which needs the edit to be expressible
+against one base. Neither fits "read three signals, build one value,
+decide where it goes". The core already models a scope as a flat set of
+states (`Scope.states`; `assertAssignable` checks scope membership, not
+lineage; `resolve` and `adopt` finalise a draft wherever the walk meets
+it), so a second root costs the guards only: identity on a draft of this
+scope, an error on one from another, pass-through for leaves. The one rule
+that shifts is D36's "foreign material stays raw": raw by default, `draft`
+opts in. Independence from a child draft over the same base follows from
+D36's per-location wrappers and is the immer `createDraft` semantics.
+**Rejected:** immer's `createDraft`/`finishDraft`, a draft whose lifetime
+outlives a call. The revoke-at-scope-end rule is what the escape guarantee
+rests on, and D36 already rejected ambient context that leaks across
+`await`; a `computed` runs synchronously, so a `produce` inside it is a
+sufficient lexical scope. DESIGN.md §7.1.
 
 ## Non-goals
 

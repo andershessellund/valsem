@@ -106,6 +106,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — `[equals]` + `[hashCode]`, or one registration, see [Extending](#extending); a value is an opaque leaf in a recipe (`Draft<ValueDate>` is `ValueDate`) unless it implements `[toDraft]` — give a registered class at least one method so the types can tell |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
+| `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draft(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
 | Async recipes | silently wrong | rejected with an error |
 
 ```ts
@@ -292,7 +293,7 @@ it costs.
 
 | | |
 | --- | --- |
-| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical |
+| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `draft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical; `draft()` detaches a second root for material brought in from elsewhere |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
 | `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |

@@ -589,6 +589,16 @@ recorded there and revoked when the recipe returns (a proxy's `revoke` is
 called; a class draft checks `revoked` on every operation). A draft from
 another scope cannot be assigned in (`assertAssignable`).
 
+A scope is a set of states, not a tree: the recipe's draft is one root, and
+`draft(value)` adds a **detached** root over any draftable — no parent, no
+location. `markChanged` has nothing to bubble to, which is harmless:
+attaching the draft is itself a change that marks the container. Finalize
+meets it wherever it landed (`resolve` through a slot, `adopt` through a
+grafted literal, the replacement path when returned) and memoises it, so
+every attachment receives the one canonical; an unattached draft is revoked
+with the scope and never finalised. `draft` of a draft in this scope is the
+identity; of a draft from another scope, an error. Why: D42.
+
 A value becomes draftable by implementing `[toDraft](parent)` on its
 prototype, returning a `DraftState` built with `createDraftState`:
 

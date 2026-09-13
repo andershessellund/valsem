@@ -108,6 +108,11 @@ export interface Scope {
 
 let currentScope: Scope | undefined;
 
+/** @internal The scope of the running `produce()`, if any. */
+export function _currentScope(): Scope | undefined {
+  return currentScope;
+}
+
 /** @internal Run `body` inside a fresh scope; every draft it creates is revoked afterwards. */
 export function _runInScope<T>(body: () => T): T {
   const scope: Scope = { parent: currentScope, states: [] };

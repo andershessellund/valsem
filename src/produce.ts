@@ -61,6 +61,7 @@ import {
   snapshotOf,
   isImmutable,
   _runInScope,
+  _currentScope,
   _setCoreDraftFactories,
   isPlainObject,
   type DraftState,
@@ -1149,6 +1150,44 @@ export function produce<T, Args extends unknown[]>(
     return (base: T, ...args: Args) => runProduce(base, (d) => r(d, ...args), undefined);
   }
   return runProduce(baseOrRecipe as T, recipe, undefined);
+}
+
+/**
+ * A **detached** draft of `value`, inside the running recipe: a second root
+ * in the same scope, with no location in the recipe's draft. Edit it, then
+ * attach it — assign it into the draft, push it, put it in a collection,
+ * embed it in a literal, or return it as the replacement — and finalize
+ * resolves it to its canonical value where it landed; attached at several
+ * places, every place receives the same instance. Left unattached, it is
+ * simply dropped. It is revoked with the scope like every other draft.
+ *
+ * Meant for material the recipe brings in from elsewhere — another store's
+ * value, a signal read inside a computed — that needs editing before it
+ * has a slot. Material already reachable through the draft needs no
+ * `draft()`: reads through the draft hand out child drafts, and an assigned
+ * canonical is drafted on read-back. `draft(x)` and `d.k` (with `base.k ===
+ * x`) are two independent states over one base: edits to one do not appear
+ * in the other.
+ *
+ * Non-draftables (primitives, opaque value leaves) return themselves, as
+ * `Draft<T>` types them. A draft of this scope returns itself.
+ *
+ * @throws outside a recipe, or given a draft from another `produce()` call.
+ */
+export function draft<T>(value: T): Draft<T> {
+  const scope = _currentScope();
+  if (scope === undefined) {
+    throw new Error('valsem: draft() can only be called inside a produce() recipe');
+  }
+  const state = stateOf(value);
+  if (state !== undefined) {
+    if (state.scope !== scope) {
+      throw new Error('valsem: draft() was given a draft from a different produce() call.');
+    }
+    return value as Draft<T>;
+  }
+  if (!isDraftable(value)) return value as Draft<T>;
+  return draftOf(value).draft as Draft<T>;
 }
 
 /**
