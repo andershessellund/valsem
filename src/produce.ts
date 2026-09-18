@@ -88,8 +88,18 @@ export const nothing: unique symbol = Symbol('valsem.nothing');
 /** A plain record: own enumerable string and symbol keys. */
 type Rec = Record<string | symbol, unknown>;
 
+/**
+ * Node's `util.inspect` (so `console.log`, and a debugger's hover) formats a
+ * Proxy by reading its TARGET directly, past the traps — for a draft that is
+ * the internal state, not the data. Node honours this well-known hook on the
+ * target, so both draft targets carry it and print what the draft holds. A
+ * registered symbol: nothing is imported, and other runtimes ignore it.
+ */
+const INSPECT = Symbol.for('nodejs.util.inspect.custom');
+
 interface ObjectState extends DraftState<Rec> {
   kind: 'object';
+  [INSPECT](): unknown;
   copy: Rec | null;
   /** true = set, false = deleted; absent key = only child-drafted. */
   assigned: Map<string | symbol, boolean> | null;
@@ -216,8 +226,16 @@ const objectTraps: ProxyHandler<object> = {
       state.assigned!.set(prop, false);
       return true;
     }
-    if (same(value, current) && (value !== undefined || hasOwn(latestObj(state), prop))) {
-      return true; // no-op write
+    if (same(value, current)) {
+      if (value !== undefined || hasOwn(latestObj(state), prop)) return true; // no-op write
+      // `d.k = undefined` on an absent key. In record semantics that is no
+      // change (undefined IS absent), so the draft is not marked modified —
+      // a recipe may still return a replacement. Inside the recipe the key
+      // exists, as in plain JS, so it is written; finalize drops it.
+      prepareObjCopy(state);
+      _defineRecordField(state.copy!, prop, value);
+      state.assigned!.set(prop, true);
+      return true;
     }
     assertAssignable(value, state);
     prepareObjCopy(state);
@@ -282,6 +300,22 @@ function assertNotReserved(prop: symbol): void {
   }
 }
 
+/** The {@link INSPECT} hook. Node finds it on the target but calls it on the PROXY. */
+function inspectDraft(this: unknown): unknown {
+  let state: DraftState | undefined;
+  try {
+    state = stateOf(this);
+  } catch {
+    return '[revoked valsem draft]'; // a revoked Proxy throws on any access
+  }
+  if (state?.kind === 'object') return { ...latestObj(state as ObjectState) };
+  if (state?.kind === 'array') {
+    const arr = state as ArrayState;
+    return Array.from({ length: arrLen(arr) }, (_, i) => arrRead(arr, i));
+  }
+  return this;
+}
+
 function createObjectDraft(base: Rec, parent?: DraftState): ObjectState {
   const state = createDraftState<ObjectState>({
     kind: 'object',
@@ -293,6 +327,7 @@ function createObjectDraft(base: Rec, parent?: DraftState): ObjectState {
     draft: null as unknown as object,
     revoke: null as unknown as () => void,
     finalize: finalizeObject,
+    [INSPECT]: inspectDraft,
   });
   const { proxy, revoke } = Proxy.revocable(state as unknown as object, objectTraps);
   state.draft = proxy;
@@ -372,62 +407,84 @@ function materializeArr(state: ArrayState): unknown[] {
   return state.copy;
 }
 
-/** Mutating methods captured as intent. push/pop stay virtual; the rest materialize. */
-const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> = {
-  push(state, args) {
-    const at = arrLen(state);
-    state.ops?.push({ t: 'splice', i: at, rc: 0, inserted: args.slice(), removed: [] });
-    if (state.copy !== null) state.copy.push(...args);
-    else state.vTail.push(...args);
-    return at + args.length;
-  },
-  pop(state) {
-    const len = arrLen(state);
-    if (len === 0) return undefined;
-    let removed: unknown;
-    if (state.copy !== null) removed = state.copy.pop();
-    else if (state.vTail.length > 0) removed = state.vTail.pop();
-    else removed = materializeArr(state).pop();
-    state.ops?.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
-    return removed;
-  },
-  shift(state) {
-    const copy = materializeArr(state);
-    if (copy.length === 0) return undefined;
-    const removed = copy.shift();
-    if (copy.length > 0) state.opaqued = true; // survivors relocated
-    state.ops?.push({ t: 'splice', i: 0, rc: 1, inserted: [], removed: [removed] });
-    return removed;
-  },
-  unshift(state, args) {
-    const copy = materializeArr(state);
-    if (args.length > 0 && copy.length > 0) state.opaqued = true; // survivors relocated
-    copy.unshift(...args);
-    state.ops?.push({ t: 'splice', i: 0, rc: 0, inserted: args.slice(), removed: [] });
-    return copy.length;
-  },
-  splice(state, args) {
-    const copy = materializeArr(state);
-    const len = copy.length;
-    let start = Math.trunc((args[0] as number) ?? 0);
-    start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
-    const rc =
-      args.length < 2
-        ? len - start
-        : Math.min(Math.max(Math.trunc(args[1] as number), 0), len - start);
-    const items = args.slice(2);
-    if (items.length !== rc && start + rc < len) state.opaqued = true; // survivors relocated
-    const removed = copy.splice(start, rc, ...items);
-    state.ops?.push({
-      t: 'splice',
-      i: start,
-      rc,
-      inserted: items.slice(),
-      removed: removed.slice(),
-    });
-    return removed;
-  },
-};
+/**
+ * Mutating methods captured as intent. push/pop stay virtual; the rest materialize.
+ *
+ * A NULL-PROTOTYPE table: it is indexed by whatever property the recipe reads,
+ * and a plain literal would answer `toString`, `valueOf`, `hasOwnProperty`,
+ * `constructor`, `__proto__`… with Object.prototype's members, which the get
+ * trap would then wrap as mutating methods — marking the draft modified and
+ * calling them with no receiver (`String(draft)` gave "[object Undefined]").
+ */
+const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> = Object.assign(
+  Object.create(null) as Record<string, (state: ArrayState, args: unknown[]) => unknown>,
+  {
+    push(state: ArrayState, args: unknown[]) {
+      const at = arrLen(state);
+      state.ops?.push({ t: 'splice', i: at, rc: 0, inserted: args.slice(), removed: [] });
+      if (state.copy !== null) state.copy.push(...args);
+      else state.vTail.push(...args);
+      return at + args.length;
+    },
+    pop(state) {
+      const len = arrLen(state);
+      if (len === 0) return undefined;
+      let removed: unknown;
+      if (state.copy !== null) removed = state.copy.pop();
+      else if (state.vTail.length > 0) removed = state.vTail.pop();
+      else removed = materializeArr(state).pop();
+      state.ops?.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
+      return removed;
+    },
+    shift(state) {
+      const copy = materializeArr(state);
+      if (copy.length === 0) return undefined;
+      const removed = copy.shift();
+      if (copy.length > 0) state.opaqued = true; // survivors relocated
+      state.ops?.push({ t: 'splice', i: 0, rc: 1, inserted: [], removed: [removed] });
+      return removed;
+    },
+    unshift(state, args) {
+      const copy = materializeArr(state);
+      if (args.length > 0 && copy.length > 0) state.opaqued = true; // survivors relocated
+      copy.unshift(...args);
+      state.ops?.push({ t: 'splice', i: 0, rc: 0, inserted: args.slice(), removed: [] });
+      return copy.length;
+    },
+    splice(state, args) {
+      const copy = materializeArr(state);
+      const len = copy.length;
+      let start = Math.trunc((args[0] as number) ?? 0);
+      start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
+      const rc =
+        args.length < 2
+          ? len - start
+          : Math.min(Math.max(Math.trunc(args[1] as number), 0), len - start);
+      const items = args.slice(2);
+      if (items.length !== rc && start + rc < len) state.opaqued = true; // survivors relocated
+      const removed = copy.splice(start, rc, ...items);
+      state.ops?.push({
+        t: 'splice',
+        i: start,
+        rc,
+        inserted: items.slice(),
+        removed: removed.slice(),
+      });
+      return removed;
+    },
+  } satisfies Record<string, (state: ArrayState, args: unknown[]) => unknown>,
+);
+
+/**
+ * The array index `prop` spells, or -1. Canonical spellings only, as in
+ * JavaScript: `'1'` is index 1, while `'01'`, `'1.0'` and `'+1'` are ordinary
+ * property names that an array does not have.
+ */
+function arrayIndex(prop: string | symbol): number {
+  if (typeof prop !== 'string' || !/^(?:0|[1-9]\d*)$/.test(prop)) return -1;
+  const index = Number(prop);
+  return index < 0xffffffff ? index : -1;
+}
 
 /** Mutating methods with no clean intent mapping: fall back to index diffing. */
 const OPAQUE = new Set(['sort', 'reverse', 'fill', 'copyWithin']);
@@ -460,13 +517,13 @@ const arrayTraps: ProxyHandler<object> = {
       }
     }
     if (prop === 'length') return arrLen(state);
-    if (typeof prop === 'symbol' || !/^\d+$/.test(prop)) {
+    const index = arrayIndex(prop);
+    if (index === -1) {
       // Methods and symbols come off Array.prototype; index reads and length
       // during their execution route back through these traps, so iteration
       // and the read-only methods work virtually.
       return Reflect.get(state.copy ?? state.base, prop, state.draft);
     }
-    const index = Number(prop);
     const value = arrRead(state, index);
     if (state.finalized || !isDraftable(value)) return value;
     // Draft base-positioned values. Frozen values (canonicals — assigned or
@@ -482,15 +539,20 @@ const arrayTraps: ProxyHandler<object> = {
     ) {
       (state.drafted ??= new Set()).add(index);
       const child = createChildDraft(value, state);
+      // Store it where arrRead looks: vEdits covers the base region only. A
+      // child drafted over a pushed (frozen) element belongs in the tail —
+      // parked in vEdits it was never read again, and its edits were lost.
       if (state.copy !== null) state.copy[index] = child;
-      else state.vEdits.set(index, child);
+      else if (index < state.base.length) state.vEdits.set(index, child);
+      else state.vTail[index - state.base.length] = child;
       return child;
     }
     return value;
   },
   has(target, prop) {
     const state = (target as [ArrayState])[0]!;
-    if (typeof prop === 'string' && /^\d+$/.test(prop)) return Number(prop) < arrLen(state);
+    const index = arrayIndex(prop);
+    if (index !== -1) return index < arrLen(state);
     return prop in (state.copy ?? state.base);
   },
   ownKeys(target) {
@@ -507,10 +569,10 @@ const arrayTraps: ProxyHandler<object> = {
       state.copy!.length = value as number;
       return true;
     }
-    if (typeof prop === 'symbol' || !/^\d+$/.test(prop)) {
+    const index = arrayIndex(prop);
+    if (index === -1) {
       throw new TypeError(`valsem: arrays take integer indices, got ${String(prop)}`);
     }
-    const index = Number(prop);
     const len = arrLen(state);
     const current = index < len ? arrRead(state, index) : undefined;
     if (same(value, current) && index < len) return true;
@@ -531,12 +593,15 @@ const arrayTraps: ProxyHandler<object> = {
   },
   deleteProperty(target, prop) {
     // `delete arr[i]` — arrays are positional; treat as set-to-undefined.
+    // `length` is not configurable on any array; routed through `set` it
+    // became `copy.length = undefined`, a RangeError about array lengths.
+    if (prop === 'length') throw new TypeError("valsem: cannot delete an array's length");
     return arrayTraps.set!.call(this, target, prop, undefined, (target as [ArrayState])[0]!.draft);
   },
   getOwnPropertyDescriptor(target, prop) {
     const state = (target as [ArrayState])[0]!;
-    if (typeof prop === 'string' && /^\d+$/.test(prop)) {
-      const index = Number(prop);
+    const index = arrayIndex(prop);
+    if (index !== -1) {
       if (index >= arrLen(state)) return undefined;
       return {
         writable: true,
@@ -583,7 +648,9 @@ function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
     revoke: null as unknown as () => void,
     finalize: finalizeArray,
   });
-  const { proxy, revoke } = Proxy.revocable([state] as unknown as object, arrayTraps);
+  const target = [state] as [ArrayState] & { [INSPECT]?: () => unknown };
+  target[INSPECT] = inspectDraft;
+  const { proxy, revoke } = Proxy.revocable(target as unknown as object, arrayTraps);
   state.draft = proxy as unknown as unknown[];
   state.revoke = revoke;
   return state;

@@ -294,7 +294,7 @@ export function assertUnrevoked(state: DraftState): void {
 
 /** Throw if `value` is a draft that belongs to a different produce() call. */
 export function assertAssignable(value: unknown, into: DraftState): void {
-  const vState = stateOf(value);
+  const vState = stateOfLive(value);
   if (vState !== undefined && vState.scope !== into.scope) {
     throw new Error('valsem: cannot assign a draft from a different produce() call.');
   }
@@ -314,7 +314,7 @@ export function resolve(
   path: PatchPath | null,
   recorder: PatchRecorder | undefined,
 ): unknown {
-  const state = stateOf(value);
+  const state = stateOfLive(value);
   if (state !== undefined) return finalizeState(state, path, recorder);
   return adopt(value);
 }
@@ -357,12 +357,16 @@ export function snapshotOf(value: unknown): unknown {
   if (!state.modified) return state.base;
   const outermost = snapshotScope === undefined;
   if (outermost) snapshotScope = state.scope;
+  // current() of a draft that contains itself would recurse without end.
+  if (inProgress.has(state)) throw cyclicDraftError();
+  inProgress.add(state);
   try {
     if (state.snapshot !== undefined) return state.snapshot(state);
     if (coreSnapshot !== undefined && (state.kind === 'object' || state.kind === 'array')) {
       return coreSnapshot(state);
     }
   } finally {
+    inProgress.delete(state);
     if (outermost) snapshotScope = undefined;
   }
   throw new Error(
@@ -474,6 +478,30 @@ function adoptUncached(value: object): unknown {
   return intern(value);
 }
 
+/**
+ * {@link stateOf} for a value a recipe handed over, which may be a plain
+ * draft whose produce() has ended: a revoked Proxy throws the engine's
+ * "proxy that has been revoked" on any access, even this probe. Same
+ * mistake as a draft of another live recipe; same teaching error.
+ */
+function stateOfLive(value: unknown): DraftState | undefined {
+  try {
+    return stateOf(value);
+  } catch {
+    throw foreignDraftError();
+  }
+}
+
+/** States whose kind-specific finalize (or snapshot) is running right now. */
+const inProgress = new Set<DraftState>();
+
+function cyclicDraftError(): Error {
+  return new Error(
+    'valsem: a draft was assigned into itself, directly or through one of its descendants. ' +
+      'A value cannot contain itself — assign current(draft) to embed a snapshot instead.',
+  );
+}
+
 function foreignDraftError(): Error {
   return new Error(
     'valsem: a draft from a different produce() call was found inside a value given to this one. ' +
@@ -493,13 +521,24 @@ export function finalizeState(
   // saw it. Checked BEFORE the memo: finalizing it here would freeze its
   // result early and silently drop every edit its own recipe makes later.
   if (state.scope !== currentScope) throw foreignDraftError();
-  if (state.finalized) return state.result;
+  if (state.finalized) {
+    // Finalized but still running: finalize reached this state again through
+    // its own contents (`d.self = d`, `d.a.b = d`). The memo is not filled
+    // yet — returning it read as "assigned undefined" and dropped the key.
+    if (inProgress.has(state)) throw cyclicDraftError();
+    return state.result;
+  }
   state.finalized = true;
   if (!state.modified) {
     state.result = intern(state.base);
     return state.result;
   }
-  return state.finalize(state, path, recorder);
+  inProgress.add(state);
+  try {
+    return state.finalize(state, path, recorder);
+  } finally {
+    inProgress.delete(state);
+  }
 }
 
 // ---------------------------------------------------------------------------
