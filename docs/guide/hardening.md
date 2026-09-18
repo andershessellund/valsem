@@ -140,10 +140,24 @@ Two promises, both tested against hostile inputs in `src/hardening.test.ts`:
   drafting, snapshots — enumerates own enumerable keys and reads them with
   `hasOwn`, never `in` or `for…in`, so a polluted `Object.prototype` never
   leaks into a value, and a `__proto__` key in JSON becomes an own data
-  property of the canonical record, never a prototype change. Holes in an
-  input array canonicalise to `undefined` rather than reading through to
-  `Array.prototype`. Registry dispatch keys on the prototype's constructor,
-  not the instance's shadowable `constructor` property.
+  property of the canonical record, never a prototype change. Registry
+  dispatch keys on the prototype's constructor, not the instance's
+  shadowable `constructor` property.
+- **Arrays are their own elements.** An array's value is its length and its
+  own elements, and a hole means `undefined`. JavaScript's index read is not
+  that: `arr[i]` on a hole reads the prototype chain, and so do `slice`,
+  spread, `Array.from`, `map` and the array iterator, which turn an inherited
+  index into an own element of their result. With `Array.prototype[1] = x`, a
+  sparse array reads `x` at its hole. Every walk over an array that may be
+  raw — equality, hashing, interning, `produce`'s grafts, replacements and
+  patch values, `current()`, `RawArray`, and the collections' `from` — reads
+  own slots only, so a sparse array means the same thing to all of them and
+  the polluted value never enters a canonical one. A recipe that grows an
+  array (`d.length = n`, `d[far] = v`) gets a filled gap, not holes, and a
+  draft answers an out-of-range index with `undefined` from its own content.
+  valsem's internal arrays follow the same rule. The test suite runs a second
+  time with `Array.prototype` polluted at every small index, which is how the
+  internal cases were found.
 - **Patches are validated, not trusted.** `applyPatches` follows a path only
   through own keys of records, in-range integer indices of arrays, and a
   draftable kind's own `childAt`; a segment such as `__proto__`,

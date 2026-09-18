@@ -16,7 +16,7 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
-import { same } from './shared.js';
+import { same, ownAt } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
@@ -423,8 +423,9 @@ function snapshotForeign(value: unknown): unknown {
       let changed = false;
       const out = new Array<unknown>(value.length);
       for (let i = 0; i < value.length; i++) {
-        const snap = snapshotOf(value[i]);
-        if (snap !== value[i]) changed = true;
+        const own = ownAt(value, i);
+        const snap = snapshotOf(own);
+        if (snap !== own) changed = true;
         out[i] = snap;
       }
       return changed ? out : value;
@@ -484,7 +485,7 @@ function adoptUncached(value: object): unknown {
     let changed = false;
     const out = new Array<unknown>(value.length);
     for (let i = 0; i < value.length; i++) {
-      const child = value[i];
+      const child = ownAt(value, i);
       const resolved = resolve(child, null, undefined);
       if (resolved !== child) changed = true;
       out[i] = resolved;

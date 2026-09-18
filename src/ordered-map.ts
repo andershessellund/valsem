@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same } from './shared.js';
+import { same, ownIterable, ownPair } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -259,7 +259,8 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const ks: unknown[] = [];
     const vs: unknown[] = [];
     const at = new Map<unknown, number>();
-    for (const [rawK, rawV] of entries) {
+    for (const entry of ownIterable(entries)) {
+      const [rawK, rawV] = ownPair(entry);
       const k = intern(rawK);
       const key = k !== k ? NaN : k; // SameValueZero: one NaN key
       const i = at.get(key);

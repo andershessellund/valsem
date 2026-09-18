@@ -11,6 +11,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createSetDraft, type SetState } from './draft-set.js';
+import { ownIterable } from './shared.js';
 import {
   createTrieConfig,
   trieGet,
@@ -238,7 +239,7 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
    */
   static from<T>(values: Iterable<T>): ValueSet<T> {
     const members: unknown[] = [];
-    for (const raw of values) members.push(intern(raw));
+    for (const raw of ownIterable(values)) members.push(intern(raw));
     return ValueSet.#for<T>(trieFrom(CFG, members, null));
   }
 

@@ -313,8 +313,8 @@ DESIGN.md §3.3.
 
 Records are their own keys: every walk enumerates own enumerable keys and
 reads with `hasOwn`, `__proto__` from JSON becomes an own data property,
-holes in input arrays canonicalise to `undefined`, and registry dispatch
-keys on the prototype's constructor. `applyPatches` follows a path only
+holes in arrays canonicalise to `undefined` in every walk (D44), and
+registry dispatch keys on the prototype's constructor. `applyPatches` follows a path only
 through own keys, in-range indices, and a kind's own `childAt`, and
 type-checks keys and indices. Admitting walks (`intern`, `deepHash`,
 `produce`'s adopt, `current`) are depth-capped (default 512, reconfigurable
@@ -929,6 +929,35 @@ pushes, collection values, replacements, detached drafts, custom kinds
 calling `resolve` — with no signature change to the `valsem/draft` toolkit.
 **Rejected:** walking every assigned value at assignment time; it is O(size
 of the graft) per write for material finalize walks anyway. DESIGN.md §7.1.
+
+### D44. An array is its own elements: no walk reads a hole off the prototype chain
+
+Every read of a possibly-raw array goes through `ownAt`/`ownElements`, and
+internal arrays are filled before they are read. A second test run pollutes
+`Array.prototype` at every small index.
+
+**Why.** D19 said holes canonicalise to `undefined`, and that was true of
+`intern` alone. `deepEqual` and `deepHash` read `arr[i]`, so under
+`Array.prototype[1] = x` a sparse array was not equal to its own canonical
+form, and hashed differently (external review). The same reads, and the
+native copies (`slice`, spread, `Array.from`, `map`, the array iterator all
+read holes off the chain and make the result OWN), were in `produce`'s
+adopt, in `RawArray.from`, in the collections' `from`, and in the patch
+path: through a graft, a replacement, a patch value or a raw sparse base,
+`x` entered canonical state. A recipe could make the holes itself
+(`d.length = 3`), and an out-of-range draft read is a hole read too.
+Running the whole suite polluted then found the library's own: `new
+Array(32)` read before written in the trie builder, and the sparse `carry`
+of `ValueList.setMany`. With an array as the polluted value, both would
+have pushed into one shared array, silently. **Cost and the probe.**
+`Object.hasOwn` per element cost 3.5x on hashing or comparing a large raw
+number array, and is 12x a bare read on JavaScriptCore. A read can only be
+wrong where the chain HAS that index, and `i in CHAIN`, on an empty array,
+asks exactly that: free on V8, no getter run. Worst case is now about 20%,
+single digits elsewhere. **Rejected:** a per-walk check that the prototypes
+are clean. `Array.prototype.length` answers it in O(1) for one prototype,
+but nothing does for `Object.prototype`, and a cached answer cannot be
+invalidated. DESIGN.md §9.
 
 ## Non-goals
 
