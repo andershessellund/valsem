@@ -52,3 +52,42 @@ describe('deepEqual — development expectation warnings', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the warning is development-only', () => {
+  // The guard is the LITERAL `process.env.NODE_ENV`, inline — the text bundlers
+  // substitute. Read through `globalThis.process?.env` it was never
+  // substituted, and in a browser (no `process`) came out as `undefined !==
+  // 'production'`: every production bundle warned.
+  const warnsUnder = async (setup: () => void): Promise<number> => {
+    vi.resetModules();
+    setup();
+    try {
+      const fresh = await import('./deep-equal.js');
+      warn.mockClear();
+      fresh.deepEqual(new Set(), new Set());
+      return warn.mock.calls.length;
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  };
+
+  it('on in development', async () => {
+    expect(await warnsUnder(() => vi.stubEnv('NODE_ENV', 'development'))).toBe(1);
+  });
+
+  it('off in production', async () => {
+    expect(await warnsUnder(() => vi.stubEnv('NODE_ENV', 'production'))).toBe(0);
+  });
+
+  it('off where there is no `process` at all — an unbundled browser import', async () => {
+    expect(await warnsUnder(() => vi.stubGlobal('process', undefined))).toBe(0);
+  });
+
+  it('the source reads the literal expression bundlers replace', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const source = await readFile(new URL('./deep-equal.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/if \(process\.env\.NODE_ENV !== 'production'\) \{/);
+    expect(source).not.toMatch(/_g\.process/); // the old, never-substituted read
+  });
+});

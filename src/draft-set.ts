@@ -114,7 +114,6 @@ export class DraftSet<T> {
   }
 }
 
-/** Mutable draft twin of {@link ValueList}, handed out inside produce(). */
 
 /** Draft `base` under `parent`; `empty` builds the canonical empty set for `clear()`. */
 export function createSetDraft<T>(

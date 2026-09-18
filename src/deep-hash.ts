@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
-import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics } from './deep-equal.js';
+import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype } from './deep-equal.js';
 import { hashString, hashNumber, mix } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 
@@ -300,7 +300,7 @@ function hashObjectValue(obj: object): number {
   }
 
   const proto = Object.getPrototypeOf(obj);
-  if (proto !== Object.prototype && proto !== null) {
+  if (proto !== Object.prototype && proto !== null && !_isForeignObjectPrototype(proto)) {
     // A class instance: the [hashCode] protocol (a property or a legacy
     // method), else the registry by the PROTOTYPE's constructor. Neither is
     // consulted on a plain record, where a protocol symbol is an ordinary
@@ -316,7 +316,7 @@ function hashObjectValue(obj: object): number {
       if (typeof hc === 'function') return hc.call(obj) >>> 0;
     }
     const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
-    if (handler) return handler(obj);
+    if (handler) return handler(obj) >>> 0; // a uint32, as the [hashCode] path above: handlers may return anything
     throw new TypeError(unhashableMessage(obj));
   }
 
