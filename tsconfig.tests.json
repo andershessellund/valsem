@@ -1,6 +1,13 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  // The tests run on Node only, so they get its types, held at the major of
+  // the supported floor (see .github/dependabot.yml), and the iterator
+  // helpers (in Node since 22.0) on top of what the library may use.
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "lib": ["ES2024", "ESNext.Collection", "ESNext.Iterator"]
+  },
   "include": ["src/**/*"],
   "exclude": []
 }

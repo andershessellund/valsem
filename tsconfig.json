@@ -3,7 +3,20 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ESNext"],
+    // What the shipped source may assume about its host, stated instead of
+    // inherited. `ESNext` grows with every TypeScript release, so it admits
+    // built-ins newer than the Node 22 floor, and nothing backstops that for
+    // browsers, which CI does not run. ES2024 is fully in Node 22;
+    // ESNext.Collection is the Set methods and `ReadonlySetLike` (in Node
+    // since 22.0), which ValueSet and OrderedSet type against. When
+    // TypeScript renames it, the successor is ES2025.Collection, not a wider
+    // ESNext.Collection.
+    "lib": ["ES2024", "ESNext.Collection"],
+    // No ambient types. Left unset, TypeScript pulls in every @types package
+    // it finds, @types/node included, and the library could lean on Node
+    // globals unnoticed. valsem is runtime-neutral: this makes that a
+    // compile error rather than a convention.
+    "types": [],
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,

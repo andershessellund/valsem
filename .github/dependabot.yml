@@ -19,6 +19,13 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore
+    ignore:
+      # The major of @types/node mirrors the Node major. It stays at the
+      # supported floor (`engines` in package.json), so the typecheck rejects
+      # a Node API the floor does not have. It moves only when the floor is
+      # raised on purpose, which is a breaking change (CONTRIBUTING.md).
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       toolchain:
         patterns: ['*']
