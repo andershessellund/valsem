@@ -120,18 +120,38 @@ export function _powP(n: number): number {
 // identity with no content: it gets a per-symbol hash on first sight, kept
 // in the shared hash cache (unique symbols are valid weak keys since ES2023;
 // registered ones are not, which is exactly why they take the other branch).
-// The counter is mixed through the seeded hasher like every other leaf.
+// The identity number is mixed through the seeded hasher like every other leaf.
+//
+// The numbering is PROCESS-wide, shared through globalThis beside the hash
+// seed: a module-local counter would number symbols in the order each
+// installed copy happened to meet them, so plain data holding a unique
+// symbol would hash differently across duplicate installs — the one leaf
+// for which "one seed ⟹ hashes agree across copies" would not hold.
 // ---------------------------------------------------------------------------
 
-let uniqueSymbolCount = 0;
+interface SymbolIds {
+  count: number;
+  readonly ids: WeakMap<symbol, number>;
+}
+
+const SYMBOL_IDS_KEY = Symbol.for('valsem.symbolIds.v1');
+
+function readSymbolIds(): SymbolIds {
+  const g = globalThis as unknown as Record<symbol, SymbolIds | undefined>;
+  return (g[SYMBOL_IDS_KEY] ??= { count: 0, ids: new WeakMap() });
+}
+
+const symbolIds = readSymbolIds();
 
 /** @internal The hash of a symbol value or key. */
 export function _symbolHash(s: symbol): number {
   const key = Symbol.keyFor(s);
   if (key !== undefined) return mix(TAG_SYMBOL, hashString(key));
-  let h = _hashCache.get(s) as number | undefined;
+  let h = _hashCache.get(s) as number | undefined; // this copy's fast path
   if (h === undefined) {
-    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(++uniqueSymbolCount));
+    let id = symbolIds.ids.get(s);
+    if (id === undefined) symbolIds.ids.set(s, (id = ++symbolIds.count));
+    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(id));
     _hashCache.set(s, h);
   }
   return h;

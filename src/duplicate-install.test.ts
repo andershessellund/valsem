@@ -24,6 +24,20 @@ describe('duplicate install — two module graphs', () => {
     expect(A.deepHash({ x: [1] })).toBe(B.deepHash({ x: [1] }));
   });
 
+  it('unique symbols hash alike in both copies, whichever copy meets them first', () => {
+    const s1 = Symbol('one');
+    const s2 = Symbol('two');
+    // Opposite first-sight order: a per-copy counter would number them 1,2 / 2,1.
+    const a1 = A.deepHash(s1);
+    const b2 = B.deepHash(s2);
+    expect(B.deepHash(s1)).toBe(a1);
+    expect(A.deepHash(s2)).toBe(b2);
+    expect(a1).not.toBe(b2);
+    // …and so does plain data carrying them, as a value and as a key.
+    expect(A.deepHash({ k: [s1, s2], [s2]: 1 })).toBe(B.deepHash({ [s2]: 1, k: [s1, s2] }));
+    expect(A.deepHash(Symbol.iterator)).toBe(B.deepHash(Symbol.iterator));
+  });
+
   it("the other copy's collections are a different type: unequal, from both sides, in O(1)", () => {
     const la = A.ValueList.of(1, 2);
     const lb = B.ValueList.of(1, 2);

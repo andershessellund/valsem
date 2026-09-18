@@ -95,12 +95,12 @@ describe('prototype-chain keys reach records only as OWN keys', () => {
   it('assigning the inherited member itself is a real write (and then a real rejection)', () => {
     // `d.toString = Object.prototype.toString` must not be swallowed as
     // "already equal" — it is a write of a function, and functions are not
-    // values: the hasher rejects it with its own error, not a phantom no-op.
+    // values: finalize rejects it with its own error, not a phantom no-op.
     expect(() =>
       produce(base, (d) => {
         (d as Record<string, unknown>)['toString'] = Object.prototype.toString;
       }),
-    ).toThrow(/function is not supported/);
+    ).toThrow(/a function is not a value/);
   });
 
   it('reading an inherited name through a draft still resolves the prototype', () => {

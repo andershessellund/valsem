@@ -25,7 +25,7 @@
 // ---------------------------------------------------------------------------
 
 import { deepEqual, _isPlainRecord, _ctorOf } from './deep-equal.js';
-import { intern, internHash, isCanonical } from './intern.js';
+import { intern, internHash } from './intern.js';
 import { HashTable, type TableEntry } from './hash-table.js';
 
 export interface MemoizeOptions {
@@ -127,6 +127,12 @@ export function memoize<F extends (...args: never[]) => unknown>(
     try {
       result = intern(raw);
     } catch (e) {
+      if (typeof raw === 'function') {
+        throw new TypeError(
+          `valsem: memoize — ${name} returned a function, which is not a value. ` +
+            'Memoized results are interned and shared: return data, or a type valsem can canonicalise.',
+        );
+      }
       // A class instance the function built: say so, keeping intern's reason.
       // Anything else (a non-value nested in plain data, a depth cap, a
       // cycle) is best described by intern's own error.
@@ -140,14 +146,6 @@ export function memoize<F extends (...args: never[]) => unknown>(
       }
       throw e;
     }
-    if (!isCanonical(result)) {
-      // Only functions get here now: intern returns them untouched.
-      throw new TypeError(
-        `valsem: memoize — ${name} returned a function, which is not a value. ` +
-          'Memoized results are interned and shared: return data, or a type valsem can canonicalise.',
-      );
-    }
-
     const e: Entry = { hash: h, args: args.map(intern), result, newer: null, older: null };
     table.add(e);
     pushNewest(e);

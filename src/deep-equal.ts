@@ -401,9 +401,15 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  * registered with an equality only; a hash for them is refused.
  *
  * The companion invariant applies: `equalsFn(a, b)` ⟹ `hashFn(a) === hashFn(b)`.
- * Registering again replaces both handlers (a call without `hashFn` drops a
- * previously registered hash; instances pooled before that stay canonical).
- * Register at startup, before instances flow.
+ *
+ * **A value's semantics are fixed.** Once a type is registered with a hash,
+ * registering it again throws (repeating the identical pair is a no-op):
+ * canonical instances carry hashes and sit in pools chosen by the first
+ * pair, and distinct canonicals are unequal by identity, so a replacement
+ * would make equality depend on when a value was interned. A
+ * comparable-only registration has no such history — nothing is ever hashed
+ * or pooled under it — and may be replaced, or upgraded to a value, freely.
+ * Register next to the class, at startup.
  *
  * @example
  * ```ts
@@ -433,9 +439,18 @@ deepEqual.register = function register<T>(
       );
     }
   }
+  const priorHash = hashCodeMethods.get(type);
+  if (priorHash !== undefined) {
+    if (equalsMethods.get(type) === equalsFn && priorHash === hashFn) return; // idempotent
+    throw new TypeError(
+      `deepEqual.register: ${type.name || 'this type'} is already registered as a value, and a ` +
+        "value's equality and hash are fixed — canonical instances were hashed and pooled by " +
+        'them, so replacing them would make equality depend on when a value was interned. ' +
+        'Register each type once, next to its class.',
+    );
+  }
   equalsMethods.set(type, equalsFn);
   if (hashFn !== undefined) hashCodeMethods.set(type, hashFn);
-  else hashCodeMethods.delete(type);
 };
 
 /**

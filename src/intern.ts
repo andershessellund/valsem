@@ -73,6 +73,14 @@ export function isCanonical(value: unknown): boolean {
   );
 }
 
+/** @internal The teaching error for a function at an admission door (`intern`, `produce`). */
+export function _functionError(fn: string): TypeError {
+  return new TypeError(
+    `${fn}: a function is not a value — it has no content to compare or hash. ` +
+      'Keep functions outside canonical state and store the data they work on.',
+  );
+}
+
 function describeNonCanonical(value: unknown): string {
   if (typeof value === 'function') return 'a function';
   if (Array.isArray(value)) return 'a raw array';
@@ -154,14 +162,19 @@ let depth = 0;
  * - Everything else throws, naming the fix: the mutable built-ins `Date`,
  *   `RegExp`, `Map`, `Set` and the TypedArrays with their immutable
  *   replacement; a class with only an equality, only a hash, or neither
- *   with what it lacks. Nothing is passed through silently — a `HashMap`
- *   keyed by such an object would miss every equal lookup.
+ *   with what it lacks; a function, which has no content to compare or
+ *   hash. Nothing is passed through silently — a `HashMap` keyed by such an
+ *   object would miss every equal lookup.
  *
  * Nesting deeper than `configureLimits({ maxDepth })` (default 512) is
  * rejected; so is cyclic input.
  */
 export function intern<T>(value: T): T {
   if (value === null || value === undefined || typeof value !== 'object') {
+    // A function is the one non-object that is not a value: nested in data
+    // the hasher rejects it, so the front door must too — a pass-through here
+    // would hand back something `isCanonical` denies and `deepHash` refuses.
+    if (typeof value === 'function') throw _functionError('intern');
     // `=== 0` admits exactly +0 and -0: the one primitive with two spellings.
     return (value as unknown) === 0 ? (0 as T) : value;
   }
