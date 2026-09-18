@@ -140,15 +140,20 @@ function readSymbolIds(): SymbolIds {
 
 const symbolIds = readSymbolIds();
 
+/** @internal The process-wide identity number of a UNIQUE symbol (assigned on first sight). */
+export function _symbolId(s: symbol): number {
+  let id = symbolIds.ids.get(s);
+  if (id === undefined) symbolIds.ids.set(s, (id = ++symbolIds.count));
+  return id;
+}
+
 /** @internal The hash of a symbol value or key. */
 export function _symbolHash(s: symbol): number {
   const key = Symbol.keyFor(s);
   if (key !== undefined) return mix(TAG_SYMBOL, hashString(key));
   let h = _hashCache.get(s) as number | undefined; // this copy's fast path
   if (h === undefined) {
-    let id = symbolIds.ids.get(s);
-    if (id === undefined) symbolIds.ids.set(s, (id = ++symbolIds.count));
-    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(id));
+    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(_symbolId(s)));
     _hashCache.set(s, h);
   }
   return h;

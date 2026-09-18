@@ -181,3 +181,46 @@ describe('total-collision trie — node-level set algebra through collision node
     expect(A.symmetricDifference(A.difference(one))).toBe(one);
   });
 });
+
+describe('symbols inside a collision node', () => {
+  // Collision order put symbols in the OBJECT rank, ordered by a WeakMap of
+  // ordinals. A registered symbol (`Symbol.for`) is not a valid weak key, so
+  // two of them in one collision node threw "Invalid value used as weak map
+  // key" from ValueSet.from. Under this file's hasher every registered symbol
+  // hashes alike (their hash is their name's), so the node is certain.
+  const registered = ['delta', 'alpha', 'charlie', 'bravo'].map((n) => Symbol.for(`valsem.test.${n}`));
+  const unique = [Symbol('u1'), Symbol('u2'), Symbol('u3')];
+
+  it('registered symbols are members, and shuffled builds converge', () => {
+    const a = ValueSet.from(registered);
+    expect(a.size).toBe(4);
+    for (const s of registered) expect(a.has(s)).toBe(true);
+    expect(a.has(Symbol.for('valsem.test.other'))).toBe(false);
+    expect(ValueSet.from(registered.slice().reverse())).toBe(a);
+    expect(ValueSet.from([registered[2]!, registered[0]!, registered[3]!, registered[1]!])).toBe(a);
+  });
+
+  it('as map keys, with updates and deletes inside the node', () => {
+    let m = ValueMap.empty<symbol, number>();
+    registered.forEach((s, i) => (m = m.set(s, i)));
+    expect(m.size).toBe(4);
+    registered.forEach((s, i) => expect(m.get(s)).toBe(i));
+    m = m.set(registered[1]!, 99).delete(registered[0]!);
+    expect(m.get(registered[1]!)).toBe(99);
+    expect(m.has(registered[0]!)).toBe(false);
+    expect(m.size).toBe(3);
+  });
+
+  it('registered, unique and well-known symbols mix with every other kind', () => {
+    const members: unknown[] = [...registered, ...unique, Symbol.iterator, 'str', 1, true, null, undefined, 10n, intern({ o: 1 })];
+    const a = ValueSet.from(members);
+    expect(a.size).toBe(members.length);
+    for (const v of members) expect(a.has(v)).toBe(true);
+    expect(ValueSet.from(members.slice().reverse())).toBe(a);
+    // Canonical order is a function of the members, not of insertion order.
+    expect([...ValueSet.from(members.slice().reverse())]).toEqual([...a]);
+    let shrunk = a;
+    for (const s of registered) shrunk = shrunk.delete(s);
+    expect(shrunk).toBe(ValueSet.from(members.filter((v) => !registered.includes(v as symbol))));
+  });
+});

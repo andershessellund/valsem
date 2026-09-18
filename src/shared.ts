@@ -26,6 +26,18 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
 }
 
 /**
+ * `ToIntegerOrInfinity` — the coercion `Array.prototype.slice`/`splice` give
+ * their index arguments: fractions truncate, `NaN` (and so `undefined`) is 0,
+ * `-0` is 0, infinities stay. The collections' `slice`/`splice` promise Array
+ * bounds, and without this a fractional index walked the tree to a position
+ * between elements and built a list of `undefined`s — which was then interned.
+ */
+export function toInteger(n: number): number {
+  const t = Math.trunc(n);
+  return t !== t || t === 0 ? 0 : t;
+}
+
+/**
  * `Iterator` (ES2025) as a base class where the runtime has it, a plain base
  * otherwise, so explicit-stack iterator objects inherit the iterator helpers
  * (`map`, `filter`, `take`, …) exactly as generators would.
