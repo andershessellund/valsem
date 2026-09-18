@@ -143,7 +143,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   }
   /** The `[key, value]` entry at `index`, or `undefined` out of range. */
   at(index: number): [K, V] | undefined {
-    if (index < 0 || index >= this.#keys.length) return undefined;
+    if (!Number.isInteger(index) || index < 0 || index >= this.#keys.length) return undefined;
     return [this.#keys.get(index) as K, this.#vals.get(index) as V];
   }
   /** The first entry, or `undefined` when empty. */
