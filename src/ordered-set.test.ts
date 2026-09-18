@@ -172,3 +172,19 @@ describe('OrderedSet', () => {
     expect(s).toBe(OrderedSet.from(model));
   });
 });
+
+describe('OrderedSet — set-like for the native Set methods', () => {
+  it('is a ReadonlySetLike the native methods accept, in both directions', () => {
+    const s = OrderedSet.from([3, 1, 2]);
+    // The compile-time half of this test: the class does not spell
+    // `implements ReadonlySetLike` (the name would reach the published
+    // declarations and make every consumer's `lib` need the ES2025 collection
+    // types), so the assignability is asserted here instead.
+    const like: ReadonlySetLike<number> = s;
+    expect([...new Set([0, 1]).union(like)]).toEqual([0, 1, 3, 2]);
+    expect([...new Set([1, 2, 9]).intersection(s)].sort()).toEqual([1, 2]);
+    expect(new Set([1, 3]).isSubsetOf(s)).toBe(true);
+    expect(new Set([1, 2, 3, 4]).isSupersetOf(s)).toBe(true);
+    expect(new Set([7]).isDisjointFrom(s)).toBe(true);
+  });
+});

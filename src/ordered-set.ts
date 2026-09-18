@@ -29,7 +29,12 @@ const CFG = createTrieConfig(2); // member, anchor
 const pool = createInternPool<OrderedSet<unknown>>();
 const SEED = 0x05e7;
 
-/** The `ReadonlySet` read contract; the set algebra is `ValueSet`'s business (`ValueSet.from(orderedSet)`). */
+/**
+ * The `ReadonlySet` read contract; the set algebra is `ValueSet`'s business
+ * (`ValueSet.from(orderedSet)`). `size`, `has` and `keys` also make the class
+ * set-like in the ES2025 sense, so native Set methods accept it; the tests
+ * assert that, to keep `ReadonlySetLike` out of the published declarations.
+ */
 type ReadonlySetReads<T> = Pick<ReadonlySet<T>, 'size' | 'has' | 'keys' | 'values' | 'entries' | typeof Symbol.iterator>;
 
 /**
@@ -47,7 +52,7 @@ type ReadonlySetReads<T> = Pick<ReadonlySet<T>, 'size' | 'has' | 'keys' | 'value
  * order, O(n), and `valueList` is the canonical `ValueList` of the members,
  * shared with every other structure holding that sequence.
  */
-export class OrderedSet<T> implements ReadonlySetLike<T>, ReadonlySetReads<T> {
+export class OrderedSet<T> implements ReadonlySetReads<T> {
   readonly #list: ValueList<T>;
   readonly #root: HNode;
   readonly #hash: number;
