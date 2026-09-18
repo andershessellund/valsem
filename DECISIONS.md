@@ -717,8 +717,18 @@ frozen bases copied repeatedly get an unfrozen shadow (`copyArr`), built on
 the second copy.
 
 **Why.** The incremental-finalize pass was measure-first, with the in-repo
-bench built before touching code. Array hashing moved to a positional polynomial
-accumulator because the chained mix could not be delta-updated. A successor
+bench built before touching code. Array hashing moved to a positional
+accumulator because the chained mix could not be delta-updated. Its first
+form, `Σ hash(eᵢ)·Pⁱ` with a fixed public `P`, was a security defect found
+by external review: linear with known coefficients, so position subsets with
+equal `Σ Pⁱ`, found offline by a birthday search, collided any two elements
+under any seed or hasher, and `m` such blocks put `2^m` arrays in one
+bucket. The term is now `scramble(mix(hash(i), hash(eᵢ)))`, the record form
+with the position as the key: still one independent term per index, so the
+delta update is unchanged, but not computable without the seed. **Rejected:**
+deriving `P` from the seed; zero cost, but the structure stays linear, so
+recovering the seed would reopen it. Cost: about 10% on from-scratch array
+hashing, nothing measurable on `produce`. A successor
 is a pure function of (base identity, exact delta), so a repeat produce
 verifies O(touched) with no hash trust and builds nothing: the recurrent
 arena went from 48 µs (17× behind mutative, because recognising a recurring

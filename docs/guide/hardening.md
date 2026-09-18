@@ -10,6 +10,16 @@ ships for DoS-resistant string hashing), drawn from `crypto.getRandomValues`,
 so an attacker cannot precompute inputs that collide into one bucket. The
 32-bit hashes are for bucketing, not authentication.
 
+The seed has to reach the *structure* too, not only the leaves. A container's
+hash combines its entries' hashes, and a combiner with public coefficients can
+be collided without knowing any leaf hash at all. valsem's are built so that
+every term is non-linear in a seeded quantity: a record entry is mixed with
+its key's hash, an array element with its position's, and the collections
+chain their entries through the same mix. A handful of hashes are the same in
+every process, because they have no content to seed: `null`, `undefined`,
+`true`, `false`, and the empty containers. That is one value each, which
+gives an attacker nothing to multiply.
+
 For untrusted-input deployments that also worry about seed recovery via
 timing, swap in a keyed PRF:
 
