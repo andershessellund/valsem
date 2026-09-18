@@ -156,3 +156,76 @@ describe('configureHasher ordering guard', () => {
     expect(deepHash('probe')).toBe(deepHash('probe'));
   });
 });
+
+describe('array hashes cannot be collided without the seed', () => {
+  // The array accumulator was Σ hᵢ·Pⁱ (mod 2³²) with a fixed, public P. A
+  // sign vector e ∈ {-1,0,1}ⁿ with Σ eᵢ·Pⁱ ≡ 0 then swaps two elements
+  // across its positions without moving the sum — for ANY seed, any hasher
+  // and any two elements. A birthday search finds such vectors offline, and
+  // m independent blocks give 2^m arrays in one bucket: quadratic work in
+  // intern and in every hash collection, from input alone.
+  const P = 0x9e3779b1 | 0;
+  const BLOCK = 24;
+  const BLOCKS = 8;
+  const LEN = BLOCK * BLOCKS;
+  const pw: number[] = [];
+  for (let i = 0, p = 1; i < LEN; i++, p = Math.imul(p, P)) pw.push(p);
+
+  /** Two distinct position subsets of one block with equal Σ Pⁱ: the old scheme's collision gadget. */
+  const gadget = (offset: number, rand: () => number): [number, number] => {
+    const seen = new Map<number, number>();
+    for (;;) {
+      const bits = Math.floor(rand() * 2 ** BLOCK);
+      let sum = 0;
+      for (let i = 0; i < BLOCK; i++) if ((bits >> i) & 1) sum = (sum + pw[offset + i]!) | 0;
+      const prev = seen.get(sum >>> 0);
+      if (prev !== undefined && prev !== bits) return [prev, bits];
+      seen.set(sum >>> 0, bits);
+    }
+  };
+  // Deterministic, so the test is: the gadgets are fixed by this LCG, not by luck.
+  let state = 0x2545f491;
+  const rand = (): number => ((state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+  const gadgets = Array.from({ length: BLOCKS }, (_, g) => gadget(g * BLOCK, rand));
+  const build = (k: number, x: unknown, y: unknown): unknown[] => {
+    const a = new Array<unknown>(LEN).fill(y);
+    for (let g = 0; g < BLOCKS; g++) {
+      const bits = gadgets[g]![(k >> g) & 1]!;
+      for (let i = 0; i < BLOCK; i++) if ((bits >> i) & 1) a[g * BLOCK + i] = x;
+    }
+    return a;
+  };
+
+  it('the gadgets are real: they collide under the old public-coefficient polynomial', () => {
+    const old = (a: unknown[]): number => a.reduce<number>((acc, v, i) => (acc + Math.imul(v === 'x' ? 7 : 11, pw[i]!)) | 0, 0);
+    expect(new Set(Array.from({ length: 1 << BLOCKS }, (_, k) => old(build(k, 'x', 'y')))).size).toBe(1);
+  });
+
+  it.each([
+    ['strings', 'alpha', 'beta'],
+    ['numbers', 1, 2],
+    ['records', { id: 1 }, { id: 2 }],
+    ['collections', ValueMap.from([['k', 1]]), ValueMap.from([['k', 2]])],
+  ] as const)('…and no longer collide here: %s', (_name, x, y) => {
+    const arrays = Array.from({ length: 1 << BLOCKS }, (_, k) => build(k, x, y));
+    const hashes = new Set(arrays.map((a) => deepHash(a)));
+    // 256 distinct arrays: a sound 32-bit hash gives 256 values (a chance
+    // collision among them has probability ~1e-5); the old scheme gave 1.
+    expect(hashes.size).toBeGreaterThanOrEqual(255);
+    // And the pool agrees with the hasher: distinct arrays, distinct canonicals.
+    expect(new Set(arrays.map((a) => intern(a))).size).toBe(1 << BLOCKS);
+  });
+
+  it('the incremental hash in produce is the from-scratch hash', () => {
+    let a = intern(Array.from({ length: 200 }, (_, i) => i));
+    for (let k = 0; k < 50; k++) {
+      a = produce(a, (d) => {
+        d[(k * 37) % d.length] = -k;
+        if (k % 7 === 0) d.push(k);
+        if (k % 11 === 0) d.pop();
+      });
+      expect(deepHash(a)).toBe(deepHash([...a]));
+      expect(intern([...a])).toBe(a);
+    }
+  });
+});

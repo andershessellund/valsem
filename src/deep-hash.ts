@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
-import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics } from './deep-equal.js';
+import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype } from './deep-equal.js';
 import { hashString, hashNumber, mix } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 
@@ -90,26 +90,23 @@ function scramble(h: number): number {
 // be delta-updated in O(changes) by produce's finalize:
 //
 //   record: acc = Σ entryTerm(key, valueHash)          (commutative)
-//   array:  acc = Σ elementTerm(i, elementHash)        (positional, P odd)
+//   array:  acc = Σ elementTerm(i, elementHash)        (positional)
 //
 // and the final hash folds in the count/length. These helpers are the single
 // source of truth for both the from-scratch and the incremental paths.
+//
+// BOTH terms are non-linear in a SEEDED quantity: the key's hash for a
+// record, the position's hash for an array. That is what makes the sum
+// flood-resistant. The array term used to be `elementHash · P^i` with a
+// fixed public P — linear, with coefficients anyone can compute. A sign
+// vector e ∈ {-1,0,1}^n with Σ eᵢ·Pⁱ ≡ 0 (mod 2³²) then swaps two elements
+// across its positions without moving the sum, FOR ANY SEED and any pair of
+// elements; a birthday search finds such vectors offline, and m of them side
+// by side give 2^m arrays in one bucket. Seeding the leaves did not help:
+// the weakness was the combiner's. With the position hashed through the
+// seeded hasher and the pair scrambled, the terms cannot be computed without
+// the seed, so neither can a cancelling combination.
 // ---------------------------------------------------------------------------
-
-const P = 0x9e3779b1 | 0; // odd (golden-ratio derived) — positional multiplier
-
-/** @internal P^n mod 2³² via square-and-multiply. */
-export function _powP(n: number): number {
-  let result = 1;
-  let base = P;
-  let e = n >>> 0;
-  while (e > 0) {
-    if (e & 1) result = Math.imul(result, base);
-    base = Math.imul(base, base);
-    e >>>= 1;
-  }
-  return result | 0;
-}
 
 // ---------------------------------------------------------------------------
 // Symbols
@@ -143,15 +140,20 @@ function readSymbolIds(): SymbolIds {
 
 const symbolIds = readSymbolIds();
 
+/** @internal The process-wide identity number of a UNIQUE symbol (assigned on first sight). */
+export function _symbolId(s: symbol): number {
+  let id = symbolIds.ids.get(s);
+  if (id === undefined) symbolIds.ids.set(s, (id = ++symbolIds.count));
+  return id;
+}
+
 /** @internal The hash of a symbol value or key. */
 export function _symbolHash(s: symbol): number {
   const key = Symbol.keyFor(s);
   if (key !== undefined) return mix(TAG_SYMBOL, hashString(key));
   let h = _hashCache.get(s) as number | undefined; // this copy's fast path
   if (h === undefined) {
-    let id = symbolIds.ids.get(s);
-    if (id === undefined) symbolIds.ids.set(s, (id = ++symbolIds.count));
-    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(id));
+    h = mix(TAG_UNIQUE_SYMBOL, hashNumber(_symbolId(s)));
     _hashCache.set(s, h);
   }
   return h;
@@ -164,7 +166,7 @@ export function _entryTerm(key: string | symbol, valueHash: number): number {
 
 /** @internal One array element's accumulator term. */
 export function _elementTerm(index: number, elementHash: number): number {
-  return Math.imul(elementHash, _powP(index));
+  return scramble(mix(hashNumber(index), elementHash));
 }
 
 /** @internal Fold a record accumulator into the final hash. */
@@ -291,16 +293,14 @@ function hashObjectValue(obj: object): number {
   // contract above: this form is what makes array hashes delta-updatable).
   if (Array.isArray(obj)) {
     let acc = 0;
-    let pPow = 1;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + Math.imul(deepHash(obj[i]), pPow)) | 0;
-      pPow = Math.imul(pPow, P);
+      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
     }
     return _arrayHashOf(obj.length, acc);
   }
 
   const proto = Object.getPrototypeOf(obj);
-  if (proto !== Object.prototype && proto !== null) {
+  if (proto !== Object.prototype && proto !== null && !_isForeignObjectPrototype(proto)) {
     // A class instance: the [hashCode] protocol (a property or a legacy
     // method), else the registry by the PROTOTYPE's constructor. Neither is
     // consulted on a plain record, where a protocol symbol is an ordinary
@@ -316,7 +316,7 @@ function hashObjectValue(obj: object): number {
       if (typeof hc === 'function') return hc.call(obj) >>> 0;
     }
     const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
-    if (handler) return handler(obj);
+    if (handler) return handler(obj) >>> 0; // a uint32, as the [hashCode] path above: handlers may return anything
     throw new TypeError(unhashableMessage(obj));
   }
 
@@ -348,10 +348,8 @@ function hashObjectValue(obj: object): number {
 export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: number } {
   if (Array.isArray(obj)) {
     let acc = 0;
-    let pPow = 1;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + Math.imul(deepHash(obj[i]), pPow)) | 0;
-      pPow = Math.imul(pPow, P);
+      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
     }
     return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
   }

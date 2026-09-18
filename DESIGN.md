@@ -232,15 +232,20 @@ The accumulators are sums modulo 2³² of independent per-entry terms:
 
 ```
 record: acc = Σ scramble(mix(hash(key), hash(value)))      commutative
-array:  acc = Σ hash(element_i) · P^i                      positional, P odd
+array:  acc = Σ scramble(mix(hash(i),   hash(element_i)))  positional
 hash    = mix(mix(TAG, count), acc)
 ```
 
-`P` is odd, hence invertible, so an entry can be removed as well as added.
-`produce`'s finalize delta-updates a canonical base's accumulator in
-O(changes) and interns the successor prehashed (§7.4). The helpers
-(`_entryTerm`, `_recordHashOf`, `_arrayHashOf`, `_powP`) are the single
-source for the from-scratch and the incremental paths.
+A term depends on one entry only, so an entry can be removed as well as
+added: `produce`'s finalize delta-updates a canonical base's accumulator in
+O(changes) and interns the successor prehashed (§7.4). Both terms are
+non-linear in a **seeded** quantity, the key's hash or the position's, and
+that is what makes the sum flood-resistant: a cancelling combination of
+terms cannot be computed without the seed. (The array term was once
+`hash(element_i) · Pⁱ` with a public `P`; position subsets with equal `Σ Pⁱ`
+then collided any two elements under any seed. D38.) The helpers
+(`_entryTerm`, `_elementTerm`, `_recordHashOf`, `_arrayHashOf`) are the
+single source for the from-scratch and the incremental paths.
 
 The collections do not use accumulators: a `ValueMap`/`ValueSet` hash is
 its consed root's hash, a `ValueList` hash is derived from its consed root

@@ -2,8 +2,9 @@
 // hasher — pluggable, seeded leaf hashing
 //
 // deepHash and interning route every string/number *leaf* through the active
-// Hasher; the structural combiners (mix/scramble, the collection polynomials)
-// stay fixed. The default is a per-process SEEDED hash: Marvin32 over UTF-16
+// Hasher; the structural combiners (mix/scramble, the accumulators) stay
+// fixed — and are built so that fixed does not mean predictable: every
+// accumulator term is non-linear in a seeded leaf (see deep-hash.ts). The default is a per-process SEEDED hash: Marvin32 over UTF-16
 // code-unit pairs for strings (the algorithm .NET ships for DoS-resistant
 // string hashing) plus a seeded avalanche for numbers (as V8 does for integer
 // keys). Because the seed is a secret drawn once per process, an attacker

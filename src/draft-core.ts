@@ -19,7 +19,7 @@
 import { same } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
-import { interned as internedMarker, _defineRecordField, _recordKeys } from './deep-equal.js';
+import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
 
 /**
  * Symbol under which a draftable type exposes its draft factory.
@@ -228,12 +228,8 @@ export function isDraft(value: unknown): boolean {
 export { same };
 
 export function isPlainObject(v: unknown): v is Record<string, unknown> {
-  if (v === null || typeof v !== 'object') return false;
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
+  return v !== null && typeof v === 'object' && _isPlainRecord(v);
 }
-
-/** Values produce hands out as drafts. */
 
 // The two built-in kinds live in produce.ts, which registers them here at
 // import — so this module never depends on the proxy machinery.
@@ -636,7 +632,6 @@ export function retractSeqPatches(
   recorder.inverse.splice(0, inverseCount);
 }
 
-/** Net index diff plus one tail splice — the intent-lost patch fallback. */
 
 /**
  * If every op is a positional set or a tail splice, positions BELOW the

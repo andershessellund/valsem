@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase } from './shared.js';
+import { same, sameSlots, IteratorBase, toInteger } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -431,7 +431,8 @@ export class ValueList<T> implements Iterable<T> {
   get(index: number): T | undefined {
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
-    if (index < 0 || index >= trunk + this.#tail.length) return undefined;
+    // `!(… < …)` rather than `>=`: NaN fails every comparison, and must not pass.
+    if (!Number.isInteger(index) || index < 0 || !(index < trunk + this.#tail.length)) return undefined;
     if (index >= trunk) return this.#tail[index - trunk] as T;
     const last = this.#last;
     if (index >= last.start && index < last.end) return last.leaf!.kids[index - last.start] as T;
@@ -486,14 +487,16 @@ export class ValueList<T> implements Iterable<T> {
   /**
    * Replace `deleteCount` elements at `start` with `items` (interned on
    * entry) — the general edit; O(log n) expected. `insert`, `remove` and
-   * `slice` are all this. `start` counts from the end when negative, as
-   * `Array.prototype.splice` does.
+   * `slice` are all this. The bounds are `Array.prototype.splice`'s: `start`
+   * counts from the end when negative, both are truncated to integers, and an
+   * omitted `deleteCount` removes through the end.
    */
-  splice(start: number, deleteCount: number, items: readonly T[] = []): ValueList<T> {
+  splice(start: number, deleteCount?: number, items: readonly T[] = []): ValueList<T> {
     const n = this.length;
+    start = toInteger(start);
     if (start < 0) start = Math.max(0, n + start);
     if (start > n) start = n;
-    const end = Math.min(n, start + Math.max(0, deleteCount));
+    const end = deleteCount === undefined ? n : Math.min(n, start + Math.max(0, toInteger(deleteCount)));
     const root = this.#full();
     if (root === null) return ValueList.from(items);
     const s = pathTo(root, start);
@@ -517,7 +520,9 @@ export class ValueList<T> implements Iterable<T> {
    */
   set(index: number, value: T): ValueList<T> {
     const n = this.length;
-    if (index < 0 || index >= n) throw new RangeError(`ValueList.set: index ${index} out of range`);
+    if (!Number.isInteger(index) || index < 0 || index >= n) {
+      throw new RangeError(`ValueList.set: index ${index} out of range [0, ${n})`);
+    }
     const v = intern(value);
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
@@ -569,7 +574,9 @@ export class ValueList<T> implements Iterable<T> {
     const idx: number[] = [];
     const vals: unknown[] = [];
     for (const [i, v] of sorted) {
-      if (i < 0 || i >= n) throw new RangeError(`ValueList.setMany: index ${i} out of range`);
+      if (!Number.isInteger(i) || i < 0 || i >= n) {
+        throw new RangeError(`ValueList.setMany: index ${i} out of range [0, ${n})`);
+      }
       if (idx.length !== 0 && idx[idx.length - 1] === i) vals[vals.length - 1] = v; // last write wins
       else {
         idx.push(i);
@@ -606,6 +613,8 @@ export class ValueList<T> implements Iterable<T> {
   /** Elements `[start, end)` — `Array.prototype.slice` bounds; O(log n) expected. */
   slice(start = 0, end = this.length): ValueList<T> {
     const n = this.length;
+    start = toInteger(start);
+    end = toInteger(end);
     if (start < 0) start = Math.max(0, n + start);
     if (end < 0) end = Math.max(0, n + end);
     end = Math.min(end, n);

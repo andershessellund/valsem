@@ -38,6 +38,7 @@
 
 import { createInternPool, type InternPool } from './intern-pool.js';
 import { internHash } from './intern.js';
+import { _symbolId } from './deep-hash.js';
 import { mix } from './hasher.js';
 import { same, sameSlots, IteratorBase } from './shared.js';
 
@@ -163,9 +164,26 @@ function typeRank(v: unknown): number {
       return 4;
     case 'string':
       return 5;
+    case 'symbol':
+      return 6;
     default:
-      return 6; // objects (the only other hashable kind)
+      return 7; // objects (the only other hashable kind)
   }
+}
+
+/**
+ * Symbols, ordered without a WeakMap: a registered symbol (`Symbol.for`) is
+ * not a valid weak key, so the object ordinals threw on two of them in one
+ * collision node. Registered symbols sort first, by their name (which IS
+ * their identity); unique ones after, by the process-wide identity number
+ * their hash is made from.
+ */
+function symbolCompare(a: symbol, b: symbol): number {
+  const ka = Symbol.keyFor(a);
+  const kb = Symbol.keyFor(b);
+  if (ka !== undefined) return kb === undefined ? -1 : ka < kb ? -1 : ka > kb ? 1 : 0;
+  if (kb !== undefined) return 1;
+  return _symbolId(a) - _symbolId(b);
 }
 
 /**
@@ -193,6 +211,8 @@ function memberCompare(a: unknown, b: unknown): number {
     case 5:
       return (a as string) < (b as string) ? -1 : (a as string) > (b as string) ? 1 : 0;
     case 6:
+      return symbolCompare(a as symbol, b as symbol);
+    case 7:
       return ordinal(a as object) - ordinal(b as object);
     default:
       return 0; // undefined/null are singletons — never two distinct

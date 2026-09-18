@@ -39,7 +39,7 @@
 // ---------------------------------------------------------------------------
 
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
-import { _entryTerm, _recordHashOf, _arrayHashOf, _powP } from './deep-hash.js';
+import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
 import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
 import {
   toDraft,
@@ -668,8 +668,6 @@ function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
 // it.)
 _setCoreDraftFactories(createObjectDraft, createArrayDraft);
 
-
-/** Mutable draft twin of {@link ValueMap}, handed out inside produce(). */
 // ---------------------------------------------------------------------------
 // Finalize — the intern walk
 // ---------------------------------------------------------------------------
@@ -962,20 +960,20 @@ function finalizeArray(
       }
       keys.push(i);
       vals.push(resolved);
-      acc = (acc + Math.imul(internHash(resolved) - internHash(base[i]), _powP(i))) | 0;
+      acc = (acc - _elementTerm(i, internHash(base[i])) + _elementTerm(i, internHash(resolved))) | 0;
     }
     // Rewritten region: subtract the base's [low, L), add the final [low, L2).
     // (`low` is derivable as L2 − app.length, so the transition signature
     // stays unambiguous.)
     const app: unknown[] = [];
     for (let i = low; i < L; i++) {
-      acc = (acc - Math.imul(internHash(base[i]), _powP(i))) | 0;
+      acc = (acc - _elementTerm(i, internHash(base[i]))) | 0;
     }
     for (let i = low; i < L2; i++) {
       const slot = arrRead(state, i);
       const resolved = resolve(slot, emitting ? slotPath(state, slot, false, path!, i) : null, recorder);
       app.push(resolved);
-      acc = (acc + Math.imul(internHash(resolved), _powP(i))) | 0;
+      acc = (acc + _elementTerm(i, internHash(resolved))) | 0;
     }
     acc = acc >>> 0;
 

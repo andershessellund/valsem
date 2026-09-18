@@ -207,11 +207,12 @@ export function _mutableBuiltinReason(ctor: Function | undefined): string | unde
 // does not compile against Node or DOM ambient globals (the hasher's Crypto
 // precedent).
 const _g = globalThis as {
-  process?: { env?: Record<string, string | undefined> };
   console?: { warn?: (message: string) => void };
 };
 
-const DEV = _g.process?.env?.NODE_ENV !== 'production';
+// Declared, not imported: the library compiles with no ambient platform
+// types, and this is the one Node-shaped name it reads.
+declare const process: { env: { NODE_ENV?: string } };
 
 const warnedMutableCompare = new Set<Function>();
 
@@ -220,14 +221,39 @@ export function _resetEqualityWarnings(): void {
   warnedMutableCompare.clear();
 }
 
+/**
+ * The development-only warning. Two details make "development-only" true.
+ *
+ * The guard is the LITERAL `process.env.NODE_ENV`, inline: that text is what
+ * bundlers substitute. Read through `globalThis.process?.env` it never was,
+ * and in a browser, where `process` does not exist, `undefined !==
+ * 'production'` made every production bundle a development build. Inline,
+ * a production build folds the body away, message included; hoisted into a
+ * constant behind a try/catch, it folds nothing.
+ *
+ * With no `process` at all (an unbundled browser import) the read throws. The
+ * CALLER catches that, see {@link warnMutableComparison}: a warning meant for
+ * development must not be the default for an unknown environment. Catching in
+ * here would put the guard inside a `try`, where minifiers stop folding.
+ */
+function warnMutableComparisonDev(ctor: Function, reason: string): void {
+  if (process.env.NODE_ENV !== 'production') {
+    if (warnedMutableCompare.has(ctor) || _g.console?.warn === undefined) return;
+    warnedMutableCompare.add(ctor);
+    _g.console.warn(
+      `valsem: deepEqual compared two distinct ${ctor.name} instances — they compare by ` +
+        `REFERENCE, because ${reason}. To compare them by content anyway, register handlers ` +
+        `with deepEqual.register(${ctor.name}, …). (Development-only warning, once per type.)`,
+    );
+  }
+}
+
 function warnMutableComparison(ctor: Function, reason: string): void {
-  if (!DEV || warnedMutableCompare.has(ctor) || _g.console?.warn === undefined) return;
-  warnedMutableCompare.add(ctor);
-  _g.console.warn(
-    `valsem: deepEqual compared two distinct ${ctor.name} instances — they compare by ` +
-      `REFERENCE, because ${reason}. To compare them by content anyway, register handlers ` +
-      `with deepEqual.register(${ctor.name}, …). (Development-only warning, once per type.)`,
-  );
+  try {
+    warnMutableComparisonDev(ctor, reason);
+  } catch {
+    // No `process` to read: not a development build.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -291,9 +317,9 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   }
 
   const protoA = Object.getPrototypeOf(a);
-  const plainA = protoA === Object.prototype || protoA === null;
+  const plainA = protoA === Object.prototype || protoA === null || _isForeignObjectPrototype(protoA);
   const protoB = Object.getPrototypeOf(b);
-  const plainB = protoB === Object.prototype || protoB === null;
+  const plainB = protoB === Object.prototype || protoB === null || _isForeignObjectPrototype(protoB);
 
   // [equals] symbol — class-defined value semantics (takes priority over registry).
   // The protocol is a property of the TYPE, so it is read off the prototype
@@ -548,7 +574,28 @@ export function _ctorOf(obj: object): Function | undefined {
 /** @internal Plain record: prototype is Object.prototype or null. Protocol symbols on such an object are ordinary keys. */
 export function _isPlainRecord(obj: object): boolean {
   const proto = Object.getPrototypeOf(obj);
-  return proto === Object.prototype || proto === null;
+  return proto === Object.prototype || proto === null || _isForeignObjectPrototype(proto);
+}
+
+/**
+ * Another realm's `Object.prototype` — a `vm` context, an iframe, jsdom. A
+ * plain object from there is as plain as one from here, but failed the
+ * identity check above and was taken for an instance of an unknown class
+ * named `Object`: `deepEqual` said `false` and `intern` threw. (Arrays never
+ * had the problem: `Array.isArray` is realm-independent.) Recognised by
+ * shape: the end of a prototype chain, whose own `constructor` is a function
+ * named `Object` that points back at it. Only reached for objects that are
+ * not plain in this realm, so it costs plain data nothing; and a canonical
+ * record is always rebuilt here, so no foreign prototype enters the pool.
+ */
+export function _isForeignObjectPrototype(proto: object): boolean {
+  if (Object.getPrototypeOf(proto) !== null) return false;
+  const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
+  return (
+    typeof ctor === 'function' &&
+    ctor.name === 'Object' &&
+    (ctor as { prototype?: unknown }).prototype === proto
+  );
 }
 
 /** @internal — exposed for deepHash and intern to read the shared registry. */
