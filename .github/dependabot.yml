@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs (a tag can be moved; a SHA cannot);
+  # Dependabot keeps the pins, and the version comments beside them, current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ['*']
+
+  # valsem has no runtime dependencies; these are the toolchain.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      toolchain:
+        patterns: ['*']
+        update-types: [minor, patch]
