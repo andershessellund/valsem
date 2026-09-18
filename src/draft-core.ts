@@ -161,6 +161,13 @@ export interface DraftState<B = unknown> {
   /** The child under `segment` of the live draft — how {@link applyPatches} navigates through it. */
   childAt?(state: DraftState<B>, segment: unknown): unknown;
   /**
+   * Put `value` under `segment` of the live draft — how {@link applyPatches}
+   * applies a `replace` patch whose path ends inside this kind. A kind with
+   * `childAt` should have it: produce emits such a patch for a modified child
+   * that was finalized through an alias before its own slot was reached.
+   */
+  replaceChild?(state: DraftState<B>, segment: unknown, value: unknown): void;
+  /**
    * The value as it stands right now — how `current()` reads a draft. Only
    * called when `modified`. Build it from your bookkeeping WITHOUT touching
    * the state (the recipe goes on afterwards), replacing nested values with
@@ -311,8 +318,23 @@ export function resolve(
   recorder: PatchRecorder | undefined,
 ): unknown {
   const state = stateOfLive(value);
-  if (state !== undefined) return finalizeState(state, path, recorder);
-  return adopt(value);
+  if (state === undefined) return adopt(value);
+  const result = finalizeState(state, path, recorder);
+  // A path means this slot is where the draft LIVES, and its kind's finalize
+  // emits the deeper patches there. But finalize is memoised: a modified
+  // child that was reached first through an alias (`d.b = d.a`, a push of
+  // `d[0]`, a map value) was finalized WITHOUT a path, so those patches were
+  // never written and never will be — applyPatches then left the home slot at
+  // its base value. Say it here instead, as the one thing still knowable:
+  // the value at this path became `result`.
+  if (path !== null && recorder !== undefined && state.modified && !emitted.has(state)) {
+    const before = intern(state.base);
+    if (!same(before, result)) {
+      recorder.patches.push({ kind: 'replace', path, value: result });
+      recorder.inverse.unshift({ kind: 'replace', path, value: before });
+    }
+  }
+  return result;
 }
 
 /** Restore-side value for inverse patches: a draft restores its base. */
@@ -488,6 +510,9 @@ function stateOfLive(value: unknown): DraftState | undefined {
   }
 }
 
+/** States whose kind's finalize ran WITH a path and recorder: their deeper patches exist. */
+const emitted = new WeakSet<DraftState>();
+
 /** States whose kind-specific finalize (or snapshot) is running right now. */
 const inProgress = new Set<DraftState>();
 
@@ -529,9 +554,23 @@ export function finalizeState(
     state.result = intern(state.base);
     return state.result;
   }
+  const emitting = path !== null && recorder !== undefined;
+  const patchMark = emitting ? recorder.patches.length : 0;
+  const inverseMark = emitting ? recorder.inverse.length : 0;
+  if (emitting) emitted.add(state);
   inProgress.add(state);
   try {
-    return state.finalize(state, path, recorder);
+    const result = state.finalize(state, path, recorder);
+    // The zero-patch law, for every kind at once: edits that net out return
+    // the base, so whatever this container and its children wrote since the
+    // mark describes no change. (Inverses are unshifted, so the entries added
+    // since the mark are exactly the first ones.) A kind's own bookkeeping
+    // can miss cases — a map cleared and refilled to equal content did.
+    if (emitting && result === state.base) {
+      recorder.patches.length = patchMark;
+      recorder.inverse.splice(0, recorder.inverse.length - inverseMark);
+    }
+    return result;
   } finally {
     inProgress.delete(state);
   }

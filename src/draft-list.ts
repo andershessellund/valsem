@@ -224,6 +224,7 @@ export function createListDraft<T>(
     snapshot: snapshotList,
     applyPatch: applyListPatch,
     childAt: (state, segment) => (state as ListState).draft.get(segment as number),
+    replaceChild: (state, segment, value) => void (state as ListState).draft.set(segment as number, value),
   });
   state.draft = new DraftList(INTERNAL, state);
   return state as ListState<T>;
@@ -253,13 +254,21 @@ function finalizeList(
   const opCount = state.ops.length;
   if (emitting) emitSeqOps(state.ops, path!, recorder);
   const edits: [number, unknown][] = [];
-  for (const [i, e] of state.overlay) {
-    const childPath = emitting && !e.assigned ? [...path!, i] : null;
-    edits.push([i, resolve(e.v, childPath, recorder)]);
-  }
+  // An assigned slot is described by the ops above — unless it holds a child
+  // draft of THIS list: the op captured the value as assigned, and `get` then
+  // drafted it (`l.set(0, c); l.get(0).y = 2`), so the edits are in no op.
+  // The child says them itself, after the ops: its own patches, or a
+  // `replace` if an alias finalized it first (see `resolve`).
+  const slotPath = (e: Entry, i: number): PatchPath | null => {
+    if (!emitting) return null;
+    if (!e.assigned) return [...path!, i];
+    return stateOf(e.v)?.parent === state ? [...path!, i] : null;
+  };
+  for (const [i, e] of state.overlay) edits.push([i, resolve(e.v, slotPath(e, i), recorder)]);
   let result = state.work.setMany(edits);
   if (state.tail.length !== 0) {
-    const tail = state.tail.map((e) => resolve(e.v, null, recorder));
+    const at = state.work.length;
+    const tail = state.tail.map((e, j) => resolve(e.v, slotPath(e, at + j), recorder));
     result = result.splice(result.length, 0, tail);
   }
   if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);

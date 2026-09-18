@@ -220,10 +220,14 @@ const objectTraps: ProxyHandler<object> = {
     const current = ownValue(latestObj(state), prop);
     const currentState = stateOf(current);
     if (currentState !== undefined && currentState.base === value) {
-      // Assigning the original back over its own draft — not a change.
+      // Assigning the original back over its own draft: the child's edits are
+      // abandoned and the slot holds `value` again. An ASSIGNMENT (true) —
+      // this used to record `false`, the deleted marker, and the patches said
+      // `record.delete` for a key the result still had. Finalize compares
+      // with the base and emits nothing when the slot nets out.
       prepareObjCopy(state);
       _defineRecordField(state.copy!, prop, value);
-      state.assigned!.set(prop, false);
+      state.assigned!.set(prop, true);
       return true;
     }
     if (same(value, current)) {
@@ -889,6 +893,28 @@ function storeTransition(
   if (list.length > TRANSITION_CAP) list.pop();
 }
 
+/**
+ * The patch path for the value in a sequence slot, or null when the slot is
+ * described by the sequence's own ops. A `home` slot (never assigned) always
+ * has one. An ASSIGNED slot has one exactly when it holds a child draft of
+ * THIS container: the op captured the value as it was assigned, and the
+ * container then drafted it on read (`d[0] = c; d[0].y = 2`), so the edits
+ * are in no op. The child says them itself, after the ops, against the final
+ * index — its own patches, or a `replace` if an alias finalized it first
+ * (see `resolve`). A draft the recipe brought from elsewhere has another
+ * parent: the op that placed it already carries its final value.
+ */
+function slotPath(
+  owner: DraftState,
+  slot: unknown,
+  home: boolean,
+  path: PatchPath,
+  index: number,
+): PatchPath | null {
+  if (home) return [...path, index];
+  return stateOf(slot)?.parent === owner ? [...path, index] : null;
+}
+
 function finalizeArray(
   state: ArrayState,
   path: PatchPath | null,
@@ -923,8 +949,8 @@ function finalizeArray(
     const vals: unknown[] = [];
     for (const i of [...touched].sort((a, b) => a - b)) {
       if (i >= low) continue; // rewritten region — taken from final items below
-      const childPath = emitting && !assignedIdx.has(i) ? [...path!, i] : null;
-      const resolved = resolve(arrRead(state, i), childPath, recorder);
+      const slot = arrRead(state, i);
+      const resolved = resolve(slot, emitting ? slotPath(state, slot, !assignedIdx.has(i), path!, i) : null, recorder);
       if (same(resolved, base[i])) {
         // Netted out — but a materialized copy holds the child DRAFT at this
         // index (written by the read trap); restore the base value so the
@@ -944,7 +970,8 @@ function finalizeArray(
       acc = (acc - _elementTerm(i, internHash(base[i]))) | 0;
     }
     for (let i = low; i < L2; i++) {
-      const resolved = resolve(arrRead(state, i), null, recorder);
+      const slot = arrRead(state, i);
+      const resolved = resolve(slot, emitting ? slotPath(state, slot, false, path!, i) : null, recorder);
       app.push(resolved);
       acc = (acc + _elementTerm(i, internHash(resolved))) | 0;
     }
@@ -983,9 +1010,11 @@ function finalizeArray(
   const copy = materializeArr(state);
   const resolved = new Array<unknown>(copy.length);
   for (let i = 0; i < copy.length; i++) {
-    const st = stateOf(copy[i]);
-    const childPath =
-      emitting && opsMode && st !== undefined && !st.finalized ? [...path!, i] : null;
+    // Positions are unstable here, so home and alias slots cannot be told
+    // apart: every slot holding a draft gets its path. One finalized by the
+    // ops above emits a `replace` — redundant in an alias slot, the only
+    // record of the change in its home slot.
+    const childPath = emitting && opsMode && stateOf(copy[i]) !== undefined ? [...path!, i] : null;
     resolved[i] = resolve(copy[i], childPath, recorder);
   }
   state.result = intern(resolved);
@@ -1286,12 +1315,9 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
     current = produce(current, (draft) => applyRun(draft, batch));
   };
   for (const p of patches) {
-    if (p.kind === 'replace') {
-      if (p.path.length !== 0) {
-        throw new Error('valsem: replace patches must target the root');
-      }
+    if (p.kind === 'replace' && p.path.length === 0) {
       flush();
-      current = p.value;
+      current = intern(p.value);
     } else {
       run.push(p);
     }
@@ -1300,9 +1326,44 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
   return intern(current) as T;
 }
 
-/** Apply one run of non-replace patches to a draft, in order. */
+/** A copy of `p` with its payload canonical: `value`, and the members of `insert`. */
+function internPatch(p: Patch): Patch {
+  const loose = p as unknown as { value?: unknown; insert?: unknown };
+  const hasValue = 'value' in loose;
+  const hasInsert = Array.isArray(loose.insert);
+  if (!hasValue && !hasInsert) return p;
+  const out = { ...loose };
+  if (hasValue) out.value = intern(loose.value);
+  if (hasInsert) out.insert = (loose.insert as unknown[]).map((v) => intern(v));
+  return out as unknown as Patch;
+}
+
+/** A `replace` below the root: the value at `path` becomes `value`. */
+function replaceAt(draft: unknown, path: PatchPath, value: unknown): void {
+  navigate(draft, path); // validates the whole path, the last segment included
+  const parent = navigate(draft, path.slice(0, -1));
+  const segment = path[path.length - 1];
+  const state = stateOf(parent);
+  if (state?.replaceChild !== undefined) state.replaceChild(state, segment, value);
+  else if (state !== undefined && (state.kind === 'object' || state.kind === 'array')) {
+    (parent as Record<PropertyKey, unknown>)[segment as PropertyKey] = value;
+  } else {
+    throw new Error(`valsem: cannot apply a 'replace' patch inside a ${describe(parent)}`);
+  }
+}
+
+/** Apply one run of patches (no root replace among them) to a draft, in order. */
 function applyRun(draft: unknown, patches: readonly Patch[]): void {
-  for (const p of patches) {
+  for (const raw of patches) {
+    // Patch values are interned on application (DESIGN §7.5) — HERE, before
+    // they enter the draft, not at finalize. Assigned raw, a caller's object
+    // sat in the draft as the recipe's own mutable material, and a later
+    // patch that navigated into it wrote into the caller's object.
+    const p = internPatch(raw);
+    if (p.kind === 'replace') {
+      replaceAt(draft, p.path, p.value);
+      continue;
+    }
     const target = navigate(draft, p.path);
     const state = stateOf(target);
     if (state !== undefined && state.applyPatch !== undefined) {

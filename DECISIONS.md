@@ -703,7 +703,19 @@ patches can come off a wire. Inverse-patch law: forward values resolve
 drafts to their final canonical, restore values resolve drafts to their
 base. Emission precedes result knowledge (children patch against
 post-splice indices), so finalize retracts a container's entries on every
-`=== base` outcome. DESIGN.md §7.5.
+`=== base` outcome; that lives in `finalizeState`, by recorder marks, for
+every kind at once, since per-kind bookkeeping missed cases (a map cleared
+and refilled to equal content). Memoised finalize and aliasing do not mix
+for free: an external review found `applyPatches(base, patches) !== result`
+whenever one modified draft sat in two places, an original was assigned
+back over its edited draft, or a value was edited after a sequence op
+placed it. The repair is a `replace` below the root, emitted at a child's
+home path when an alias finalized it first, and a path for a sequence's
+own child drafts in assigned slots. **Rejected:** ordering the walk so home
+slots resolve first; it works inside one container and not across two.
+The mirror-checked property suite never generated these shapes; a second
+one now does, and needs no mirror, because the laws are self-consistency.
+DESIGN.md §7.5.
 
 ### D38. Incremental finalize: cached accumulators, virtual array drafts, transition memoisation, shadow copies
 

@@ -48,7 +48,13 @@ A recipe whose edits net out to the base emits **no patches at all** — patch
 streams are as canonical as results. `applyPatches` validates what it is
 given: a path is followed only through own keys and in-range indices (a
 segment like `__proto__` throws), keys and indices are type-checked, and
-patch values are interned on application — so patches can come off a wire.
+patch values are interned on application — so patches can come off a wire,
+and `applyPatches` never writes into the values you hand it.
+
+Most patches are the fine-grained operations above. A `replace` patch means
+"the value at this path becomes that": at the root when a recipe returned a
+replacement, and below it in one situation, when the same edited draft was
+placed in several slots (`d.b = d.a`), where one of them is described whole.
 
 Record patches carry the key as written, so a symbol-keyed edit yields a
 patch with a symbol `key` (or a symbol in its `path`). Those apply and invert

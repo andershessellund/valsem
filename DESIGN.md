@@ -629,7 +629,7 @@ prototype, returning a `DraftState` built with `createDraftState`:
 | `modified` | set by `markChanged`, bubbles to the root |
 | `draft` | what the recipe receives |
 | `finalize(state, path, recorder)` | the canonical result; emits this container's patches when `path` is not null |
-| `applyPatch?`, `childAt?` | how `applyPatches` reaches and navigates through this kind |
+| `applyPatch?`, `childAt?`, `replaceChild?` | how `applyPatches` reaches this kind, navigates through it, and sets a child under it |
 | `snapshot?` | the value as it stands now, for `current()` |
 | `revoke?` | proxies revoke; classes need not |
 | `result`, `finalized`, `revoked` | memoisation and lifecycle |
@@ -733,7 +733,7 @@ D38.
 
 | Kind | Fields |
 | --- | --- |
-| `replace` | `path`, `value` (a recipe returned a replacement) |
+| `replace` | `path`, `value`: the value at `path` becomes `value`. At the root, a recipe returned a replacement; below it, see aliasing |
 | `record.set` / `record.delete` | `path`, `key`, (`value`) |
 | `list.set` / `list.splice` | `path`, `index`, (`value`) / `remove`, `insert` |
 | `map.set` / `map.delete` | `path`, `key`, (`value`) |
@@ -746,16 +746,39 @@ value itself. Record, map and set patches are net per container
 (assignment maps); sequence patches replay recorded ops; ordered patches
 replay the recipe's operations in order. Forward values are canonical;
 inverse values resolve drafts to their base (`restoreValue`). Emission
-precedes result knowledge, so a container that finalizes to its base
-retracts its own entries. Symbol keys appear in patches as symbols, and are
-not serialisable.
+precedes result knowledge, so `finalizeState` marks the recorder before a
+kind's finalize and retracts everything written since, children's entries
+included, whenever the result is the base. Symbol keys appear in patches as
+symbols, and are not serialisable.
+
+**Aliasing.** A child's deeper patches are emitted by its kind's finalize,
+at the path of the slot it lives in, and finalize is memoised. Three rules
+keep the patches equal to the result when one draft sits in several places
+or is edited after it was placed:
+
+- A modified child reached first through an alias (`d.b = d.a`, a push of
+  `d[0]`, a map value) is finalized without a path, so its deeper patches
+  are never written. When `resolve` later meets it at its home path, it
+  emits a `replace` there instead, the one thing still knowable: the value
+  at this path became the result.
+- A sequence op captures the value as assigned. A slot that then holds a
+  child draft *of that sequence* (`d[0] = c; d[0].y = 2`) gets a path, and
+  the child says its edits itself, after the ops, against the final index.
+  A draft brought from elsewhere has another parent, and the op that placed
+  it already carries its final value.
+- Assigning a child's original back over it abandons the child's edits and
+  records an assignment, which nets out at finalize.
 
 `applyPatches(base, patches)` runs each maximal run of non-`replace`
 patches as one `produce` whose recipe walks each path through the live
 draft (own keys, in-range integer indices, a kind's `childAt`; anything
 else throws), type-checks keys and indices, and calls the kind's
 `applyPatch` or edits the core draft; a root `replace` ends a run and
-starts the next on its value. Patch values are interned on application.
+starts the next on its value, and one below the root sets its path's last
+segment through the parent (a kind's `replaceChild`). Patch values are
+interned on application: as each patch is read, before its value enters the
+draft, so a later patch that edits inside an earlier patch's value drafts a
+canonical and never writes into the caller's object.
 `applyPatches(base, patches) === produce(base, recipe)`. Why: D37.
 
 ### 7.6 `current` and `original`
