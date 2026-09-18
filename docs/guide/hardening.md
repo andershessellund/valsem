@@ -26,8 +26,8 @@ configureHasher(sip); // once, at startup, before any hashing
 
 `configureHasher` is one-shot by design: hashes are baked into interned values
 and the collections' accumulators, so swapping mid-run would corrupt identity.
-Web Crypto (`globalThis.crypto`) is a platform requirement — universal in
-every supported runtime (Node ≥ 22, browsers, workers, Deno, Bun).
+Web Crypto (`globalThis.crypto`) is a platform requirement, present in every
+environment that meets the [feature floor](/guide/requirements).
 
 ## Depth-capped admission
 

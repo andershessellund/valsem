@@ -5,10 +5,12 @@ npm install valsem
 ```
 
 ::: info Runtime requirements
-Node ≥ 22 and all current browsers, workers, Deno, and Bun. valsem relies on
-`WeakRef`, `FinalizationRegistry` and Web Crypto (`globalThis.crypto`, which
-seeds the flood-resistant hasher) — universal for years. Ships as ES modules
-with full TypeScript types (TypeScript ≥ 5.6), dependency-free and
+Node 22 or later, Deno, Bun, and browsers since Chrome and Edge 93, Firefox 92
+and Safari 16. valsem calls no platform APIs, so what it needs is a short
+list of language features; [Requirements](/guide/requirements) has the exact
+floor, the one case that needs a newer browser (unique symbols in your
+values), and what is tested. Ships as ES modules with
+full TypeScript types (TypeScript 5.6 or later), dependency-free and
 tree-shakeable.
 :::
 

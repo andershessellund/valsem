@@ -68,7 +68,8 @@ Breaking, and therefore a major version:
 - changing what is a value: what `intern`, `deepHash` and `produce` admit or reject;
 - changing equality: two values that compared equal no longer do, or the reverse;
 - changing the patch vocabulary or a patch's meaning;
-- raising the minimum Node version.
+- raising the floor: the minimum Node version, or any minimum on the
+  [Requirements](docs/guide/requirements.md) page, the TypeScript one included.
 
 Not part of the API, and free to change in any release:
 
