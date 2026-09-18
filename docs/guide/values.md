@@ -130,7 +130,7 @@ built on it agrees on one definition of what each kind of thing *is*:
 | Kind | Its value is |
 | --- | --- |
 | primitive | itself (`NaN` equals `NaN`; `+0` equals `-0`, and canonical state holds it as `+0`) |
-| plain object (record) | the **unordered** set of `key → value` pairs over own enumerable string and symbol keys, where `undefined` is not a value |
+| plain object (record) | the **unordered** set of `key → value` pairs over own enumerable string and symbol keys, where `undefined` is not a value. "Plain" means its prototype is `Object.prototype` or `null`, in **any realm**: an object from a `vm` context, an iframe or jsdom is a record like any other, and its canonical form is rebuilt in this realm |
 | array / `ValueList` | the length and the **ordered** element sequence |
 | `ValueMap` | the **unordered** set of `(key, value)` entries (canonical values — interned on entry) |
 | `ValueSet` | the **unordered** set of elements (canonical values — interned on entry) |
