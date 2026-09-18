@@ -58,10 +58,11 @@ not part of the model.
 Ships as ES modules with declarations, dependency-free. Requires `WeakRef`,
 `FinalizationRegistry` and `globalThis.crypto`; uses the global `Iterator`
 as an iterator base class where the runtime has it. The declared floor is a
-list of language features, not of runtimes (ES2023, the Set methods, symbols
-as `WeakMap` keys), stated with engine versions in
-`docs/guide/requirements.md` and enforced by the build's `lib`; raising it is
-a breaking change. `sideEffects` lists only the
+list of language features, not of runtimes: ES2022, plus symbols as `WeakMap`
+keys for values that hold a unique symbol. It is stated with engine versions
+in `docs/guide/requirements.md` and enforced exactly, by the build's `lib`
+for built-ins and by lint for syntax; raising it is a breaking change.
+`sideEffects` lists only the
 Temporal entry (D7).
 
 ---
