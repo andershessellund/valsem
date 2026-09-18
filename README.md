@@ -311,7 +311,10 @@ it costs.
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |
 | `valsem/binding` | the two helpers a wire or storage binding needs; not for application code |
 
-Runs on Node ≥ 22 and current browsers, with TypeScript ≥ 5.6 for the types.
+Runs on Node 22 or later, Deno, Bun, and current browsers (Chrome and Edge 122,
+Safari 17, Firefox 146), with TypeScript 5.6 or later for the types. It calls
+no platform APIs; [Requirements](https://andershessellund.github.io/valsem/guide/requirements)
+lists the language features it needs, and what is tested.
 
 ## License
 

@@ -32,6 +32,7 @@ export default defineConfig({
           text: 'Guide',
           items: [
             { text: 'Getting started', link: '/guide/getting-started' },
+            { text: 'Requirements', link: '/guide/requirements' },
             { text: 'Equality, hashing, interning', link: '/guide/values' },
             { text: 'Value collections', link: '/guide/collections' },
             { text: 'produce', link: '/guide/produce' },

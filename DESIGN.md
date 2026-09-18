@@ -57,8 +57,11 @@ not part of the model.
 
 Ships as ES modules with declarations, dependency-free. Requires `WeakRef`,
 `FinalizationRegistry` and `globalThis.crypto`; uses the global `Iterator`
-as an iterator base class where the runtime has it. Declared floor: Node ≥
-22, current browsers, workers, Deno, Bun. `sideEffects` lists only the
+as an iterator base class where the runtime has it. The declared floor is a
+list of language features, not of runtimes (ES2023, the Set methods, symbols
+as `WeakMap` keys), stated with engine versions in
+`docs/guide/requirements.md` and enforced by the build's `lib`; raising it is
+a breaking change. `sideEffects` lists only the
 Temporal entry (D7).
 
 ---
