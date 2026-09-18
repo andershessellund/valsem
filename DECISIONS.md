@@ -85,7 +85,11 @@ floor. DESIGN.md §2.3, §3.1.
 
 A registered symbol hashes by its name; a unique one by an id assigned on
 first sight and kept in the hash cache. Own enumerable symbol keys are part
-of a record's content.
+of a record's content. The ids are numbered process-wide (a `globalThis`
+table beside the hash seed), not per module: a per-copy counter numbers
+symbols in the order each install meets them, which made plain data holding
+a unique symbol the one case where a shared seed did not give duplicate
+installs equal hashes (D4).
 
 **Why.** Before this, `deepEqual({ [s]: 1 }, { [s]: 2 })` was `true`, the
 silent wrong answer the library exists to prevent. **Cost.** Every raw-record
@@ -170,7 +174,18 @@ untouched and keyed a `HashMap` by reference, a silent miss. `intern` now
 throws for every class it cannot pool, and `register` refuses a hash for
 `Date`, `RegExp`, `Map`, `Set` and the TypedArrays. Value types are pooled
 *unfrozen*: freezing a foreign type can break it, and the hash is the
-author's promise. DESIGN.md §5.1.
+author's promise. The same declaration fixes the registration: once a type
+has a registered hash, `register` throws on any other pair (the identical
+pair is a no-op). `register` used to replace handlers freely; after a
+coarser pair, two raw instances compared equal while their canonicals,
+distinct by identity and short-circuited before dispatch, did not —
+equality depended on when a value was interned. **Rejected:** freezing only
+after first use; it needs a write on the hashing hot path and makes the
+error depend on history. A comparable-only registration is never hashed or
+pooled, so it stays replaceable and upgradable. Functions get the same
+no-silent-pass-through treatment at the front door: `intern(fn)`, a recipe
+returning a function, and a function as a non-draftable base throw, as the
+hasher always did for one nested in data. DESIGN.md §5.1.
 
 ### D27. `[interned]` is a type contract, and `deepEqual` consults canonicality
 
@@ -875,6 +890,23 @@ outlives a call. The revoke-at-scope-end rule is what the escape guarantee
 rests on, and D36 already rejected ambient context that leaks across
 `await`; a `computed` runs synchronously, so a `produce` inside it is a
 sufficient lexical scope. DESIGN.md §7.1.
+
+### D43. The one-recipe rule is enforced at finalize, not only at assignment
+
+`finalizeState` throws for a state of any scope but the running one, ahead
+of its memoisation.
+
+**Why.** `assertAssignable` sees only the value assigned. A draft of an
+enclosing recipe wrapped in a literal (`inner.slot = { w: outerDraft }`)
+passed it, and the inner finalize then resolved the outer draft through
+`adopt`: memoised, so the outer recipe's later edits were dropped without
+an error and its result could collapse to the base. Finalize always runs
+inside its own `produce`, so "this state's scope is the running scope" is
+the whole invariant, checked in one place for every route in — slots,
+pushes, collection values, replacements, detached drafts, custom kinds
+calling `resolve` — with no signature change to the `valsem/draft` toolkit.
+**Rejected:** walking every assigned value at assignment time; it is O(size
+of the graft) per write for material finalize walks anyway. DESIGN.md §7.1.
 
 ## Non-goals
 

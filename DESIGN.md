@@ -146,7 +146,9 @@ may substitute either object for the other.
 A registered symbol (`Symbol.for(name)`) *is* its name: hashed by the name,
 so it agrees across realms and installs. A unique symbol (`Symbol(desc)`,
 the well-known symbols) is an identity with no content: it hashes by an id
-assigned on first sight and kept in the hash cache (unique symbols are
+assigned on first sight — numbered process-wide, through
+`Symbol.for('valsem.symbolIds.v1')` on `globalThis` beside the seed, so
+duplicate installs agree on it too — and kept in the hash cache (unique symbols are
 valid `WeakMap` keys since ES2023; registered ones are not, which is why
 they take the other branch). Symbols work as record fields, record keys,
 `HashMap` keys and collection members. Own enumerable symbol keys are part
@@ -343,7 +345,10 @@ The three value-protocol symbols, cross-realm registered as
 
 The registry form for types you cannot edit: `deepEqual.register(Type,
 equalsFn)` makes it comparable; `deepEqual.register(Type, equalsFn, hashFn)`
-makes it a value. Registering again replaces both handlers. Dispatch keys
+makes it a value. A value's registration is fixed: registering the type again
+throws unless it repeats the identical pair, since canonical instances were
+hashed and pooled by the first; a comparable-only registration may be
+replaced or upgraded (D26). Dispatch keys
 on the prototype's constructor. `register` refuses a hash for the mutable
 built-ins; an equality alone is accepted for them (the contained escape
 hatch: `deepEqual.register(Date, (a, b) => a.getTime() === b.getTime())`).
@@ -587,7 +592,14 @@ edits net out returns the base and emits zero patches. Why: D35.
 A `produce` call opens a **scope**; every draft state created inside it is
 recorded there and revoked when the recipe returns (a proxy's `revoke` is
 called; a class draft checks `revoked` on every operation). A draft from
-another scope cannot be assigned in (`assertAssignable`).
+another scope cannot be assigned in (`assertAssignable`), and the invariant
+is recursive: `finalizeState` refuses any state whose scope is not the
+running one, before its memo, so a foreign draft wrapped in a grafted
+literal is an error at finalize rather than an early, memoised finalize
+that drops the edits its own recipe makes later. `current()` applies the
+same rule against the outermost draft's scope. Draft sets are the one door
+that never holds a draft: `add` interns its argument, taking the value it
+has at that moment. `current(draft)` is how a draft's value crosses recipes.
 
 A scope is a set of states, not a tree: the recipe's draft is one root, and
 `draft(value)` adds a **detached** root over any draftable — no parent, no

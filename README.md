@@ -17,9 +17,10 @@ const next = produce(state, (d) => { d.todos[0].done = true; });
 next.todos.push(todo); // TypeError: Cannot add property 1, object is not extensible
 ```
 
-**Ergonomic.** The immer API, verbatim: mutate a draft, get a new value, with
-structural sharing. `produceWithPatches`, `applyPatches`, `current`,
-`original`, and the curried form are all there.
+**Ergonomic.** An immer-shaped recipe API: mutate a draft, get a new value,
+with structural sharing. `produceWithPatches`, `applyPatches`, `current`,
+`original`, and the curried form are all there; what differs — collections,
+patches, draft lifetimes — is tabled under [Coming from immer](#coming-from-immer).
 
 ```ts
 const next = produce(state, (d) => {
@@ -272,7 +273,9 @@ so `produce` can edit your type in place, with patches.
 - **`{ a: undefined }` is `{}`.** Records drop undefined-valued keys; use
   `null` for "present but empty". (`ValueMap` is the opposite: storing
   `undefined` is a real entry.)
-- **Drafts do not escape.** A draft used after its `produce` call throws.
+- **Drafts do not escape.** A draft used after its `produce` call throws, and
+  so does a draft handed to a different `produce` call, however deeply it is
+  wrapped; pass `current(draft)` to give its value to another recipe.
 
 ## Documentation
 

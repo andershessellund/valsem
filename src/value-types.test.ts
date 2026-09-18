@@ -286,15 +286,59 @@ describe('deepEqual.register with a hash is the same tier', () => {
     expect(() => intern(new (class Cube extends Square {})(2))).toThrow(/Cube/);
   });
 
-  it('registering again without a hash drops the hash', () => {
+  it("a value's registration is fixed: replacing or dropping the pair throws", () => {
+    class R {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    }
+    const eq = (a: R, b: R): boolean => a.x === b.x && a.y === b.y;
+    const hash = (r: R): number => deepHash([r.x, r.y]);
+    deepEqual.register(R, eq, hash);
+    const a = intern(new R(1, 1));
+    const b = intern(new R(1, 2));
+
+    // The reviewed incoherence: a coarser pair would make the raw instances
+    // equal while their canonicals (distinct by identity) stay unequal.
+    expect(() => deepEqual.register(R, (p, q) => p.x === q.x, (r) => deepHash(r.x))).toThrow(
+      /already registered as a value/,
+    );
+    expect(() => deepEqual.register(R, eq)).toThrow(/already registered as a value/); // no dropping
+    expect(() => deepEqual.register(R, eq, (r) => deepHash([r.x, r.y]))).toThrow(/already registered/);
+
+    // Nothing changed: raw and canonical still agree.
+    expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(false);
+    expect(deepEqual(a, b)).toBe(false);
+    expect(intern(new R(1, 1))).toBe(a);
+  });
+
+  it('repeating the identical registration is a no-op', () => {
     class R {
       constructor(readonly v: number) {}
     }
-    deepEqual.register(R, (a, b) => a.v === b.v, (r) => r.v >>> 0);
-    expect(typeof deepHash(new R(1))).toBe('number');
-    deepEqual.register(R, (a, b) => a.v === b.v);
-    expect(deepEqual(new R(1), new R(1))).toBe(true);
-    expect(() => deepHash(new R(1))).toThrow(/has an equality but no hash/);
+    const eq = (a: R, b: R): boolean => a.v === b.v;
+    const hash = (r: R): number => r.v >>> 0;
+    deepEqual.register(R, eq, hash);
+    const a = intern(new R(1));
+    expect(() => deepEqual.register(R, eq, hash)).not.toThrow();
+    expect(intern(new R(1))).toBe(a);
+  });
+
+  it('a comparable-only registration may be replaced, and upgraded to a value', () => {
+    class R {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    }
+    deepEqual.register(R, (a, b) => a.x === b.x);
+    expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(true);
+    deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y); // nothing was ever pooled
+    expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(false);
+    expect(() => deepHash(new R(1, 1))).toThrow(/has an equality but no hash/);
+    deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y, (r) => deepHash([r.x, r.y]));
+    expect(intern(new R(1, 1))).toBe(intern(new R(1, 1)));
   });
 });
 

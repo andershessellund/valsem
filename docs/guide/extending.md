@@ -66,7 +66,12 @@ deepEqual.register(
 deepEqual.register(Legacy, (a, b) => a.id === b.id);
 ```
 
-Registering again replaces both handlers. The mutable built-ins (`Date`,
+**A value's registration is fixed.** Once a type is registered with a hash,
+registering it again throws (repeating the identical pair is a no-op):
+canonical instances were hashed and pooled by the first pair, so a
+replacement would make equality depend on when a value was interned. Register
+each type once, next to its class. A comparable-only registration has no such
+history and may be replaced, or upgraded to a value. The mutable built-ins (`Date`,
 `RegExp`, `Map`, `Set`, the TypedArrays) accept an equality only; `register`
 refuses a hash for them, since a hash would declare them immutable — see
 [the mutable boundary](/guide/boundary#the-contained-escape-hatch).

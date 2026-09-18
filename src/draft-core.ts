@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import { same } from './shared.js';
-import { intern, _hashCacheHas, isCanonical } from './intern.js';
+import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys } from './deep-equal.js';
 
@@ -349,15 +349,28 @@ export function snapshotOf(value: unknown): unknown {
   const state = stateOf(value);
   if (state === undefined) return snapshotForeign(value);
   assertUnrevoked(state);
+  // current() is "what produce would return here", and produce rejects a
+  // draft of another scope reachable from this one (finalizeState) — so the
+  // snapshot does too. The scope is the outermost draft's, not the running
+  // recipe's: current(outerDraft) inside a nested recipe is legitimate.
+  if (snapshotScope !== undefined && state.scope !== snapshotScope) throw foreignDraftError();
   if (!state.modified) return state.base;
-  if (state.snapshot !== undefined) return state.snapshot(state);
-  if (coreSnapshot !== undefined && (state.kind === 'object' || state.kind === 'array')) {
-    return coreSnapshot(state);
+  const outermost = snapshotScope === undefined;
+  if (outermost) snapshotScope = state.scope;
+  try {
+    if (state.snapshot !== undefined) return state.snapshot(state);
+    if (coreSnapshot !== undefined && (state.kind === 'object' || state.kind === 'array')) {
+      return coreSnapshot(state);
+    }
+  } finally {
+    if (outermost) snapshotScope = undefined;
   }
   throw new Error(
     `valsem: current() is not supported for a '${state.kind}' draft — its draft state has no snapshot()`,
   );
 }
+
+let snapshotScope: Scope | undefined;
 
 let snapshotDepth = 0;
 
@@ -408,7 +421,10 @@ export function adopt(value: unknown): unknown {
   // Primitives pass, with the one normalisation `intern` applies: -0 → +0.
   // This is the only other door into canonical state — produce's fast paths
   // commit a resolved primitive without calling `intern` on it.
-  if (value === null || typeof value !== 'object') return value === 0 ? 0 : value;
+  if (value === null || typeof value !== 'object') {
+    if (typeof value === 'function') throw _functionError('produce');
+    return value === 0 ? 0 : value;
+  }
   // O(1) recognition of canonical material: the [interned] marker covers the
   // auto-interning types (the collections); the hash cache covers canonical
   // plain data and pooled value-type instances.
@@ -458,12 +474,25 @@ function adoptUncached(value: object): unknown {
   return intern(value);
 }
 
+function foreignDraftError(): Error {
+  return new Error(
+    'valsem: a draft from a different produce() call was found inside a value given to this one. ' +
+      'A draft is only valid in its own recipe — pass current(draft) to hand its value to another.',
+  );
+}
+
 /** Finalize a draft state (memoized): unchanged states intern their base; changed ones delegate to the kind. */
 export function finalizeState(
   state: DraftState,
   path: PatchPath | null,
   recorder: PatchRecorder | undefined,
 ): unknown {
+  // Finalize runs inside its own produce(): a state of any other scope got
+  // here through material the recipe grafted in — a draft of an enclosing
+  // (or sibling) recipe wrapped in a literal, where `assertAssignable` never
+  // saw it. Checked BEFORE the memo: finalizing it here would freeze its
+  // result early and silently drop every edit its own recipe makes later.
+  if (state.scope !== currentScope) throw foreignDraftError();
   if (state.finalized) return state.result;
   state.finalized = true;
   if (!state.modified) {
