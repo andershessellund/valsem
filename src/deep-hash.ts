@@ -90,26 +90,23 @@ function scramble(h: number): number {
 // be delta-updated in O(changes) by produce's finalize:
 //
 //   record: acc = Σ entryTerm(key, valueHash)          (commutative)
-//   array:  acc = Σ elementTerm(i, elementHash)        (positional, P odd)
+//   array:  acc = Σ elementTerm(i, elementHash)        (positional)
 //
 // and the final hash folds in the count/length. These helpers are the single
 // source of truth for both the from-scratch and the incremental paths.
+//
+// BOTH terms are non-linear in a SEEDED quantity: the key's hash for a
+// record, the position's hash for an array. That is what makes the sum
+// flood-resistant. The array term used to be `elementHash · P^i` with a
+// fixed public P — linear, with coefficients anyone can compute. A sign
+// vector e ∈ {-1,0,1}^n with Σ eᵢ·Pⁱ ≡ 0 (mod 2³²) then swaps two elements
+// across its positions without moving the sum, FOR ANY SEED and any pair of
+// elements; a birthday search finds such vectors offline, and m of them side
+// by side give 2^m arrays in one bucket. Seeding the leaves did not help:
+// the weakness was the combiner's. With the position hashed through the
+// seeded hasher and the pair scrambled, the terms cannot be computed without
+// the seed, so neither can a cancelling combination.
 // ---------------------------------------------------------------------------
-
-const P = 0x9e3779b1 | 0; // odd (golden-ratio derived) — positional multiplier
-
-/** @internal P^n mod 2³² via square-and-multiply. */
-export function _powP(n: number): number {
-  let result = 1;
-  let base = P;
-  let e = n >>> 0;
-  while (e > 0) {
-    if (e & 1) result = Math.imul(result, base);
-    base = Math.imul(base, base);
-    e >>>= 1;
-  }
-  return result | 0;
-}
 
 // ---------------------------------------------------------------------------
 // Symbols
@@ -164,7 +161,7 @@ export function _entryTerm(key: string | symbol, valueHash: number): number {
 
 /** @internal One array element's accumulator term. */
 export function _elementTerm(index: number, elementHash: number): number {
-  return Math.imul(elementHash, _powP(index));
+  return scramble(mix(hashNumber(index), elementHash));
 }
 
 /** @internal Fold a record accumulator into the final hash. */
@@ -291,10 +288,8 @@ function hashObjectValue(obj: object): number {
   // contract above: this form is what makes array hashes delta-updatable).
   if (Array.isArray(obj)) {
     let acc = 0;
-    let pPow = 1;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + Math.imul(deepHash(obj[i]), pPow)) | 0;
-      pPow = Math.imul(pPow, P);
+      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
     }
     return _arrayHashOf(obj.length, acc);
   }
@@ -348,10 +343,8 @@ function hashObjectValue(obj: object): number {
 export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: number } {
   if (Array.isArray(obj)) {
     let acc = 0;
-    let pPow = 1;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + Math.imul(deepHash(obj[i]), pPow)) | 0;
-      pPow = Math.imul(pPow, P);
+      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
     }
     return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
   }
