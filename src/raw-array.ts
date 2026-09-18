@@ -24,6 +24,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern } from './intern.js';
 import { hashNumber } from './hasher.js';
+import { toInteger } from './shared.js';
 
 let nextId = 0;
 const NOT_YET = Symbol('valsem.raw-array.not-yet');
@@ -87,6 +88,8 @@ export class RawArray<T> {
    */
   slice(start = 0, end = this.#canon.length): readonly T[] {
     const n = this.#canon.length;
+    start = toInteger(start);
+    end = toInteger(end);
     if (start < 0) start = Math.max(0, n + start);
     if (end < 0) end = Math.max(0, n + end);
     start = Math.min(start, n);
