@@ -6,13 +6,16 @@
     // What the shipped source may assume about its host, stated instead of
     // inherited. `ESNext` grows with every TypeScript release, so it admits
     // built-ins newer than the Node 22 floor, and nothing backstops that for
-    // browsers, which CI does not run. ES2024 is fully in Node 22;
-    // ES2025.Collection is the Set methods and `ReadonlySetLike` (in Node
-    // since 22.0), which ValueSet and OrderedSet type against. Not
-    // ESNext.Collection: since TypeScript 6 that also declares
-    // `Map.prototype.getOrInsert`, which Node 22 lacks. Not all of ES2025
-    // either: `Promise.try`, `Float16Array` and `RegExp.escape` are in it.
-    "lib": ["ES2024", "ES2025.Collection"],
+    // browsers, which CI does not run. This list IS the published feature
+    // floor (docs/guide/requirements.md), exactly: widening it raises a
+    // minimum browser version, which is a breaking change. ES2022 is what
+    // the source uses. ES2023.Collection adds one thing, the typing of a
+    // symbol as a WeakMap key, which hashing a unique symbol needs. Nothing
+    // newer: no ES2023 array methods, no native Set methods (the collections
+    // implement their own algebra), no ES2024. The two pieces of ES2022
+    // syntax the source does not use, static blocks and top-level await,
+    // are held off by lint (eslint.config.js), since `lib` cannot.
+    "lib": ["ES2022", "ES2023.Collection"],
     // No ambient types. Left unset, TypeScript pulls in every @types package
     // it finds, @types/node included, and the library could lean on Node
     // globals unnoticed. valsem is runtime-neutral: this makes that a

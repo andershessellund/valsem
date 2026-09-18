@@ -73,11 +73,15 @@ type ReadonlySetReads<T> = Pick<
  * so the cost is proportional to where the operands differ, O(1) for the
  * same set, at worst linear, never a per-member insert. (TypeScript's
  * `ReadonlySet` insists the algebra takes a `ReadonlySetLike` and returns a
- * native `Set`, so the class does not spell `implements ReadonlySet`; it is
- * a `ReadonlySetLike`, which the native methods accept as their argument.)
+ * native `Set`, so the class does not spell `implements ReadonlySet`. It IS
+ * set-like — `size`, `has` and `keys` are all the ES2025 protocol asks — so
+ * the native methods accept it as their argument: `nativeSet.union(valueSet)`.
+ * That is asserted in the tests and not spelled `implements ReadonlySetLike`
+ * here: the name would reach the published declarations and make every
+ * consumer's `lib` need the ES2025 collection types.)
  * Take a mutable copy with `new Set(valueSet)` when you need one.
  */
-export class ValueSet<T> implements ReadonlySetLike<T>, ReadonlySetReads<T> {
+export class ValueSet<T> implements ReadonlySetReads<T> {
   readonly #root: HNode;
   readonly #hash: number;
 

@@ -1,8 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  // The tests run on Node only, so they get its types, held at the major of
-  // the supported floor (see .github/dependabot.yml), and the iterator
-  // helpers (in Node since 22.0) on top of what the library may use.
+  // The tests run on Node only, so they are not held to the library's feature
+  // floor: they get Node's types, held at the major of the supported Node
+  // version (see .github/dependabot.yml), and everything Node 22 has. That
+  // includes the native Set methods and `ReadonlySetLike`, which the tests use
+  // to assert that the set collections are accepted by them.
   "compilerOptions": {
     "noEmit": true,
     "types": ["node"],
