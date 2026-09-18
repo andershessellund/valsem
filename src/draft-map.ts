@@ -170,7 +170,6 @@ export class DraftMap<K, V> {
   }
 }
 
-/** Mutable draft twin of {@link ValueSet}, handed out inside produce(). */
 
 /** Draft `base` under `parent`; `empty` builds the canonical empty map for `clear()`. */
 export function createMapDraft<K, V>(

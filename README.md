@@ -107,6 +107,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — `[equals]` + `[hashCode]`, or one registration, see [Extending](#extending); a value is an opaque leaf in a recipe (`Draft<ValueDate>` is `ValueDate`) unless it implements `[toDraft]` — give a registered class at least one method so the types can tell |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
+| Iterating a `Map` draft | yields drafts | yields the **values**: `for (const [k, v] of d.m) v.x = 1` throws on the frozen value. Edit through the slot, `d.m.get(k).x = 1`; `get` is what hands out a draft. Iteration stays a read, so walking a large map drafts nothing |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draft(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
 | Async recipes | silently wrong | rejected with an error |
 

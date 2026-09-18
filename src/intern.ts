@@ -30,7 +30,7 @@ import {
   _missingValueSemantics,
   _protocolEquals,
   _mutableBuiltinReason,
-  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord } from './deep-equal.js';
+  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord, _isForeignObjectPrototype } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { same } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
@@ -211,7 +211,7 @@ export function intern<T>(value: T): T {
   // Keys mapped to `undefined` are dropped: an undefined-valued key IS an
   // absent key in record semantics, and the canonical form makes that literal.
   const proto = Object.getPrototypeOf(obj);
-  if (proto === Object.prototype || proto === null) {
+  if (proto === Object.prototype || proto === null || _isForeignObjectPrototype(proto)) {
     depth++;
     try {
       if (depth > _maxDepth()) throw _depthError('intern');

@@ -668,8 +668,6 @@ function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
 // it.)
 _setCoreDraftFactories(createObjectDraft, createArrayDraft);
 
-
-/** Mutable draft twin of {@link ValueMap}, handed out inside produce(). */
 // ---------------------------------------------------------------------------
 // Finalize — the intern walk
 // ---------------------------------------------------------------------------
