@@ -64,7 +64,7 @@ collections take. Covered by semver like `valsem/binding`.
 | export | description |
 | --- | --- |
 | `toDraft` | The protocol symbol: implement `[toDraft](parent)` on a class, returning a `DraftState`. Also exported from `valsem`. |
-| `createDraftState(fields)` | Build and register a draft state for the running `produce()`; supply your fields, `draft`, `finalize`, and optionally `applyPatch`/`childAt`/`snapshot`/`revoke`. |
+| `createDraftState(fields)` | Build and register a draft state for the running `produce()`; supply your fields, `draft`, `finalize`, and optionally `applyPatch`/`childAt`/`replaceChild`/`snapshot`/`revoke`. |
 | `markChanged(state)` | Record a mutation (bubbles to the root). |
 | `assertUnrevoked(state)` | Throw the teaching error once the recipe has ended. |
 | `assertAssignable(value, state)` | Reject drafts from another `produce()` call. |

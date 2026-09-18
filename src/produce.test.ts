@@ -425,7 +425,9 @@ describe('produceWithPatches — semantic patches, both directions', () => {
       { kind: 'replace', path: [], value: { q: 0 } },
     ];
     expect(applyPatches(base, patches3)).toBe(intern({ q: 0 }));
-    expect(() => applyPatches(base, [{ kind: 'replace', path: ['x'], value: 1 }])).toThrow(/root/);
+    // Below the root, a replace sets the value at its path — which must exist.
+    expect(applyPatches(base, [{ kind: 'replace', path: ['a'], value: { n: 1 } }])).toBe(intern({ a: { n: 1 } }));
+    expect(() => applyPatches(base, [{ kind: 'replace', path: ['x'], value: 1 }])).toThrow(/path segment/);
   });
 
   it('no-change recipes emit no patches', () => {
