@@ -191,6 +191,7 @@ export function createMapDraft<K, V>(
     snapshot: snapshotMap,
     applyPatch: applyMapPatch,
     childAt: (state, segment) => (state as MapState).draft.get(segment),
+    replaceChild: (state, segment, value) => void (state as MapState).draft.set(segment, value),
   });
   state.draft = new DraftMap(INTERNAL, state);
   return state as MapState<K, V>;

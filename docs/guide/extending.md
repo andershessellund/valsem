@@ -193,7 +193,11 @@ A draft state has:
   `path` is not null, push this container's patches into `recorder` (forward
   into `patches`, inverse `unshift`ed into `inverse`).
 - optionally `applyPatch(state, patch)` and `childAt(state, segment)`, so
-  `applyPatches` can route patches to your draft and navigate through it.
+  `applyPatches` can route patches to your draft and navigate through it. A
+  kind with `childAt` should also supply `replaceChild(state, segment,
+  value)`: when one modified child draft sits in two places, produce
+  describes it at its home slot with a `replace` patch, and that hook is how
+  it lands under your kind.
 - optionally `snapshot(state)` — the value as it stands right now, built
   from your bookkeeping without touching the state, children passed through
   `snapshotOf()`. This is what `current()` reads; it interns what you return.

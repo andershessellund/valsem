@@ -238,6 +238,7 @@ export function createOrderedMapDraft<K, V>(
     snapshot: (state) => withEdits(state as OrderedMapState, true, undefined, null),
     applyPatch: applyOrderedMapPatch,
     childAt: (state, segment) => (state as OrderedMapState).draft.get(segment),
+    replaceChild: (state, segment, value) => void (state as OrderedMapState).draft.set(segment, value),
   });
   state.draft = new DraftOrderedMap(INTERNAL, state);
   return state as OrderedMapState<K, V>;
