@@ -1097,6 +1097,37 @@ process with index pollution, the polluted value can enter canonical state
 through a sparse array's hole. That is faithful to what all other code in
 that process sees. DESIGN.md §9.
 
+### D47. A draft as the base of `produce` stands for its current value
+
+`produce(draft, recipe)`, `produceWithPatches(draft, …)` and
+`applyPatches(draft, …)` are the same call on `current(draft)`, for every
+kind of draft: the result is a value, patches are relative to that value, and
+the draft given is not edited.
+
+**Why.** Function A calls function B, both are built on `produce`, and A
+hands B a piece of its draft. B is a function from value to value, and must
+behave as it does anywhere else. Before this the call worked for a plain
+draft by accident (the inner draft read through the outer proxy) and failed
+for a collection draft, or a plain one holding one, with "DraftList has no
+[hashCode] … implement [equals]", advice for a different mistake. It is
+immer's rule, and the one the drafts already follow elsewhere: `toJSON`,
+`slice` and the set algebra answer as the value the draft is right now.
+**Rejected:** refusing a draft as a base. It is loud, but whether
+`helper(d.sub)` throws would then depend on whether `helper` uses `produce`
+inside, which is `helper`'s business. **Rejected:** running the recipe on the
+given draft in place, "as if the inner produce were not there". It makes the
+careless call work (`step(d.sub)` with the result dropped), and it makes
+`produce` mutate its argument and return a live draft typed as a value: a
+what-if asked twice applies twice, a result kept past the recipe is a revoked
+proxy, and `produceWithPatches` has no value to be relative to. With the
+snapshot rule the one way to go wrong is to drop the result, which is how
+every operation on a value goes wrong. A draft is still not a value anywhere
+else (`intern`, a `HashMap` key, a `memoize` argument), and the error there
+now says so. **Cost.** The snapshot of the two core draft kinds no longer
+tree-shakes away with `current()`: a bundle importing `produce` alone grows
+by 1.2 KB minified (330 B gzipped); one that already imports `current` by
+0.2 KB. DESIGN.md §7.1.
+
 ## Non-goals
 
 Permanently out of scope: mutable built-ins as values; cycle support; wire

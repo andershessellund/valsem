@@ -144,6 +144,32 @@ Patches are exact for the same reason: `applyPatches` refuses a `list.set`
 or `list.splice` whose index or count does not fit the value, because a
 patch that does not fit was made against another base.
 
+## Calling a producer from inside a recipe
+
+A function built on `produce` works inside someone else's recipe as it does
+anywhere: a draft given to `produce` as its **base** stands for the value it
+is right now, so `produce(draft, recipe)` is `produce(current(draft), recipe)`,
+for every kind of draft.
+
+```ts
+const bump = (c: Counter): Counter => produce(c, (d) => { d.n++; });
+
+produce(state, (d) => {
+  d.counter = bump(d.counter);   // bump neither knows nor cares that it was handed a draft
+});
+```
+
+It takes a value, returns a value, and edits nothing, so the caller has to
+**use the result**, exactly as with `list.push(x)` on a `ValueList`; calling
+`bump(d.counter)` and dropping what it returns changes nothing. That also
+means a what-if can be asked twice (`bump(d.counter)` is the same value both
+times), and the result outlives the recipe. `produceWithPatches` and
+`applyPatches` take a draft the same way, with patches relative to the value
+it is right now. When the state holds collections, TypeScript will not take
+a `Draft<Sub>` where a `Sub` is declared (a `DraftList` is not a
+`ValueList`): write `step(current(d.sub))`, and `castDraft` to assign the
+result.
+
 ## Looking at a draft: `current()` and `original()`
 
 immer's two inspectors, with valsem's guarantee attached. `original(draft)`

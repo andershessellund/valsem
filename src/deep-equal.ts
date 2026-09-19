@@ -20,6 +20,8 @@
 // No circular reference handling — state values should be plain data.
 // ---------------------------------------------------------------------------
 
+import { DRAFT_STATE } from './shared.js';
+
 // ---------------------------------------------------------------------------
 // Protocol symbols
 //
@@ -499,6 +501,12 @@ export function _protocolEquals(obj: object): ((this: unknown, o: unknown) => bo
 export function _missingValueSemantics(obj: object): string | undefined {
   const ctor = _ctorOf(obj);
   const name = ctor?.name || 'an anonymous class';
+  // A collection draft (a DraftList handed to intern, a HashMap, memoize) is
+  // a class without a hash too, and "implement [equals] and [hashCode]" is
+  // the wrong advice for it.
+  if ((obj as Record<symbol, unknown>)[DRAFT_STATE] !== undefined) {
+    return `this ${name} is a draft, not a value — pass current(draft) for what it holds now`;
+  }
   const eq = _protocolEquals(obj);
   const hc = (obj as Record<symbol, unknown>)[hashCode];
   const hasEquals = eq !== undefined || (ctor !== undefined && equalsMethods.has(ctor));

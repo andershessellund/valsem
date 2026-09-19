@@ -111,6 +111,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | `castDraft()` | for a `readonly` value headed into a mutable slot | the same, and also for every whole collection assigned into a slot: `d.todos = castDraft(ValueList.of(a, b))`, since a `ValueList` slot is typed as a `DraftList` |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draft(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
 | Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.remove(-1)` throw, `get` returns `T`), while ranges clamp (`slice(0, 10)`) |
+| `produce(draft, recipe)` inside a recipe | a new value; the outer draft is untouched, so use the result | the same, for every kind of draft: the draft stands for `current(draft)` |
 | Async recipes | silently wrong | rejected with an error |
 
 ```ts
@@ -282,8 +283,11 @@ so `produce` can edit your type in place, with patches.
   the string differs between processes: never compare or key by it, and
   persist `OrderedMap`/`OrderedSet` when order must hold.
 - **Drafts do not escape.** A draft used after its `produce` call throws, and
-  so does a draft handed to a different `produce` call, however deeply it is
-  wrapped; pass `current(draft)` to give its value to another recipe.
+  so does a draft *put into* a different `produce` call's state, however
+  deeply it is wrapped; pass `current(draft)` to give its value to another
+  recipe. As the *base* of a `produce` it is fine: it stands for the value it
+  is right now, so a function built on `produce` can be called from inside
+  someone else's recipe, and returns a value like anywhere else.
 
 ## Documentation
 

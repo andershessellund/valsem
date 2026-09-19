@@ -126,3 +126,11 @@ export function inspectAs(name: string, size: number, body: () => unknown, depth
   const inner = inspect(body(), { ...options, depth: unlimited ? null : depth });
   return `${name}(${size}) ${inner.replace(/^(?:Map|Set)\(\d+\) /, '')}`;
 }
+
+/**
+ * The property through which a draft object exposes its state. Defined in
+ * this leaf module, not in draft-core, so that the lowest layer can tell a
+ * draft from "a class that is not a value" in its error path without
+ * importing the draft machinery. A per-copy symbol, like every internal one.
+ */
+export const DRAFT_STATE: unique symbol = Symbol('valsem.draftState') as any;

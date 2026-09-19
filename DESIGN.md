@@ -634,6 +634,10 @@ that drops the edits its own recipe makes later. `current()` applies the
 same rule against the outermost draft's scope. Draft sets are the one door
 that never holds a draft: `add` interns its argument, taking the value it
 has at that moment. `current(draft)` is how a draft's value crosses recipes.
+As the *base* of a `produce` (or of `produceWithPatches`, `applyPatches`) a
+draft is taken the same way, by its snapshot: a function built on `produce`
+called from inside another recipe gets the value the draft is right now, and
+returns a value, editing nothing (D47).
 
 A scope is a set of states, not a tree: the recipe's draft is one root, and
 `draft(value)` adds a **detached** root over any draftable — no parent, no
