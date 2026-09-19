@@ -30,7 +30,7 @@
 | `createInternPool` | function | Create a typed weak pool for your own value type. |
 | `equals` / `hashCode` / `interned` | symbol | Opt-in value-semantics hooks for classes: `[equals]` makes a class comparable, `[hashCode]` declares it immutable and makes it a value (hashable, internable, a key), `[interned]` marks an auto-interning type. |
 | `configureHasher` / `createMarvin32Hasher` / `getHashSeed` | function | Inspect or replace the seeded leaf hash (e.g. plug in SipHash). |
-| `skipChecks()` / `skipFreezing()` | function | The two one-way switches you own: stop verifying *canonical only* arguments (`fastEquals`); stop freezing canonical records and arrays (faster iteration in V8, mutations no longer caught). Neither reads the environment. See the hardening guide. |
+| `skipChecks()` / `skipFreezing()` | function | The two one-way switches you own: stop verifying *canonical only* arguments (`fastEquals`); stop freezing canonical records and arrays (faster iteration in V8, mutations no longer caught). Neither reads the environment. See the [performance guide](/guide/performance). |
 | `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
 | `Draft` / `Undraft` / `RecipeReturn` | type | The draft of a value type and its inverse; a recipe's permitted return. |
 | `Patch` / `PatchPath` / `PatchKinds` / `Hunk` | type | Semantic patches and their paths (extend `PatchKinds` by declaration merging); one changed region from `ValueList.diff`. |

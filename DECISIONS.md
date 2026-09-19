@@ -309,7 +309,7 @@ first: every lookup on a canonical object would probe each table, and that
 lookup is the hot path (`deepHash` of a canonical child, `fastEquals`).
 **Rejected: `[hashCode]` as the carrier**: one number where three are
 needed, no room for an owner check, and on a plain record that symbol is
-content (D9). DESIGN.md §3.4; the guide's Hardening page.
+content (D9). DESIGN.md §3.4; the guide's Performance and scale page.
 
 ### D12. Admission looks up before it copies
 
@@ -1016,7 +1016,7 @@ experience is not to be made worse because one engine freezes slowly: an
 engine-dependent default, or a size threshold above which mutation silently
 stops being caught, would trade a documented, avoidable cost for a rule
 nobody can keep in their head. The cost is stated where a reader meets it
-(the README's "Freezing, and Safari", the hardening guide), measured per
+(the README's "Freezing, and Safari", the guide's Performance and scale page), measured per
 engine by the `skip-freezing` benchmark suite (V8: the switch buys 2–3× in
 the reader's own loops and nothing in valsem's operations; JavaScriptCore:
 two orders of magnitude on an edit of a large plain array; SpiderMonkey:

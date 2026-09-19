@@ -39,6 +39,7 @@ export default defineConfig({
             { text: 'The mutable boundary', link: '/guide/boundary' },
             { text: 'Making your own types values', link: '/guide/extending' },
             { text: 'Hardening', link: '/guide/hardening' },
+            { text: 'Performance and scale', link: '/guide/performance' },
           ],
         },
         {

@@ -103,7 +103,7 @@ costs an occasional pause (tens of milliseconds at 100,000 distinct live
 records on V8, most of a second at a million); values that recur do not pay
 it, and neither do `ValueList`, `ValueMap` and the other collections, nor
 your own value types with a pool of their own. The
-[hardening guide](https://andershessellund.github.io/valsem/guide/hardening#large-states-memory-and-pauses)
+[performance guide](https://andershessellund.github.io/valsem/guide/performance#large-states-memory-and-pauses)
 has the measurements.
 
 ### Freezing, and Safari
@@ -129,7 +129,7 @@ which pays neither cost on any engine (its leaves are small arrays inside
 a frozen wrapper). Records, and arrays of ordinary size, are not worth the
 thought. The `skipFreezing()` suite in [BENCHMARKS.md](BENCHMARKS.md) has
 the three engines side by side; the
-[hardening guide](https://andershessellund.github.io/valsem/guide/hardening)
+[performance guide](https://andershessellund.github.io/valsem/guide/performance)
 says what the switch gives up.
 
 ## Coming from immer
@@ -293,7 +293,7 @@ so `produce` can edit your type in place, with patches.
 - **Immutable.** Everything `produce`, `intern` and the collections return is
   frozen, all the way down — unless you call `skipFreezing()`, which trades
   that enforcement for unfrozen (faster to iterate) canonical arrays; see
-  the [hardening guide](https://andershessellund.github.io/valsem/guide/hardening).
+  the [performance guide](https://andershessellund.github.io/valsem/guide/performance).
 - **Canonical.** Equal values are the same object — lineage-free: however a
   value was built, it converges on one instance.
 - **Compared by content.** `deepEqual` never throws on a *type* — mutable
@@ -337,7 +337,8 @@ depth: [getting started](https://andershessellund.github.io/valsem/guide/getting
 [`produce` and patches](https://andershessellund.github.io/valsem/guide/produce),
 [the mutable boundary](https://andershessellund.github.io/valsem/guide/boundary),
 [extending](https://andershessellund.github.io/valsem/guide/extending),
-[hardening](https://andershessellund.github.io/valsem/guide/hardening), and the
+[hardening](https://andershessellund.github.io/valsem/guide/hardening),
+[performance and scale](https://andershessellund.github.io/valsem/guide/performance), and the
 [API reference](https://andershessellund.github.io/valsem/api). For working
 on the library itself: [DESIGN.md](DESIGN.md) describes how it is built,
 [DECISIONS.md](DECISIONS.md) why, and [BENCHMARKS.md](BENCHMARKS.md) what
