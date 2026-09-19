@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Equality is ===
-    details: intern() collapses every structurally-equal value to one frozen canonical instance. After that, value equality is a pointer compare — 20–33 ns at any size.
+    details: intern() collapses every structurally-equal value to one frozen canonical instance. After that, value equality is a pointer compare — tens of nanoseconds at any size.
   - title: The immer ergonomics, canonical results
     details: produce() gives you plain mutable syntax over immutable values, and the result is canonical — edits that net out converge back to the very same base object.
   - title: Collections that dedup themselves

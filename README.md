@@ -87,8 +87,9 @@ derived.get(state);                    // a native Map lookup plus one probe —
 
 What is *not* fast is building: every value is hashed and canonicalised when
 it is created, so constructing and updating cost more than a plain copy. An
-edit to a large plain array costs a few times what immer charges, admitting
-a large API response costs a few times parsing it, and a lookup with a raw
+edit to a large plain array costs two to nine times what immer charges with
+its auto-freeze off (and far less than immer's default, which re-freezes the
+array), admitting a large API response costs four to five times parsing it, and a lookup with a raw
 (uncanonicalised) key walks it. That is the trade: a win for state that is
 compared, memoized, keyed, or kept in history more often than it is built,
 and a loss for state built once and thrown away.

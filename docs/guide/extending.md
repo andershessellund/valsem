@@ -182,7 +182,7 @@ else it drafts arrives through one protocol, and the built-in
 implements `[toDraft](parent)` and returns a *draft state* built with the
 `valsem/draft` toolkit. This is also what keeps the package small: `produce`
 never imports the collections, so a bundle that uses only `produce` carries
-none of them (8 KB gzipped), and a bundle that uses only `ValueMap` carries
+none of them (about 10 KB gzipped), and a bundle that uses only `ValueMap` carries
 no proxies.
 
 A draft state has:
