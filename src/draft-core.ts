@@ -16,7 +16,7 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
-import { same, inspectAs, type Inspect, type InspectOptions } from './shared.js';
+import { same, inspectAs, DRAFT_STATE, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
@@ -35,7 +35,7 @@ import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRe
 export const toDraft: unique symbol = Symbol.for('valsem.toDraft.v1') as any;
 
 /** @internal The property through which a draft object exposes its state. */
-export const DRAFT_STATE: unique symbol = Symbol('valsem.draftState') as any;
+export { DRAFT_STATE };
 
 // ---------------------------------------------------------------------------
 // Patch vocabulary

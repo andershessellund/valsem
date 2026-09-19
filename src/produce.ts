@@ -65,6 +65,7 @@ import {
   _runInScope,
   _currentScope,
   _setCoreDraftFactories,
+  _setCoreSnapshot,
   isPlainObject,
   type DraftState,
   type Patch,
@@ -1202,11 +1203,32 @@ export type RecipeReturn<T> =
   | Draft<T>
   | (undefined extends T ? typeof nothing : never);
 
+/**
+ * A draft given as a BASE stands for the value it would be right now, its
+ * snapshot: `produce(draft, recipe)` is `produce(current(draft), recipe)`.
+ * So a function built on produce behaves inside someone else's recipe as it
+ * does anywhere: it takes a value, returns a value, and edits nothing, and
+ * the caller uses its result (`d.sub = castDraft(step(d.sub))`). The caller
+ * need not know that `step` uses produce, which rejecting a draft would have
+ * required; and running the recipe on the caller's draft in place would make
+ * produce mutate its argument and return a live draft typed as a value.
+ *
+ * Before this, a plain draft happened to work (the inner draft read through
+ * the outer proxy) and a collection draft, or a plain one holding one, failed
+ * with "DraftList has no [hashCode]".
+ */
+function valueOfBase<T>(base: T): T {
+  if (stateOf(base) === undefined) return base;
+  _setCoreSnapshot(_snapshotCore); // what current.ts registers; a produce-only bundle has not
+  return snapshotOf(base) as T;
+}
+
 function runProduce<T>(
-  base: T,
+  given: T,
   recipe: (draft: Draft<T>) => RecipeReturn<T>,
   recorder: PatchRecorder | undefined,
 ): T {
+  const base = valueOfBase(given);
   return _runInScope(() => {
     let rootState: DraftState | undefined;
     let draft: unknown = base;
@@ -1383,7 +1405,7 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
   // Patches apply strictly in sequence. A root `replace` ends the current
   // run of draft edits (they must land on the value as it was BEFORE the
   // replacement) and starts the next run on the replacement value.
-  let current: unknown = base;
+  let current: unknown = valueOfBase(base); // a draft stands for the value it is right now, as in produce
   let run: Patch[] = [];
   const flush = (): void => {
     if (run.length === 0) return;
