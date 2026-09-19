@@ -6,6 +6,7 @@ import {
   applyPatches,
   nothing,
   isDraft,
+  draft,
   type Patch,
 } from './produce.js';
 import { DraftMap } from './draft-map.js';
@@ -234,6 +235,20 @@ describe('produce — grafts and aliasing', () => {
     });
     expect(next.a).toBe(next.b);
     expect(next).toBe(intern({ a: { n: 5 }, b: { n: 5 } }));
+  });
+
+  it('copy-on-write through a read reaches a canonical assigned into the slot, not one inside the recipe’s own literal', () => {
+    const c = intern({ y: 1 });
+    const base = intern({ k: null }) as { k: unknown };
+    // Assigned into the slot: read back as a draft, edited as a copy.
+    expect(produce(base, (d) => { d.k = c; (d.k as { y: number }).y = 2; })).toBe(intern({ k: { y: 2 } }));
+    // Inside raw material the recipe built: reached through that raw object, so
+    // the write goes to the frozen canonical and the engine refuses it. Loud,
+    // and `c` is safe; the docs used to promise this case never throws.
+    expect(() => produce(base, (d) => { d.k = { inner: c }; (d.k as { inner: { y: number } }).inner.y = 2; })).toThrow(TypeError);
+    expect(c.y).toBe(1);
+    // draft(c) is how such material is opted in.
+    expect(produce(base, (d) => { const e = draft(c); e.y = 2; d.k = { inner: e }; })).toBe(intern({ k: { inner: { y: 2 } } }));
   });
 });
 

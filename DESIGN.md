@@ -428,8 +428,10 @@ and does not pretend to be (D29).
   `[0, length)`, so those reads return `T`, never `undefined` for "not
   there". An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
   an integer in `[0, length]`, not counted from the end. A *range*
-  (`slice`'s bounds, `splice`'s count) keeps `Array`'s clamping whole: it
-  has an answer wherever it points, the part that exists. `Array`'s
+  has an answer wherever it points, the part that exists: `slice`'s bounds
+  keep `Array`'s clamping whole, and `splice`'s count is an amount, an
+  integer ≥ 0 or `Infinity`, clamped to what is there (a negative one
+  throws). `Array`'s
   coercion is nowhere: `NaN`, `1.5` and `'2'` throw. `first()`/`last()`
   answer `undefined` when empty; keyed lookups are queries and a miss is an
   answer (D45).
@@ -678,9 +680,14 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   made on first write (§7.3), an `assigned` map (key → set/deleted) and a
   `drafted` set (keys whose base value was child-drafted on read). Reads of
   a draftable base value hand out a child draft; reads of the recipe's own
-  assigned material return it raw (the immer rule), except frozen or
-  canonical assignments, which are drafted copy-on-write so mutating
-  through the read never throws. Writing a protocol symbol is rejected.
+  assigned material return it raw (the immer rule), except a frozen or
+  canonical value assigned *into the slot itself* (`d.k = c`), which is
+  drafted copy-on-write, so `d.k.y = 2` edits a copy instead of throwing. A
+  canonical nested inside the recipe's own raw literal (`d.k = { inner: c }`)
+  is reached through that raw object, not through a draft, so `d.k.inner.y =
+  2` is a write to a frozen object and throws the engine's `TypeError`:
+  loud, and `c` is safe; `draft(c)` opts it in. Writing a protocol symbol is
+  rejected.
 - **Plain arrays: `Proxy`** with a **virtual mode**: point edits
   (`vEdits`) plus an appended tail (`vTail`) over the base; index reads and
   writes and `push` never copy, and `pop` stays virtual while the appended
