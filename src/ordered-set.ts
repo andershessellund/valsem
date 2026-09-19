@@ -18,6 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
+import { elementIndex, insertionIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -120,17 +121,18 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     return ValueList._indexOf(this.#list, intern(value), (k) => this.#anchor(k));
   }
 
-  /** The member at `index`, or `undefined` out of range. */
-  at(index: number): T | undefined {
-    return this.#list.get(index);
+  /** The member at `index`, which must name one: an integer in `[0, size)`, or a `RangeError` (not counted from the end: that is {@link last}). */
+  at(index: number): T {
+    return this.#list.get(elementIndex(index, this.#list.length, 'OrderedSet.at'));
   }
   /** The first member, or `undefined` when empty. */
   first(): T | undefined {
-    return this.#list.get(0);
+    return this.#list.length === 0 ? undefined : this.#list.get(0);
   }
   /** The last member, or `undefined` when empty. */
   last(): T | undefined {
-    return this.#list.get(this.#list.length - 1);
+    const n = this.#list.length;
+    return n === 0 ? undefined : this.#list.get(n - 1);
   }
 
   /** Append `value` (interned on entry). Returns `this` if a structural equal is present. */
@@ -162,9 +164,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
    */
   insertAt(index: number, value: T): OrderedSet<T> {
     const n = this.#list.length;
-    if (!Number.isInteger(index) || index < 0 || index > n) {
-      throw new RangeError(`OrderedSet.insertAt: index ${index} out of range [0, ${n}]`);
-    }
+    insertionIndex(index, n, 'OrderedSet.insertAt');
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) {

@@ -39,9 +39,9 @@ describe('RawArray', () => {
     holey[2] = 3; // a hole at index 1
     const view = RawArray.from(holey);
     expect(view.length).toBe(3);
-    expect(view.get(1)).toBeUndefined();
-    expect(view.get(3)).toBeUndefined();
-    expect(view.get(-1)).toBeUndefined();
+    expect(view.get(1)).toBeUndefined(); // a hole is an element, and it is undefined
+    expect(() => view.get(3)).toThrow(RangeError); // no element there
+    expect(() => view.get(-1)).toThrow(RangeError);
     expect(view.slice(-2)).toBe(intern([undefined, 3]));
     expect(view.slice(1, 100)).toBe(intern([undefined, 3]));
     expect(view.slice(5, 2)).toBe(intern([]));

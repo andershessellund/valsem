@@ -452,6 +452,91 @@ holding or dropping the returned reference. Properties are O(1); methods
 may cost, so the O(n) step is a method. Native `Map`/`Set` are non-values;
 `new Map(m)` is the explicit mutable-copy escape. DESIGN.md §6.4.
 
+### D45. A position is checked: not coerced, and not clamped where it names a place
+
+A positional argument on valsem's own collections is checked by what it
+names, and a failed check is a `RangeError` thrown before anything is
+touched:
+
+- **an element** (`get`, `at`, `keyAt`, `valueAt`, `set`, `setMany`,
+  `remove`, on the values and their drafts, and `RawArray.get`): an integer
+  in `[0, length)`. The reads return `T`, not `T | undefined`;
+- **an insertion point** (`insert`, `insertAt`, and `splice`'s `start`): an
+  integer in `[0, length]`, not counted from the end;
+- **a range** (`slice`'s bounds, `splice`'s count): any integer or ±Infinity,
+  with `Array`'s clamping whole: `slice(-3)`, `slice(0, 10)` of seven, a
+  count of `Infinity` for "the rest";
+- **a patch** is exact: a `list.set` index or a `list.splice` index and
+  count that do not fit the value are refused, on a `ValueList` and on a
+  plain array alike.
+
+A non-integer (`NaN`, `1.5`, `'2'`) throws in all of them. `first()` and
+`last()` have no index to get wrong and answer `undefined` when empty; a
+keyed lookup (`get(key)`, `has`, `indexOf`) is a query, and a miss is an
+answer.
+
+**Why.** This reverses an earlier choice in two steps. After a fractional
+index built a list of `undefined`s that was then interned, the index
+arguments were made to follow `Array` exactly, `ToIntegerOrInfinity`
+included, with the plain `Array` as the test oracle "for every argument
+JavaScript callers can produce", and the reads answered `undefined` for
+anything that was not an index. `Array`'s rules are three things, and only
+one is worth inheriting.
+
+*Coercion* is not: a `NaN` index is an upstream computation that went wrong
+(`list.get(list.length / 2)` on an odd list), `Array` turns it into "index
+0", and here the edit nobody chose lands in a value that is then canonical
+and shared.
+
+*Out of bounds as a quiet answer* is not either, where the argument names
+one place. A position can be known valid in advance (`0 ≤ i < length`), so
+an index that names nothing is a mistake in the caller, which is the
+conclusion most language designers reached for indexing; a key cannot, which
+is why the keyed lookups keep their `undefined` (and `ValueMap` is a
+`ReadonlyMap` by contract, D30). The quiet answers were worse than
+`undefined`: `remove(99)` was a silent no-op, `remove(-1)` deleted the last
+element, so `list.remove(items.indexOf(x))` on a miss destroyed data, and
+`ValueList.insert(99, x)` appended where `OrderedSet.insertAt(99, x)` threw.
+`get` could not tell an `undefined` element from a missing one. Throwing
+also buys the type: `get(i): T`, sound where TypeScript's own arrays are
+not, and no `!` in a loop over `length`. To probe, compare with `length`; a
+non-throwing accessor can be added at any time, the throw could not be.
+
+*Clamping a range* is: a range has an answer wherever it points, the part of
+it that exists, down to the empty list, and correct programs overshoot on
+purpose: the top ten of seven, the short last page, the window past the last
+row (`RawArray.slice(first, first + visible)` is that type's reason to
+exist), a batch drained off a queue, "the rest". The languages that throw on
+an index concede it: each ships a clamping range vocabulary beside the
+strict one (`take`/`skip`, `prefix`/`dropFirst`, `limit`), and Python, which
+raises on `l[99]`, made `l[2:99]` total on purpose. JavaScript has one name
+for that vocabulary, `slice`. But only the *extent* of an edit is a range:
+`splice`'s `start` is where a write lands, so it must exist, and counting it
+from the end is where intent and an `indexOf` miss look identical; `pop()`
+and `remove(length - 1)` say "the last one" without the ambiguity. On
+`slice`, a read, `slice(-3)` stays. A patch is never "up to": it is a
+recorded edit, and clamping one made against another base applied it
+"successfully" to the wrong value.
+
+On a plain array in a recipe, the mutators valsem intercepts (`splice`,
+`fill`, `copyWithin`) check that their index arguments are integers and keep
+`Array`'s bounds otherwise: the array is an `Array`, its reads are
+`Array.prototype`'s own, and outside a recipe valsem is not there to
+intercept anything. One call reads differently there: `splice(i, undefined,
+x)` throws, because `Array` coerces that count to 0 and the `ValueList` twin
+reads it as "through the end", and one of the two deletes data. The check
+runs before the draft is marked or copied, so a recipe that catches the
+error carries on with an untouched draft. **Rejected:** `TypeError` for
+non-numbers and `RangeError` for non-integers, as Temporal splits them: two
+error types for one mistake, and `set` and `insertAt` already answered
+`RangeError` for both. **Rejected:** negative indices in `at`, after
+`Array.prototype.at`: one rule for every element accessor is worth more than
+the namesake, and `last()` exists. **Cost.** Breaking for callers who relied
+on any of it; and `DraftList.get`'s return type is spelled `Draft<T> | (T &
+undefined)`, which is `Draft<T>` exactly, because a bare conditional type
+there is opaque to TypeScript's variance check and `ValueList<number>`
+stopped being a `ValueList<unknown>`. DESIGN.md §6.2, §7.2, §9.
+
 ### D23. Ordered collections find a key's position through content-derived anchors
 
 `OrderedMap` and `OrderedSet` are insertion-ordered twins of `ValueMap` and

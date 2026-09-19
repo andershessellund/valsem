@@ -42,6 +42,36 @@ m1.get('sp');                    // 5
 [...m1];                         // ValueMap *is* a ReadonlyMap — iterate it directly
 ```
 
+**A position is checked.** What happens to an index depends on what it
+names, and what fails throws a `RangeError` before anything is touched:
+
+- **An element** (`get`, `set`, `remove`, and `at`/`keyAt`/`valueAt` on the
+  ordered collections) must exist: an integer in `[0, length)`. So `get(i)`
+  returns a `T`, not a `T | undefined`, a loop over `length` needs no `!`,
+  and an `undefined` that comes back *is* an element. To probe, compare with
+  `length`.
+- **An insertion point** (`insert`, `insertAt`, `splice`'s `start`) is an
+  integer in `[0, length]`, never counted from the end, so the `-1` of an
+  `indexOf` miss cannot quietly mean "the last one".
+- **A range** (`slice`, and `splice`'s count) takes `Array`'s bounds whole:
+  negative counts from the end, and out of range clamps, because a range has
+  an answer wherever it points: the part of it that exists.
+- **A non-integer** (`NaN`, `1.5`, `'2'`) throws everywhere. `Array` would
+  make it index 0 or 1; here that edit would land in a canonical value.
+
+```ts
+const list = ValueList.of('a', 'b', 'c');
+list.get(1);                     // 'b', typed string
+list.get(3);                     // RangeError: ValueList.get: index 3 out of range [0, 3)
+list.remove(['a'].indexOf('z')); // RangeError: ValueList.remove: index -1 out of range [0, 3)
+list.slice(-2).toArray();        // ['b', 'c']: a range clamps, as Array's does
+list.slice(0, 10).length;        // 3
+```
+
+`first()` and `last()` have no index to get wrong and answer `undefined` on
+an empty collection; a keyed lookup (`map.get(key)`, `indexOf`) is a query,
+and a miss is an answer.
+
 ### Interop and encapsulation
 
 `ValueMap` **is** a `ReadonlyMap` — pass it anywhere one is accepted.

@@ -163,10 +163,7 @@ describe('DraftList — get, toArray, length', () => {
     produce(base, (d) => {
       expect(d.get(0)).toBe(1);
       expect(d.get(2)).toBe(3);
-      expect(d.get(3)).toBeUndefined();
-      expect(d.get(-1)).toBeUndefined();
-      expect(d.get(1.5)).toBeUndefined();
-      expect(d.get(NaN)).toBeUndefined();
+      for (const i of [3, -1, 1.5, NaN]) expect(() => d.get(i)).toThrow(RangeError);
       d.push(4);
       expect(d.get(3)).toBe(4);
       expect(d.length).toBe(4);

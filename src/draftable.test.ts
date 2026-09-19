@@ -258,6 +258,6 @@ describe('a third-party draftable', () => {
   it('Draft<T> infers the draft type from [toDraft]', () => {
     expectTypeOf<Draft<Interval>>().toEqualTypeOf<IntervalDraft>();
     expectTypeOf<Draft<{ range: Interval }>>().toEqualTypeOf<{ range: IntervalDraft }>();
-    expectTypeOf<Draft<ValueList<Interval>>['get']>().returns.toEqualTypeOf<IntervalDraft | undefined>(); // drafts all the way down
+    expectTypeOf<Draft<ValueList<Interval>>['get']>().returns.toEqualTypeOf<IntervalDraft>(); // drafts all the way down, and get() names an element, so no undefined
   });
 });

@@ -26,15 +26,68 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
 }
 
 /**
- * `ToIntegerOrInfinity` — the coercion `Array.prototype.slice`/`splice` give
- * their index arguments: fractions truncate, `NaN` (and so `undefined`) is 0,
- * `-0` is 0, infinities stay. The collections' `slice`/`splice` promise Array
- * bounds, and without this a fractional index walked the tree to a position
- * between elements and built a list of `undefined`s — which was then interned.
+ * Positional arguments are CHECKED, never coerced (D45). Three kinds, by what
+ * the argument names:
+ *
+ * - an ELEMENT ({@link elementIndex}: `get`, `at`, `set`, `remove`): an
+ *   integer in `[0, length)`. There is no element anywhere else, so there is
+ *   nothing to answer with and nothing to edit;
+ * - an INSERTION POINT ({@link insertionIndex}: `insert`, `insertAt`,
+ *   `splice`'s start): an integer in `[0, length]`. An edit lands in canonical
+ *   state, so the place it names must exist: no counting from the end, where
+ *   an `indexOf` miss (-1) would name the last element;
+ * - a RANGE ({@link indexArg} for `slice`'s bounds, {@link extentArg} for
+ *   `splice`'s count): any integer or ±Infinity, clamped as `Array` clamps
+ *   it. A range has an answer wherever it points, the part of it that exists,
+ *   and correct programs overshoot on purpose: the top ten of seven, the
+ *   short last page, "the rest".
+ *
+ * What none of them does is `Array`'s ToIntegerOrInfinity, where `NaN`
+ * becomes index 0 and `1.7` becomes 1: a non-integer is an upstream
+ * computation that went wrong, and it throws a `RangeError` everywhere.
  */
-export function toInteger(n: number): number {
-  const t = Math.trunc(n);
-  return t !== t || t === 0 ? 0 : t;
+export function indexArg(value: number, operation: string, name: string): number {
+  if (Number.isInteger(value)) return value === 0 ? 0 : value; // -0 is 0
+  if (value === Infinity || value === -Infinity) return value;
+  throw notAnInteger(value, operation, name);
+}
+
+/** How many elements: an integer ≥ 0 or Infinity ("the rest"); the caller clamps it to what is there. */
+export function extentArg(value: number, operation: string, name: string): number {
+  const n = indexArg(value, operation, name);
+  if (n < 0) throw new RangeError(`${operation}: ${name} must not be negative, got ${n}`);
+  return n;
+}
+
+/** The index of an element that exists: an integer in `[0, length)`. */
+export function elementIndex(index: number, length: number, operation: string): number {
+  if (!Number.isInteger(index)) throw notAnInteger(index, operation, 'index');
+  if (index < 0 || index >= length) throw outOfRange(index, length, operation, 'index', ')');
+  return index === 0 ? 0 : index;
+}
+
+/** A place an element can go: an integer in `[0, length]`. */
+export function insertionIndex(index: number, length: number, operation: string, name = 'index'): number {
+  if (!Number.isInteger(index)) throw notAnInteger(index, operation, name);
+  if (index < 0 || index > length) throw outOfRange(index, length, operation, name, ']');
+  return index === 0 ? 0 : index;
+}
+
+function notAnInteger(value: unknown, operation: string, name: string): RangeError {
+  return new RangeError(`${operation}: ${name} must be an integer, got ${showArg(value)}`);
+}
+
+function outOfRange(index: number, length: number, operation: string, name: string, close: ')' | ']'): RangeError {
+  return new RangeError(`${operation}: ${name} ${index} out of range [0, ${length}${close}`);
+}
+
+/** A caller's argument, for an error message: strings quoted, and nothing that can throw or run long. */
+function showArg(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'bigint') return `${value}n`;
+  if (typeof value === 'function') return 'a function';
+  if (typeof value === 'object' && value !== null) return Array.isArray(value) ? 'an array' : 'an object';
+  return String(value); // numbers, booleans, null, undefined, symbols
 }
 
 /**

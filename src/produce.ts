@@ -41,7 +41,7 @@
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
 import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
-import { toInteger } from './shared.js';
+import { indexArg } from './shared.js';
 import {
   toDraft,
   DRAFT_STATE,
@@ -459,22 +459,13 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
     splice(state, args) {
       const copy = materializeArr(state);
       const len = copy.length;
-      // Array.prototype.splice's argument rules, exactly. An index goes
-      // through ToIntegerOrInfinity (NaN, and so `undefined`, is 0), and the
-      // delete count follows how many arguments were PASSED, not their
-      // values: none removes nothing, a start alone removes through the end,
-      // an explicit `undefined` count is 0. This used to truncate: a NaN
-      // stayed NaN here while the native splice below coerced it to 0, so
-      // the recorded op disagreed with the edit, and the NaN reached the
-      // patches, which `applyPatches` rejects as malformed.
-      let start = toInteger(args[0] as number);
+      // Both are integers or ±Infinity by now (checkIndexArgs), so what is
+      // left of Array.prototype.splice's argument rules is the clamping: a
+      // negative start counts from the end, and a start alone removes
+      // through the end.
+      let start = args[0] as number;
       start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
-      const rc =
-        args.length === 0
-          ? 0
-          : args.length === 1
-            ? len - start
-            : Math.min(Math.max(toInteger(args[1] as number), 0), len - start);
+      const rc = args.length < 2 ? len - start : Math.min(Math.max(args[1] as number, 0), len - start);
       const items = args.slice(2);
       if (items.length !== rc && start + rc < len) state.opaqued = true; // survivors relocated
       const removed = copy.splice(start, rc, ...items);
@@ -504,6 +495,45 @@ function arrayIndex(prop: string | symbol): number {
 /** Mutating methods with no clean intent mapping: fall back to index diffing. */
 const OPAQUE = new Set(['sort', 'reverse', 'fill', 'copyWithin']);
 
+/**
+ * The index arguments of the intercepted mutators, and when each is checked:
+ * `always` (required), `passed` (whenever the call has that many arguments),
+ * or `defined` (an `undefined` means "the default", to Array as well).
+ *
+ * `splice`'s count is `passed` because that is the one place where Array's
+ * coercion and an honest reading disagree about `undefined`: `splice(i)`
+ * removes through the end, `splice(i, undefined)` removes NOTHING (the count
+ * is coerced to 0), and the ValueList twin reads it as "through the end". Any
+ * answer chosen silently is wrong for somebody, and one of them deletes data,
+ * so a count that is passed must be a count.
+ */
+type IndexArgRule = readonly [position: number, name: string, when: 'always' | 'passed' | 'defined'];
+const INDEX_ARGS: Record<string, readonly IndexArgRule[]> = Object.assign(
+  Object.create(null) as Record<string, readonly IndexArgRule[]>,
+  {
+    splice: [[0, 'start', 'always'], [1, 'deleteCount', 'passed']],
+    fill: [[1, 'start', 'defined'], [2, 'end', 'defined']],
+    copyWithin: [[0, 'target', 'always'], [1, 'start', 'defined'], [2, 'end', 'defined']],
+  } satisfies Record<string, readonly IndexArgRule[]>,
+);
+
+/**
+ * Check a mutator's index arguments, in place (`-0` becomes `0`), BEFORE the
+ * draft is marked or copied: an index must be an integer, never coerced
+ * (D45). A plain array in a recipe is an Array, and its reads stay the
+ * native ones; the mutators are valsem's, since it records their intent, and
+ * a `NaN` recorded as "index 0" is an edit nobody chose.
+ */
+function checkIndexArgs(method: string, args: unknown[]): void {
+  const rules = INDEX_ARGS[method];
+  if (rules === undefined) return;
+  for (const [at, name, when] of rules) {
+    if (when === 'always' || (when === 'passed' ? at < args.length : args[at] !== undefined)) {
+      args[at] = indexArg(args[at] as number, `valsem: ${method} on an array draft`, name);
+    }
+  }
+}
+
 const arrayTraps: ProxyHandler<object> = {
   get(target, prop) {
     const state = (target as [ArrayState])[0]!;
@@ -513,6 +543,7 @@ const arrayTraps: ProxyHandler<object> = {
       const captured = CAPTURED[prop];
       if (captured !== undefined) {
         return (...args: unknown[]) => {
+          checkIndexArgs(prop, args);
           for (const a of args) assertAssignable(a, state);
           markChanged(state);
           return captured(state, args);
@@ -523,6 +554,7 @@ const arrayTraps: ProxyHandler<object> = {
           prop
         ]!;
         return (...args: unknown[]) => {
+          checkIndexArgs(prop, args);
           const copy = materializeArr(state);
           markChanged(state);
           state.ops = null; // intent lost — net diff at finalize
@@ -1390,19 +1422,31 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
         else _defineRecordField(target as Rec, p.key, p.value);
         break;
       case 'record.delete':
+        if (Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (typeof p.key !== 'string' && typeof p.key !== 'symbol') throw badPatch(p.kind, 'a string or symbol key');
         delete (target as Rec)[p.key];
         break;
-      case 'list.set':
+      // The sequence ops are for sequences, and they are EXACT: a patch is a
+      // recorded edit, never "up to", so an index or a count that does not
+      // fit the array means the patch was made against another value, and
+      // clamping it would apply it "successfully" to the wrong base. (On a
+      // record, `list.set` used to write the key "0".)
+      case 'list.set': {
+        if (!Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (!Number.isInteger(p.index) || p.index < 0) throw badPatch(p.kind, 'an integer index');
-        (target as unknown[])[p.index] = p.value;
+        if (p.index >= target.length) throw misfit(p.kind, `index ${p.index}`, target.length);
+        target[p.index] = p.value;
         break;
-      case 'list.splice':
+      }
+      case 'list.splice': {
+        if (!Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (!Number.isInteger(p.index) || p.index < 0 || !Number.isInteger(p.remove) || p.remove < 0 || !Array.isArray(p.insert)) {
           throw badPatch(p.kind, 'integer index and remove counts and an insert array');
         }
-        (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
+        if (p.index + p.remove > target.length) throw misfit(p.kind, `index ${p.index}, remove ${p.remove}`, target.length);
+        target.splice(p.index, p.remove, ...(p.insert as unknown[]));
         break;
+      }
       default:
         throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
     }
@@ -1427,6 +1471,10 @@ export function _snapshotCore(state: DraftState): unknown {
   const out: Rec = {};
   for (const key of _recordKeys(src)) _defineRecordField(out, key, snapshotOf(src[key]));
   return out;
+}
+
+function misfit(kind: string, what: string, length: number): Error {
+  return new Error(`valsem: a '${kind}' patch (${what}) does not fit the array it is applied to (length ${length})`);
 }
 
 function badPatch(kind: string, expected: string): Error {
