@@ -272,11 +272,17 @@ A soak run found that the tail latency of a large valsem process is not the
 collector's but this table's. An engine rebuilds a hash table inside the one
 `set` that found it full, and a `WeakMap`'s dead entries count as full until
 then: with the live set constant and novel values interned under it, V8
-pauses 30–55 ms once per ~65k interns at 100k live canonical objects, and
+pauses 30–55 ms once per ~65k interns at 100k live canonical records, and
 700–750 ms once per ~500k at 1M (collections excluded; `_setMeta` in a CPU
 profile). Every engine does it (a bare `WeakMap`, one `set`, at 1M live
 keys: V8 120–380 ms, JavaScriptCore 23 ms, SpiderMonkey 28 ms), so it is
 what a `WeakMap` is and not a defect to wait out.
+
+Only plain records and arrays (and class instances interned through the
+global `intern`) are in the table. Collection nodes and wrappers, and the
+members of any `createInternPool`, carry their hash on the instance: a
+`ValueMap` of 1M numbers under novel sets has no operation over 18 ms
+outside a collection.
 
 **Decided:** keep D11, and say so in the guide: valsem is for application
 state, the pause is below a frame up to tens of thousands of live canonical

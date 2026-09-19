@@ -95,16 +95,16 @@ objects.
 **A pause that follows the live size.** An engine rebuilds a hash table in
 one go, inside the `set` that found it full, and the entries of collected
 objects count towards full until then. The `WeakMap` of hashes is such a
-table, with an entry per canonical object. So an application that keeps
+table, with an entry per canonical **plain record and array**. So an application that keeps
 creating *novel* values pays a pause now and then, inside an `intern` or a
-`produce`: its length follows the number of canonical objects **alive**, and
+`produce`: its length follows the number of canonical records and arrays **alive**, and
 its frequency follows how fast new ones are made. Growing is not required; a
 steady state with churn pays it too. Measured on V8, with the live set held
 constant and the collector's own pauses excluded:
 
-| live canonical objects | one pause | once per |
+| live canonical records and arrays | one pause | once per |
 | --- | --- | --- |
-| 100,000 | 30–55 ms | ~65,000 novel canonical objects |
+| 100,000 | 30–55 ms | ~65,000 novel ones |
 | 1,000,000 | 700–750 ms | ~500,000 |
 
 Every engine does this, V8 most expensively. A bare `WeakMap` under the same
@@ -113,7 +113,7 @@ V8; 6 and 23 ms on JavaScriptCore; 13 and 28 ms on SpiderMonkey.
 
 What that means:
 
-- **Up to tens of thousands of live canonical objects**, which is where
+- **Up to tens of thousands of live records and arrays**, which is where
   application state lives, the pause is below a frame and rare.
 - **Around a hundred thousand**, it is a dropped frame or two on V8, once per
   tens of thousands of new values: a bulk load shows it, interaction does not.
@@ -121,10 +121,17 @@ What that means:
   values) means pauses of most of a second every few seconds to minutes on
   V8. valsem is not the tool for that today.
 
-What counts is canonical *objects*: records, arrays, collection nodes. A
-large payload you only show a window of belongs in a
-[`RawArray`](/guide/collections#things-you-are-unlikely-to-need-—-but-if-you-do), which admits what is
-looked at and nothing else. Two designs that would remove the pause were
+What counts is plain records and arrays. The collections are not in that
+table: their nodes and wrappers carry their hash themselves and live in
+pools of their own, and so does any class you give a pool with
+[`createInternPool`](/guide/extending#interned-value-types-with-createinternpool).
+A `ValueMap` of a million numbers, with novel entries set under it, has no
+operation over 18 ms that is not the collector's, where a million small
+records pause 680 ms; the memory figure above applies to both. So at scale,
+what is bulk belongs in a collection of primitives or of pooled value
+classes, and a large payload you only show a window of belongs in a
+[`RawArray`](/guide/collections#things-you-are-unlikely-to-need-—-but-if-you-do),
+which admits what is looked at and nothing else. Two designs that would remove the pause were
 built and measured, and both cost more than they saved where valsem is
 actually used (the repository's `DECISIONS.md`, D49). The pool's own index
 does not have this problem: it is sharded, and neither stalls nor has a
