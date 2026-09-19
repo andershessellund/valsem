@@ -21,10 +21,15 @@ pnpm build       # tsc
 pnpm typecheck   # the tests' types too
 pnpm test        # vitest
 pnpm lint
+pnpm check:package   # publint and are-the-types-wrong, on the packed tarball
+pnpm docs:build      # the documentation site
 ```
 
-CI runs exactly these on Node 22 and on the latest Node. The Temporal suites
-need a runtime with a native `Temporal` and skip themselves without one.
+CI runs the first four on Node 22 and on the latest Node, and the last two
+once: they check what the tests cannot see, since the tests import from
+`src/` (the `exports` map, how the published types resolve, the docs build).
+The Temporal suites need a runtime with a native `Temporal` and skip
+themselves without one.
 
 ## Pull requests
 
