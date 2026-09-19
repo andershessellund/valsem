@@ -13,7 +13,7 @@
 // merges into the existing file and must not restamp what it did not measure.
 // ---------------------------------------------------------------------------
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
-import { environment, provenanceProblems, runtime } from './lib.mjs';
+import { environment, provenanceProblems, runtime, settle } from './lib.mjs';
 
 const SUITES = [
   'produce',
@@ -45,22 +45,6 @@ if (problems.length !== 0 && !process.argv.includes('--allow-dirty')) {
 }
 const env = environment();
 console.log(`valsem bench — ${env.runtime.name} ${env.runtime.version} (${env.runtime.engine}), ${env.machine.cpu}, commit ${env.commit}`);
-
-/**
- * Between suites: let the process settle so one suite's garbage does not
- * tax the next. The intern pool parks dead slots and drains them in idle
- * time (setImmediate here), so a synchronous benchmark loop never drains;
- * yielding a few hundred turns and collecting twice puts every suite on the
- * same footing.
- */
-async function settle() {
-  const gc = globalThis.gc ?? (typeof Bun !== 'undefined' ? () => Bun.gc(true) : null);
-  for (let round = 0; round < 3; round++) {
-    gc?.();
-    for (let i = 0; i < 100; i++) await new Promise((r) => setImmediate(r));
-  }
-  gc?.();
-}
 
 const fmt = (v) => (v === null || v === undefined ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(2)} ms` : v >= 1000 ? `${(v / 1000).toFixed(1)} µs` : `${v.toFixed(0)} ns`);
 const results = [];

@@ -1,4 +1,4 @@
-import { time, row, isBun } from '../lib.mjs';
+import { timeSettled, row, isBun } from '../lib.mjs';
 import { intern } from '../../dist/intern.js';
 import { ValueList } from '../../dist/value-list.js';
 import { RawArray } from '../../dist/raw-array.js';
@@ -33,41 +33,45 @@ transfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission r
 `,
   columns: ['per response'],
   unit: 'ns',
-  rows() {
+  async rows() {
     const rows = [];
     for (const N of [1000, 10_000]) {
       const response = (salt) => Array.from({ length: N }, (_, i) => record(i, salt));
       const text = JSON.stringify(response());
       const it = N === 1000 ? 60 : 12;
+      // Rows that admit NEW content need a fresh fixture for every call, warm-up
+      // included (time()'s default warm-up): cycled fixtures come back as pool
+      // hits — the warm-up's results are still alive in the same job.
+      const calls = it + Math.ceil(Math.min(2000, Math.max(3, it / 5)));
       const tag = `${N} × ${F}`;
-      rows.push(row(`${tag}: JSON.parse`, { 'per response': time(() => JSON.parse(text), it * 3) }));
+      rows.push(row(`${tag}: JSON.parse`, { 'per response': await timeSettled(() => JSON.parse(text), it * 3) }));
       const parsed = Array.from({ length: it }, () => JSON.parse(text));
       let k = 0;
-      rows.push(row(`${tag}: structuredClone`, { 'per response': time(() => structuredClone(parsed[k++ % it]), it) }));
+      rows.push(row(`${tag}: structuredClone`, { 'per response': await timeSettled(() => structuredClone(parsed[k++ % it]), it) }));
       setAutoFreeze(true);
-      const forImmer = Array.from({ length: it }, () => JSON.parse(text));
+      const forImmer = Array.from({ length: calls }, () => JSON.parse(text)); // freezing is done once per object: fresh ones for every call
       k = 0;
-      rows.push(row(`${tag}: immer auto-freeze walk`, { 'per response': time(() => immerProduce(forImmer[k++ % it], () => {}), it) }));
+      rows.push(row(`${tag}: immer auto-freeze walk`, { 'per response': await timeSettled(() => immerProduce(forImmer[k++], () => {}), it) }));
       let salt = 1000 + N;
-      const fresh = Array.from({ length: it }, () => response(salt++));
+      const fresh = Array.from({ length: calls }, () => response(salt++));
       k = 0;
-      rows.push(row(`${tag}: intern, all new content`, { 'per response': time(() => intern(fresh[k++ % it]), it) }));
+      rows.push(row(`${tag}: intern, all new content`, { 'per response': await timeSettled(() => intern(fresh[k++]), it) }));
       intern(response(0));
       const same = Array.from({ length: it }, () => JSON.parse(text));
       k = 0;
-      rows.push(row(`${tag}: intern, unchanged refetch (all pool hits)`, { 'per response': time(() => intern(same[k++ % it]), it) }));
+      rows.push(row(`${tag}: intern, unchanged refetch (all pool hits)`, { 'per response': await timeSettled(() => intern(same[k++ % it]), it) }));
       let salt2 = 5000 + N;
-      const partly = Array.from({ length: it }, () => { const r = response(0); for (let i = 0; i < N; i += 10) r[i] = record(i, salt2); salt2++; return r; });
+      const partly = Array.from({ length: calls }, () => { const r = response(0); for (let i = 0; i < N; i += 10) r[i] = record(i, salt2); salt2++; return r; });
       k = 0;
-      rows.push(row(`${tag}: intern, refetch with 10% of records changed`, { 'per response': time(() => intern(partly[k++ % it]), it) }));
-      const freshL = Array.from({ length: it }, () => response(salt++));
+      rows.push(row(`${tag}: intern, refetch with 10% of records changed`, { 'per response': await timeSettled(() => intern(partly[k++]), it) }));
+      const freshL = Array.from({ length: calls }, () => response(salt++));
       k = 0;
-      rows.push(row(`${tag}: ValueList.from, all new content`, { 'per response': time(() => ValueList.from(freshL[k++ % it]), it) }));
+      rows.push(row(`${tag}: ValueList.from, all new content`, { 'per response': await timeSettled(() => ValueList.from(freshL[k++]), it) }));
       const canon = intern(response(0));
-      rows.push(row(`${tag}: ValueList.from, canonical records (the list alone)`, { 'per response': time(() => ValueList.from(canon), it) }));
-      const forView = Array.from({ length: it }, () => response(salt++));
+      rows.push(row(`${tag}: ValueList.from, canonical records (the list alone)`, { 'per response': await timeSettled(() => ValueList.from(canon), it) }));
+      const forView = Array.from({ length: calls }, () => response(salt++));
       k = 0;
-      rows.push(row(`${tag}: RawArray.from + slice(0, 100) — admit only the visible window`, { 'per response': time(() => RawArray.from(forView[k++ % it]).slice(0, 100), it) }));
+      rows.push(row(`${tag}: RawArray.from + slice(0, 100) — admit only the visible window`, { 'per response': await timeSettled(() => RawArray.from(forView[k++]).slice(0, 100), it) }));
     }
     if (isBun) {
       /* same rows; nothing runtime-specific */
