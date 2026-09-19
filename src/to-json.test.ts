@@ -16,6 +16,11 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { intern } from './intern.js';
 import { produce } from './produce.js';
+import { current } from './current.js';
+import { deepHash } from './deep-hash.js';
+import { createInternPool } from './intern-pool.js';
+import { equals, hashCode, interned } from './deep-equal.js';
+import { toDraft, createDraftState, markChanged, assertUnrevoked, DRAFT_STATE, type DraftState } from './draft-core.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
@@ -202,7 +207,92 @@ describe('inside a recipe, the drafts stringify as what they hold right now', ()
     expect(asSet(Object.entries(seen))).toEqual(asSet(Object.entries(roundTrip(next) as object)));
   });
 
+  it('a draft stringifies as current(draft) does, to the character', () => {
+    produce(base, (d) => {
+      d.map.set('a', { v: 0 }); // lands before 'k' or after it, as the hash has it: the snapshot's order, not the edit's
+      d.map.get('k')!.v = 5;
+      d.set.add('0');
+      d.list.splice(1, 0, { n: 7 });
+      d.omap.insertAt(0, 'w', { v: 0 });
+      for (const k of ['list', 'map', 'set', 'omap', 'oset'] as const) {
+        expect(JSON.stringify(d[k])).toBe(JSON.stringify(current(d[k])));
+      }
+    });
+  });
+
+  it('a drafted element of a [toDraft] type of your own stringifies as its value, not as its draft object', () => {
+    // Iterating a draft hands out child drafts, and JSON.stringify cannot know
+    // what an IntervalDraft stands for: the first toJSON gave {"l":[{}]}.
+    const list = ValueList.of(Interval.of(1, 2));
+    const map = ValueMap.from([['k', Interval.of(1, 2)]]);
+    expect(JSON.stringify({ list, map })).toBe('{"list":["1..2"],"map":[["k","1..2"]]}');
+    let seen = '';
+    const next = produce({ list, map }, (d) => {
+      d.list.get(0)!.hi = 9;
+      d.map.get('k')!.hi = 9;
+      seen = JSON.stringify(d);
+    });
+    expect(seen).toBe('{"list":["1..9"],"map":[["k","1..9"]]}');
+    expect(JSON.stringify(next)).toBe(seen);
+  });
+
   it('looking is not editing: stringifying a draft changes nothing', () => {
     expect(produce(base, (d) => void JSON.stringify(d))).toBe(base);
   });
 });
+
+// A draftable value type with a JSON form of its own, as a user would write one.
+interface IntervalState extends DraftState<Interval> {
+  hi: number;
+  draft: IntervalDraft;
+}
+const intervals = createInternPool<Interval>();
+class Interval {
+  private constructor(readonly lo: number, readonly hi: number) {
+    Object.freeze(this);
+  }
+  static of(lo: number, hi: number): Interval {
+    const h = deepHash(['interval', lo, hi]);
+    return intervals.lookup(h, (c) => c.lo === lo && c.hi === hi) ?? intervals.register(new Interval(lo, hi), h);
+  }
+  get [hashCode](): number {
+    return deepHash(['interval', this.lo, this.hi]);
+  }
+  get [interned](): true {
+    return true;
+  }
+  [equals](other: unknown): boolean {
+    return other === this;
+  }
+  toJSON(): string {
+    return `${this.lo}..${this.hi}`;
+  }
+  [toDraft](parent?: DraftState): IntervalState {
+    const state = createDraftState<IntervalState>({
+      kind: 'interval',
+      parent,
+      base: this,
+      hi: this.hi,
+      draft: null as unknown as IntervalDraft,
+      finalize: (s) => Interval.of(this.lo, (s as IntervalState).hi),
+      snapshot: (s) => Interval.of(this.lo, (s as IntervalState).hi),
+    });
+    state.draft = new IntervalDraft(state);
+    return state;
+  }
+}
+class IntervalDraft {
+  declare readonly [DRAFT_STATE]: IntervalState;
+  constructor(state: IntervalState) {
+    Object.defineProperty(this, DRAFT_STATE, { value: state, enumerable: false });
+  }
+  get hi(): number {
+    return this[DRAFT_STATE].hi;
+  }
+  set hi(v: number) {
+    const s = this[DRAFT_STATE];
+    assertUnrevoked(s);
+    s.hi = v;
+    markChanged(s);
+  }
+}

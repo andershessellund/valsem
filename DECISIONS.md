@@ -613,7 +613,15 @@ snapshot. It looked free (already memoised, already under the cache law of
 D33) and measured worse in every regime: `JSON.stringify` walks a frozen
 array 1.6× slower than an unfrozen one, and 3.7× slower when the snapshot's
 first-call interning is counted (100k records: 20.3 ms against 5.6 ms). A
-fresh array also makes the cache law trivial: nothing is kept. DESIGN.md §6.2.
+fresh array also makes the cache law trivial: nothing is kept. **Rejected:**
+a draft's `toJSON` iterating the draft (`[...this]`). Iteration hands out
+child drafts, and a drafted element of a `[toDraft]` type of the user's own
+stringified as its draft object, `{}`, not as its value. A draft's JSON is
+`current(draft)`'s, through the snapshot (`snapshotOf`, not `current`
+itself, which would pull `produce` into a `ValueList`-only bundle, D7): one
+source of truth for the shapes, the result's order for the unordered
+collections, and nothing to pay for an unmodified draft, whose snapshot is
+its base. DESIGN.md §6.2.
 
 ### D21. Interning is never optional; large responses get `RawArray`
 

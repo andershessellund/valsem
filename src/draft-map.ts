@@ -169,9 +169,15 @@ export class DraftMap<K, V> {
     for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
   }
 
-  /** What `JSON.stringify` sees: what the draft holds right now, in its value twin's shape (`[key, value]` pairs). A look, not an edit. */
+  /**
+   * What `JSON.stringify` sees: the JSON of the value this draft would be
+   * right now (`[key, value]` pairs), which is `current(draft).toJSON()`. Through the
+   * snapshot and not by iterating the draft: iteration hands out child
+   * drafts, and a drafted element of a `[toDraft]` type of your own would
+   * stringify as its draft object, not as its value. A look, not an edit.
+   */
   toJSON(): [K, V][] {
-    return [...this.entries()];
+    return (snapshotOf(this) as ValueMap<K, V>).toJSON();
   }
 }
 
