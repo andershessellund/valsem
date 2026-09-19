@@ -34,6 +34,7 @@ import {
   type PatchRecorder,
 } from './draft-core.js';
 import type { OrderedMap } from './ordered-map.js';
+import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
 
 const INTERNAL = Symbol('valsem.draft-ordered-map');
@@ -118,6 +119,15 @@ export class DraftOrderedMap<K, V> {
 
   indexOf(key: K): number {
     return this.#state.work.indexOf(intern(key));
+  }
+
+  /** The keys in order, as the canonical `ValueList` of the map this draft would be right now (its snapshot). */
+  get keyList(): ValueList<K> {
+    return (snapshotOf(this) as OrderedMap<K, V>).keyList;
+  }
+  /** The values in key order, likewise: values, not drafts. */
+  get valueList(): ValueList<V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).valueList;
   }
 
   /**

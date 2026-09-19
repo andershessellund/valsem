@@ -110,6 +110,39 @@ export class DraftSet<T> {
     return this.values();
   }
 
+  // The set algebra does not edit: it answers about the VALUE this draft
+  // would be right now (its snapshot, `current(draft)`) and gives back
+  // values. `d.tags = d.tags.union(more)` keeps a result.
+
+  /** This set as it is right now, with `other`'s members: a `ValueSet`, as `ValueSet.union`. */
+  union<U>(other: Iterable<U>): ValueSet<T | U> {
+    return (snapshotOf(this) as ValueSet<T>).union(other);
+  }
+  /** The members also in `other`, as `ValueSet.intersection`. */
+  intersection<U>(other: Iterable<U>): ValueSet<T & U> {
+    return (snapshotOf(this) as ValueSet<T>).intersection(other);
+  }
+  /** The members not in `other`, as `ValueSet.difference`. */
+  difference<U>(other: Iterable<U>): ValueSet<T> {
+    return (snapshotOf(this) as ValueSet<T>).difference(other);
+  }
+  /** The members in exactly one of the two, as `ValueSet.symmetricDifference`. */
+  symmetricDifference<U>(other: Iterable<U>): ValueSet<T | U> {
+    return (snapshotOf(this) as ValueSet<T>).symmetricDifference(other);
+  }
+  /** Whether every member is in `other`, as `ValueSet.isSubsetOf`. */
+  isSubsetOf(other: Iterable<unknown>): boolean {
+    return (snapshotOf(this) as ValueSet<T>).isSubsetOf(other);
+  }
+  /** Whether every member of `other` is in this set, as `ValueSet.isSupersetOf`. */
+  isSupersetOf(other: Iterable<unknown>): boolean {
+    return (snapshotOf(this) as ValueSet<T>).isSupersetOf(other);
+  }
+  /** Whether no member is in `other`, as `ValueSet.isDisjointFrom`. */
+  isDisjointFrom(other: Iterable<unknown>): boolean {
+    return (snapshotOf(this) as ValueSet<T>).isDisjointFrom(other);
+  }
+
   /** `[value, value]` pairs, as `Set.prototype.entries` gives them. */
   *entries(): IterableIterator<[T, T]> {
     for (const v of this.values()) yield [v, v];

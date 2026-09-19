@@ -219,6 +219,33 @@ export class DraftList<T> implements Iterable<T> {
     return this.length;
   }
 
+  /**
+   * Set many elements at once: `[index, value]` pairs, the last write to an
+   * index winning, as `ValueList.setMany`. Every index is checked before
+   * anything is written, so a bad one leaves the draft untouched.
+   */
+  setMany(edits: readonly (readonly [number, T])[]): this {
+    const s = this.#state;
+    const len = s.work.length + s.tail.length;
+    for (const [i] of edits) elementIndex(i, len, 'DraftList.setMany');
+    for (const [i, v] of edits) this.set(i, v);
+    return this;
+  }
+
+  // What does not edit answers about the VALUE this draft would be right now
+  // (its snapshot, `current(draft)`), and gives back values, not drafts: only
+  // `get` hands out a draft. Assign the result into a slot to keep it.
+
+  /** Elements `[start, end)` of the list as it is right now, as `ValueList.slice`: a value, not a draft. */
+  slice(start?: number, end?: number): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).slice(start, end);
+  }
+
+  /** The list as it is right now, followed by `other`, as `ValueList.concat`: a value, not a draft. */
+  concat(other: ValueList<T>): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).concat(other);
+  }
+
   /** Visit every element in index order, as it is right now (iteration's view: a child already drafted comes as its draft). */
   forEach(fn: (value: T, index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
     let i = 0;
