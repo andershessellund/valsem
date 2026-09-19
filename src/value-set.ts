@@ -34,8 +34,6 @@ import {
 
 const CFG = createTrieConfig(1);
 
-/** Canonical wrapper per root — ephemeron-collected with the root itself. */
-const wrappers = new WeakMap<HNode, ValueSet<unknown>>();
 
 /**
  * The `ReadonlySet` contract minus the set algebra, whose lib signatures
@@ -102,10 +100,10 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   }
 
   static #for<T>(root: HNode): ValueSet<T> {
-    const hit = wrappers.get(root);
+    const hit = root.w;
     if (hit !== undefined) return hit as ValueSet<T>;
     const fresh = new ValueSet<unknown>(root);
-    wrappers.set(root, fresh);
+    root.w = fresh; // the root holds its wrapper: the WeakMap's ephemeron lifetime, without the WeakMap
     return fresh as ValueSet<T>;
   }
 

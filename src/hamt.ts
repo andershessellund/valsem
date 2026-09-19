@@ -56,6 +56,8 @@ export interface BNode {
   readonly nmap: number;
   /** Entry slots (stride each, in bit order), then child slots (in bit order). */
   readonly slots: readonly unknown[];
+  /** The canonical collection wrapper whose root this node is (set lazily by the owning class). */
+  w: object | undefined;
 }
 
 /** Collision node: entries whose keys share one full 32-bit hash. */
@@ -67,6 +69,8 @@ export interface CNode {
   readonly khash: number;
   /** Entry slots (stride each), in canonical member order. */
   readonly slots: readonly unknown[];
+  /** The canonical collection wrapper whose root this node is (set lazily by the owning class). */
+  w: object | undefined;
 }
 
 export type HNode = BNode | CNode;
@@ -109,7 +113,7 @@ function consB(cfg: TrieConfig, dmap: number, nmap: number, slots: unknown[]): B
     (c) => c.dmap === dmap && c.nmap === nmap && sameSlots(c.slots, slots),
   );
   if (found !== undefined) return found;
-  return cfg.bpool.register({ t: 0, h, n, dmap, nmap, slots }, h);
+  return cfg.bpool.register({ t: 0, h, n, dmap, nmap, slots, w: undefined }, h);
 }
 
 function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
@@ -117,7 +121,7 @@ function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
   for (let i = 0; i < slots.length; i++) h = mix(h, internHash(slots[i]));
   const found = cfg.cpool.lookup(h, (c) => c.khash === khash && sameSlots(c.slots, slots));
   if (found !== undefined) return found;
-  return cfg.cpool.register({ t: 1, h, n: slots.length / cfg.stride, khash, slots }, h);
+  return cfg.cpool.register({ t: 1, h, n: slots.length / cfg.stride, khash, slots, w: undefined }, h);
 }
 
 export function createTrieConfig(stride: Stride): TrieConfig {

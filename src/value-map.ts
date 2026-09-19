@@ -40,8 +40,6 @@ import {
 
 const CFG = createTrieConfig(2);
 
-/** Canonical wrapper per root — ephemeron-collected with the root itself. */
-const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
 
 /**
  * Persistent (immutable) map with structural identity.
@@ -84,10 +82,10 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   static #for<K, V>(root: HNode): ValueMap<K, V> {
-    const hit = wrappers.get(root);
+    const hit = root.w;
     if (hit !== undefined) return hit as ValueMap<K, V>;
     const fresh = new ValueMap<unknown, unknown>(root);
-    wrappers.set(root, fresh);
+    root.w = fresh; // the root holds its wrapper: the WeakMap's ephemeron lifetime, without the WeakMap
     return fresh as ValueMap<K, V>;
   }
 
