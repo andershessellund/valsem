@@ -1098,6 +1098,50 @@ on refetched data, update→detect→patch, memory under history); and a
 `ValueList` win on a plain-data benchmark must never lead the marketing
 (the Immutable.js trap). DESIGN.md §8.
 
+### D51. Three optimisations measured and not taken (performance review, 2026-09)
+
+An external review proposed seven patches. Four went in (the benchmark
+harness, D50, and the two anchor changes in D23). These three did not. All
+figures are bursts of operations per macrotask on pinned hash seeds, medians
+of four paired runs, noise ±1–2%.
+
+**A batched finalize for `DraftOrderedMap`** (`OrderedMap._setValues`: the
+draft's value edits in one `ValueList.setMany` and one trie descent, not a
+persistent `set` per key). Real: `produce` over a 10k `OrderedMap` with
+100 sets and 10 deletes −27%, with 10 sets and one delete −26% on V8, −18%
+on JavaScriptCore. Not taken: it is a second write path into `OrderedMap`,
+with its own dedupe, its own interning and a precondition (every key
+present) that only one caller can promise, visible in the published
+declarations, for the draft of the least used collection. 0.53 KB minified.
+If ordered drafts with many edits turn out to matter to someone, this is
+the first thing to take, and it fits on the batched descent D23 now has.
+
+**Element hashes kept on `ValueList` leaves** (`hs`, so `set`, `splice`,
+`concat` and `setMany` stop rehashing the elements they re-chunk). Real for
+lists of records, where each rehash is a `WeakMap` lookup: `set` at 10k
+−24%, and −13% for numbers; `insert` −5%; `push` and the list draft
+unchanged; −10% to −12% on JavaScriptCore. Not taken: a double per element
+per distinct leaf, about 14 bytes, which is +56% retained heap for a list
+of a million numbers (25 → 40 MB), and memory is the cost valsem already
+asks its users to accept (the guide's Performance and scale page). A
+variant that keeps hashes only on leaves holding objects would spend the
+memory where the rehash is dear; not built.
+
+**Small inlinable entries for `intern` and `deepHash`** (primitives inline,
+objects out of line, so element and field loops make no call per
+primitive). The review measured −15% to −20% interning a 10,000-number
+array on a 2-vCPU Xeon. Here (M2 Pro, the machine the published numbers
+come from): +4% on that row, −2% on records, nothing elsewhere. Not taken:
+a gain that depends on the machine is not one to restructure two entry
+points for.
+
+The same review independently reached D49's conclusion about a stamped
+meta (`{...rec}` 3.5–4.4× slower with a private field on the source), and
+measured where an update's time goes: the weak pool is about half of every
+collection update (no pool at all: −50%; strong references: −29%; no
+`FinalizationRegistry`: −25% on a map update). Those are bounds on D2 and
+D31, not proposals.
+
 ### D41. `valsem/binding` is small and semver-covered; there is no "is this a value" probe
 
 `valsem/binding` exports `defineRecordField` and `mutableBuiltinReason`.
