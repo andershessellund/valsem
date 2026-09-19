@@ -1375,6 +1375,28 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
     run = [];
     current = produce(current, (draft) => applyRun(draft, batch));
   };
+  // Patches may come from anywhere (a wire, a store): what is not a list of
+  // patches is said to be so, before any of it is applied, not left to fail
+  // as "patches is not iterable" or "cannot read properties of null".
+  const given: unknown = patches;
+  if (given === null || typeof given !== 'object' || typeof (given as Iterable<unknown>)[Symbol.iterator] !== 'function') {
+    const kind = given !== null && typeof given === 'object' ? (given as { kind?: unknown }).kind : undefined;
+    throw new TypeError(
+      typeof kind === 'string'
+        ? `valsem: applyPatches expects a list of patches, got a single '${kind}' patch — wrap it in an array`
+        : `valsem: applyPatches expects a list of patches, got ${describeArg(given)}`,
+    );
+  }
+  let at = 0;
+  for (const p of patches as Iterable<unknown>) {
+    const loose = p as { kind?: unknown; path?: unknown } | null;
+    if (loose === null || typeof loose !== 'object' || typeof loose.kind !== 'string' || !Array.isArray(loose.path)) {
+      throw new TypeError(
+        `valsem: malformed patch at index ${at} — expected an object with a \`kind\` string and a \`path\` array, got ${describeArg(p)}`,
+      );
+    }
+    at++;
+  }
   for (const p of patches) {
     if (p.kind === 'replace' && p.path.length === 0) {
       flush();
@@ -1493,6 +1515,14 @@ export function _snapshotCore(state: DraftState): unknown {
 
 function misfit(kind: string, what: string, length: number): Error {
   return new Error(`valsem: a '${kind}' patch (${what}) does not fit the array it is applied to (length ${length})`);
+}
+
+/** What a caller handed in, for an error message: short, and nothing that can throw. */
+function describeArg(value: unknown): string {
+  if (value === null || typeof value !== 'object') return typeof value === 'string' ? JSON.stringify(value) : String(value);
+  if (Array.isArray(value)) return 'an array';
+  const kind = (value as { kind?: unknown }).kind;
+  return typeof kind === 'string' ? `a '${kind}' patch without a path array` : 'an object without a `kind`';
 }
 
 function badPatch(kind: string, expected: string): Error {
