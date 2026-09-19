@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { intern } from './intern.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 
 /**
  * Mutable set with value membership: `{ x: 1, y: 2 }` and `{ y: 2, x: 1 }`
@@ -76,6 +77,15 @@ export class HashSet<T> {
 
   [Symbol.iterator](): IterableIterator<T> {
     return this.#set.values();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `HashSet(n)` and the contents, where private state would print as `HashSet {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('HashSet', this.size, () => new Set(this), depth, options, inspect);
+  }
+  /** `[object HashSet]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'HashSet';
   }
 
   /** What `JSON.stringify` sees: the members in insertion order, as a fresh plain array, where a native `Set` gives `{}`. */

@@ -444,6 +444,14 @@ and does not pretend to be (D29).
   draft twins the same. A fresh unfrozen array per call, nothing kept. A
   view and not a wire format: the unordered collections' output order
   follows the per-process hash seed (D46).
+- **A printed form.** Each class, and each draft twin, answers Node's
+  `util.inspect` hook (`Symbol.for('nodejs.util.inspect.custom')`, so nothing
+  is imported) with its name, size and contents in the form Node gives the
+  native collections, `ValueList(2) [ 1, 2 ]`, where private state would
+  print as `ValueList {}`; a revoked draft prints `[revoked DraftList]`
+  where every other access throws. A `Symbol.toStringTag` getter gives
+  `[object ValueList]`, the name a minifier cannot take. About 0.5 KB
+  minified for one collection, 1.5 KB for all of them.
 
 ### 6.3 `ValueMap` / `ValueSet`: the hash-consed CHAMP trie
 

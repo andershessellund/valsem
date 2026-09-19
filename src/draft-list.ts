@@ -32,10 +32,11 @@ import {
   type PatchPath,
   type PatchRecorder,
   type SeqOp,
+  inspectDraft,
 } from './draft-core.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { extentArg, elementIndex, insertionIndex } from './shared.js';
+import { extentArg, elementIndex, insertionIndex, INSPECT, type Inspect, type InspectOptions } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -193,6 +194,11 @@ export class DraftList<T> implements Iterable<T> {
     }
     for (let j = 0; j < values.length; j++) s.overlay.set(at + j, { v: values[j], assigned: true });
     return removed as T[];
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectDraft('DraftList', this, () => this.length, () => [...this], depth, options, inspect);
   }
 
   *[Symbol.iterator](): IterableIterator<T> {

@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, indexArg, extentArg, elementIndex, insertionIndex } from './shared.js';
+import { same, sameSlots, IteratorBase, indexArg, extentArg, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -677,6 +677,15 @@ export class ValueList<T> implements Iterable<T> {
     const out: T[] = [];
     this.forEach((v) => out.push(v));
     return out;
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `ValueList(n)` and the contents, where private state would print as `ValueList {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('ValueList', this.length, () => this.toJSON(), depth, options, inspect);
+  }
+  /** `[object ValueList]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'ValueList';
   }
 
   [Symbol.iterator](): ArrayIterator<T> {

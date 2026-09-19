@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { intern } from './intern.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 
 /**
  * Mutable map with value-keyed entries: `{ table: 'users', id: 1 }` and
@@ -108,6 +109,15 @@ export class HashMap<K, V> {
 
   [Symbol.iterator](): IterableIterator<[K, V]> {
     return this.#map.entries();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `HashMap(n)` and the contents, where private state would print as `HashMap {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('HashMap', this.size, () => new Map(this), depth, options, inspect);
+  }
+  /** `[object HashMap]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'HashMap';
   }
 
   /**

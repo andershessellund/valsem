@@ -17,7 +17,9 @@ import {
   type PatchPath,
   type PatchRecorder,
   snapshotOf,
+  inspectDraft,
 } from './draft-core.js';
+import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
 import type { ValueSet } from './value-set.js';
 
 const INTERNAL = Symbol('valsem.draftInternal');
@@ -108,6 +110,11 @@ export class DraftSet<T> {
 
   [Symbol.iterator](): IterableIterator<T> {
     return this.values();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectDraft('DraftSet', this, () => this.size, () => new Set(this), depth, options, inspect);
   }
 
   forEach(fn: (value: T, value2: T, set: DraftSet<T>) => void, thisArg?: unknown): void {

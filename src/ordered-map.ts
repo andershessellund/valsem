@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, elementIndex, insertionIndex } from './shared.js';
+import { same, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -245,6 +245,15 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const out: [K, V][] = [];
     this.#keys.forEach((k, i) => out.push([k, vals[i] as V]));
     return out;
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `OrderedMap(n)` and the contents, where private state would print as `OrderedMap {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('OrderedMap', this.size, () => new Map(this), depth, options, inspect);
+  }
+  /** `[object OrderedMap]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'OrderedMap';
   }
 
   /** The `produce` draft protocol: a {@link DraftOrderedMap} over this map. */
