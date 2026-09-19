@@ -95,8 +95,11 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     return i;
   }
 
-  #reanchor(root: HNode, keys: ValueList<K>, consed: readonly CNode[]): HNode {
-    return consed.length === 0 ? root : applyAnchorUpdates(CFG, root, ValueList._anchorUpdates(consed, keys));
+  /** The trie after an edit at `at` made `keys` the key list, consing `consed`; `this` is the map before it. */
+  #reanchor(root: HNode, keys: ValueList<K>, consed: readonly CNode[], at: number): HNode {
+    return consed.length === 0
+      ? root
+      : applyAnchorUpdates(CFG, root, ValueList._anchorUpdates(consed, keys, this.#keys as ValueList<unknown>, at));
   }
 
   /** Number of entries. */
@@ -177,7 +180,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const { result: keys, consed } = ValueList._record(() => this.#keys.push(k));
     const vals = this.#vals.push(v);
     const root = trieInsert(CFG, this.#root, 0, h, [k, v, _ANCHOR_TAIL])!.node;
-    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed));
+    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed, this.#keys.length));
   }
 
   /** Remove a structurally equal `key`. Returns `this` if absent. */
@@ -189,7 +192,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const { result: keys, consed } = ValueList._record(() => this.#keys.remove(i));
     const vals = this.#vals.remove(i);
     const root = trieRemove(CFG, this.#root, 0, h, k)!.node as HNode;
-    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed));
+    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed, i));
   }
 
   /**
@@ -210,7 +213,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const { result: keys, consed } = ValueList._record(() => this.#keys.insert(index, k));
     const vals = this.#vals.insert(index, v);
     const root = trieInsert(CFG, this.#root, 0, h, [k, v, _ANCHOR_TAIL])!.node;
-    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed));
+    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed, index));
   }
 
   /** Iterate the keys in order. */

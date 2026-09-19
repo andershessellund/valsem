@@ -5,8 +5,8 @@
 // ---------------------------------------------------------------------------
 
 import { internHash } from './intern.js';
-import { same, IteratorBase } from './shared.js';
-import { trieGet, trieInsert, NOT_FOUND, type HNode, type TrieConfig } from './hamt.js';
+import { IteratorBase } from './shared.js';
+import { trieSetLast, type HNode, type TrieConfig } from './hamt.js';
 
 /** The anchor of each member from a full-build update map; every member must have one. */
 export function anchorsFor(members: readonly unknown[], updates: Map<unknown, unknown>): unknown[] {
@@ -21,21 +21,26 @@ export function anchorsFor(members: readonly unknown[], updates: Map<unknown, un
 /**
  * Apply anchor `updates` (key → anchor) to `root`, whose entries end in an
  * anchor slot. Keys the trie does not hold are skipped — a superseded node
- * may name a key that was just removed — and so are unchanged anchors, at
- * the cost of one lookup, which is what most updates after an edit are.
+ * may name a key that was just removed — and so are unchanged anchors. One
+ * batched descent ({@link trieSetLast}): each touched trie node is rebuilt
+ * and consed once, however many of its entries' anchors moved.
  */
 export function applyAnchorUpdates(cfg: TrieConfig, root: HNode, updates: Map<unknown, unknown>): HNode {
-  const stride = cfg.stride;
+  const n = updates.size;
+  if (n === 0) return root;
+  const hs = new Array<number>(n);
+  const ks = new Array<unknown>(n);
+  const vs = new Array<unknown>(n);
+  const ids = new Array<number>(n);
+  let j = 0;
   for (const [k, a] of updates) {
-    const h = internHash(k);
-    const cur = trieGet(cfg, root, h, k, 0, stride - 1);
-    if (cur === NOT_FOUND || same(cur, a)) continue;
-    const entry: unknown[] = [k];
-    for (let t = 1; t < stride - 1; t++) entry.push(trieGet(cfg, root, h, k, 0, t));
-    entry.push(a);
-    root = trieInsert(cfg, root, 0, h, entry)!.node;
+    hs[j] = internHash(k);
+    ks[j] = k;
+    vs[j] = a;
+    ids[j] = j;
+    j++;
   }
-  return root;
+  return trieSetLast(cfg, root, 0, hs, ks, vs, ids);
 }
 
 /** `[value, value]` pairs from one iterator — what `ReadonlySet.entries` yields (no iterator helper needed). */

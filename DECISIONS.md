@@ -676,10 +676,24 @@ delta: a key deleted and set back to the same value moved to the end, and
 version built a working `OrderedSet` from the key list at draft creation,
 an O(n) setup that put a one-edit `produce` at 3 ms on a 10k map; the draft
 now applies structural ops to the base persistently as they happen.
-**Backlog.** Skip the contributions of a consed node that is pointer-equal
-to the old tree's node at that first element (the no-op lookups), and batch
-the trie update for the changed anchors; together they would take a delete
-to roughly the two list removals. DESIGN.md §6.5.
+**The anchor update, as built** (both were this entry's backlog). The
+candidates an edit's consed nodes report are first cut down to the ones
+that moved: a key's anchor has one contributor, the node where it starts a
+non-first kid, and a collection's stored anchors are exactly those of its
+key list, so whatever the *previous* list's path to the edit, its right
+spine, its tail and its root imply is already in the trie, and a candidate
+equal to it is dropped without a lookup (187 → 14 per middle delete at 10k
+keys, 189 → 6 per `insertAt`). Any node of the previous tree states true
+facts about the previous anchors, so the filter cannot drop an update that
+is needed, whichever nodes it consults. What is left goes into the trie in
+one batched descent (`trieSetLast`): keys grouped by hash bits, each touched
+node rebuilt and consed once, the shape untouched since no entry comes or
+goes. Measured in bursts on pinned hash seeds, medians of four paired runs:
+`OrderedMap.delete` at 10k −28%, `insertAt` −31%, `OrderedSet.delete` −30%
+on V8, −30% and −38% on JavaScriptCore; the filter is most of it (the
+batched descent alone: −5% to −14%, and nothing on some seeds). 1.27 KB
+minified, 0.49 KB gzipped. What remains of a delete is mostly the two list
+re-chunks. From an external performance review, 2026-09-19. DESIGN.md §6.5.
 
 ### D6. Iteration on explicit stacks
 

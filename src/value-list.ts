@@ -760,7 +760,12 @@ export class ValueList<T> implements Iterable<T> {
    * these to entries that still exist (and skipping unchanged ones) brings
    * an ordered collection's anchors up to date.
    */
-  static _anchorUpdates(consed: readonly CNode[], next: ValueList<unknown>): Map<unknown, unknown> {
+  static _anchorUpdates(
+    consed: readonly CNode[],
+    next: ValueList<unknown>,
+    prev?: ValueList<unknown>,
+    at?: number,
+  ): Map<unknown, unknown> {
     const out = new Map<unknown, unknown>();
     for (let c = 0; c < consed.length; c++) {
       const node = consed[c]!;
@@ -774,7 +779,41 @@ export class ValueList<T> implements Iterable<T> {
     if (next.#root !== null) out.set(next.#root.first, _ANCHOR_ROOT);
     const tail = next.#tail;
     for (let i = 0; i < tail.length; i++) out.set(tail[i], _ANCHOR_TAIL);
+    if (prev !== undefined) ValueList.#dropUnchanged(out, prev, at ?? prev.length);
     return out;
+  }
+
+  /**
+   * Drop from `out` the updates `prev` already implies, without a trie
+   * lookup each: an ordered collection's stored anchors are exactly those
+   * of its key list, and a key's anchor comes from ONE node, the one where
+   * it starts a non-first kid (a leaf: where it is a non-first element). So
+   * every anchor the nodes on `prev`'s path to `at` and on its right spine
+   * contribute is known, and so are its tail's and its root's. An edit
+   * re-chunks only around its cut and at the list end, which is where the
+   * consed nodes are: most of their contributions are these, unchanged.
+   */
+  static #dropUnchanged(out: Map<unknown, unknown>, prev: ValueList<unknown>, at: number): void {
+    const drop = (k: unknown, a: unknown): void => {
+      if (out.has(k) && same(out.get(k), a)) out.delete(k);
+    };
+    const tail = prev.#tail;
+    for (let i = 0; i < tail.length; i++) drop(tail[i], _ANCHOR_TAIL);
+    const root = prev.#root;
+    if (root === null) return;
+    drop(root.first, _ANCHOR_ROOT);
+    const visit = (node: CNode): void => {
+      const kids = node.kids;
+      if (node.ht === 1) for (let i = 1; i < kids.length; i++) drop(kids[i], node.first);
+      else for (let i = 1; i < kids.length; i++) drop((kids[i] as CNode).first, node.first);
+    };
+    const path = (i: number): void => {
+      const p = pathTo(root, Math.min(Math.max(i, 0), root.n));
+      for (let k = 0; k < p.frames.length; k++) visit(p.frames[k]!.node);
+      visit(p.leaf);
+    };
+    if (at < root.n) path(at);
+    path(root.n);
   }
 
   /**
