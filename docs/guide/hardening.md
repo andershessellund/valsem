@@ -80,6 +80,56 @@ idle time catches up. The measurements behind this choice — frame-loop,
 pool-churn and collection benchmarks on V8 and JavaScriptCore — are in the
 repository's `BENCHMARKS.md`.
 
+## How large a state: memory, and the hash table behind every value
+
+valsem is built for application state. What follows is what it costs when
+the state gets large, measured, so that you can tell where your application
+sits.
+
+**Memory.** A canonical object has a pool slot (a `WeakRef`), a registry
+cell, and an entry in one `WeakMap` that holds its hash. On V8 that is about
+280 bytes on top of the object itself: an entity of ten fields with a nested
+record and a small array is about 1.1 KB canonical, against 0.5 KB as plain
+objects.
+
+**A pause that follows the live size.** An engine rebuilds a hash table in
+one go, inside the `set` that found it full, and the entries of collected
+objects count towards full until then. The `WeakMap` of hashes is such a
+table, with an entry per canonical object. So an application that keeps
+creating *novel* values pays a pause now and then, inside an `intern` or a
+`produce`: its length follows the number of canonical objects **alive**, and
+its frequency follows how fast new ones are made. Growing is not required; a
+steady state with churn pays it too. Measured on V8, with the live set held
+constant and the collector's own pauses excluded:
+
+| live canonical objects | one pause | once per |
+| --- | --- | --- |
+| 100,000 | 30–55 ms | ~65,000 novel canonical objects |
+| 1,000,000 | 700–750 ms | ~500,000 |
+
+Every engine does this, V8 most expensively. A bare `WeakMap` under the same
+churn, one `set`: 25 ms at 100,000 live keys and 120–380 ms at a million on
+V8; 6 and 23 ms on JavaScriptCore; 13 and 28 ms on SpiderMonkey.
+
+What that means:
+
+- **Up to tens of thousands of live canonical objects**, which is where
+  application state lives, the pause is below a frame and rare.
+- **Around a hundred thousand**, it is a dropped frame or two on V8, once per
+  tens of thousands of new values: a bulk load shows it, interaction does not.
+- **Millions, under steady traffic** (a long-lived server holding its data as
+  values) means pauses of most of a second every few seconds to minutes on
+  V8. valsem is not the tool for that today.
+
+What counts is canonical *objects*: records, arrays, collection nodes. A
+large payload you only show a window of belongs in a
+[`RawArray`](/guide/collections#things-you-are-unlikely-to-need-—-but-if-you-do), which admits what is
+looked at and nothing else. Two designs that would remove the pause were
+built and measured, and both cost more than they saved where valsem is
+actually used (the repository's `DECISIONS.md`, D49). The pool's own index
+does not have this problem: it is sharded, and neither stalls nor has a
+ceiling.
+
 ## The two switches you own: `skipChecks()` and `skipFreezing()`
 
 valsem enforces two promises its callers make. It **freezes** every plain

@@ -226,7 +226,11 @@ Every canonical object has one entry in a single `WeakMap`: `{ h, a, n }`,
 its hash, its raw accumulator, and its defined-entry count (`n` is −1 for
 pooled value-type instances, which have no accumulator). The meta never
 refers back to its key (D11). The same map holds unique symbols' identity
-hashes.
+hashes. It is the one table in valsem whose size follows the number of live
+canonical objects and which cannot be sharded (its key is the object, and
+the hash is what it stores), so its rebuild is valsem's pause at scale:
+tens of milliseconds at 100k live objects on V8, most of a second at a
+million. Measured, and accepted: D49.
 
 The accumulators are sums modulo 2³² of independent per-entry terms:
 

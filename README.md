@@ -93,7 +93,11 @@ array; Safari's engine is [its own section](#freezing-and-safari)), admitting a 
 (uncanonicalised) key walks it. That is the trade: a win for state that is
 compared, memoized, keyed, or kept in history more often than it is built,
 and a loss for state built once and thrown away.
-[BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first.
+[BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first. It is built
+for application state: tens of thousands of live values, not a server's
+millions, and the
+[hardening guide](https://andershessellund.github.io/valsem/guide/hardening#how-large-a-state-memory-and-the-hash-table-behind-every-value)
+says what happens as a state grows.
 
 ### Freezing, and Safari
 

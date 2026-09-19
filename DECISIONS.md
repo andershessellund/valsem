@@ -264,7 +264,43 @@ marker resolves iteratively on every major GC. **Rejected:** storing the
 meta *on* the value as a hidden property, measured at 5% cheaper admission.
 It is visible to `Reflect.ownKeys`, descriptor-based copiers and DevTools,
 and needs an owner check so a copied or proxied property is not mistaken
-for canonical. DESIGN.md §3.4.
+for canonical. DESIGN.md §3.4. Measured again at scale, and kept: D49.
+
+### D49. The meta stays in one `WeakMap`, and its rebuild pause is documented
+
+A soak run found that the tail latency of a large valsem process is not the
+collector's but this table's. An engine rebuilds a hash table inside the one
+`set` that found it full, and a `WeakMap`'s dead entries count as full until
+then: with the live set constant and novel values interned under it, V8
+pauses 30–55 ms once per ~65k interns at 100k live canonical objects, and
+700–750 ms once per ~500k at 1M (collections excluded; `_setMeta` in a CPU
+profile). Every engine does it (a bare `WeakMap`, one `set`, at 1M live
+keys: V8 120–380 ms, JavaScriptCore 23 ms, SpiderMonkey 28 ms), so it is
+what a `WeakMap` is and not a defect to wait out.
+
+**Decided:** keep D11, and say so in the guide: valsem is for application
+state, the pause is below a frame up to tens of thousands of live canonical
+objects, and a server holding millions is outside what it is for.
+
+**Rejected: the meta on the object**, built and measured (a private
+non-enumerable symbol holding `{ h, a, n, o }`, `o` the owner, so that a
+copy or a proxy showing the property is not taken for canonical; drafts hide
+it in four traps, or interning a draft recurses through its base's meta). It
+removes the pause, halves the cost of interning under churn (2.37 → 1.16 µs
+at 2M live), halves major-GC time and saves 7% of the heap. But a symbol
+property on the *source* takes `{ ...source }` off every engine's fast path,
+enumerable or not: a 5-key spread 15 → 57 ns on V8, a 20-key one 18 → 159 ns
+on JavaScriptCore. That is every reducer a user writes over canonical state,
+and `produce`'s own copies: the wide-record arena 2.7 → 128 µs, big-array
+held 10.4 → 18.5 µs, the collection drafts +36%, memoize hits on a raw
+argument +30–39% (a miss on an absent property is dearer than a miss in a
+`WeakMap`). It trades the common case for the rare one, on top of what D11
+already held against it. **Rejected: several capped `WeakMap`s**, newest
+first: every lookup on a canonical object would probe each table, and that
+lookup is the hot path (`deepHash` of a canonical child, `fastEquals`).
+**Rejected: `[hashCode]` as the carrier**: one number where three are
+needed, no room for an owner check, and on a plain record that symbol is
+content (D9). DESIGN.md §3.4; the guide's Hardening page.
 
 ### D12. Admission looks up before it copies
 
