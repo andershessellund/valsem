@@ -96,8 +96,10 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   }
 
   /** The trie after `list` became the member list through an operation that consed `consed`. */
-  #reanchor(root: HNode, list: ValueList<T>, consed: readonly CNode[]): HNode {
-    return consed.length === 0 ? root : applyAnchorUpdates(CFG, root, ValueList._anchorUpdates(consed, list));
+  #reanchor(root: HNode, list: ValueList<T>, consed: readonly CNode[], at: number): HNode {
+    return consed.length === 0
+      ? root
+      : applyAnchorUpdates(CFG, root, ValueList._anchorUpdates(consed, list, this.#list as ValueList<unknown>, at));
   }
 
   /** Number of members. */
@@ -142,7 +144,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) return this;
     const { result: list, consed } = ValueList._record(() => this.#list.push(v));
     const root = trieInsert(CFG, this.#root, 0, h, [v, _ANCHOR_TAIL])!.node;
-    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed));
+    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed, this.#list.length));
   }
 
   /** Remove a structurally equal `value`. Returns `this` if absent. */
@@ -154,7 +156,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     if (i < 0) throw new Error('valsem: OrderedSet anchors are inconsistent (this is a bug)');
     const { result: list, consed } = ValueList._record(() => this.#list.remove(i));
     const root = trieRemove(CFG, this.#root, 0, h, v)!.node as HNode;
-    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed));
+    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed, i));
   }
 
   /**
@@ -173,7 +175,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     if (index === n) return this.add(v);
     const { result: list, consed } = ValueList._record(() => this.#list.insert(index, v));
     const root = trieInsert(CFG, this.#root, 0, h, [v, _ANCHOR_TAIL])!.node;
-    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed));
+    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed, index));
   }
 
   /** Iterate the members in order. */
