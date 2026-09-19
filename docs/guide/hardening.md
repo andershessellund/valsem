@@ -143,21 +143,17 @@ Two promises, both tested against hostile inputs in `src/hardening.test.ts`:
   property of the canonical record, never a prototype change. Registry
   dispatch keys on the prototype's constructor, not the instance's
   shadowable `constructor` property.
-- **Arrays are their own elements.** An array's value is its length and its
-  own elements, and a hole means `undefined`. JavaScript's index read is not
-  that: `arr[i]` on a hole reads the prototype chain, and so do `slice`,
-  spread, `Array.from`, `map` and the array iterator, which turn an inherited
-  index into an own element of their result. With `Array.prototype[1] = x`, a
-  sparse array reads `x` at its hole. Every walk over an array that may be
-  raw — equality, hashing, interning, `produce`'s grafts, replacements and
-  patch values, `current()`, `RawArray`, and the collections' `from` — reads
-  own slots only, so a sparse array means the same thing to all of them and
-  the polluted value never enters a canonical one. A recipe that grows an
-  array (`d.length = n`, `d[far] = v`) gets a filled gap, not holes, and a
-  draft answers an out-of-range index with `undefined` from its own content.
-  valsem's internal arrays follow the same rule. The test suite runs a second
-  time with `Array.prototype` polluted at every small index, which is how the
-  internal cases were found.
+- **Where the line is.** Two promises: valsem is never the *vector* — no input,
+  key or patch path can write to a prototype — and a record's value never
+  picks up an inherited key, which is what real prototype pollution looks like
+  (a string key on `Object.prototype`). One thing is out of scope: a process
+  whose built-in prototypes already carry **index** properties
+  (`Array.prototype[1] = x`). An array element is what `arr[i]` reads, in
+  valsem as in every other piece of code in that process, so a sparse array's
+  hole reads that value there too. Such a process cannot trust `slice`,
+  spread, `map` or `for…of` either; guarding one library's reads would not
+  make it sound, and it costs every array walk. Without such pollution a hole
+  is `undefined`, consistently, and canonical arrays are always dense.
 - **Patches are validated, not trusted.** `applyPatches` follows a path only
   through own keys of records, in-range integer indices of arrays, and a
   draftable kind's own `childAt`; a segment such as `__proto__`,

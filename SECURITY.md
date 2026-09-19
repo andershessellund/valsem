@@ -25,8 +25,11 @@ valsem is a library that admits untrusted data at a boundary (`intern`,
 states what it defends against. Violations of those claims are in scope, for
 example:
 
-- prototype pollution, or a `__proto__`/`constructor` key behaving as anything
-  but data, through any admission path;
+- valsem acting as a vector for prototype pollution: any input, key or patch
+  path that writes to a prototype, or a `__proto__`/`constructor` key
+  behaving as anything but data, through any admission path;
+- a record's value picking up an inherited key from a polluted
+  `Object.prototype`;
 - input that defeats the depth limit, or exhausts the stack or memory out of
   proportion to its size during admission;
 - collisions that can be precomputed against the seeded hash, degrading the
@@ -43,6 +46,10 @@ Out of scope, by documented design:
 - the 32-bit hash as anything stronger than a bucket-flooding defence: it is
   not a MAC and not collision-resistant against an attacker who learns the seed;
 - corruption after opting out with `skipFreezing()` or `skipChecks()`;
+- behaviour in a process whose built-in prototypes already carry **index**
+  properties (`Array.prototype[1] = x`): a sparse array's hole then reads that
+  value, in valsem as in all other code, since an element is what `arr[i]`
+  reads. Getting such a property there through valsem would be in scope;
 - a custom value type whose `[hashCode]` promise of immutability is false.
 
 ## How releases are protected

@@ -262,8 +262,8 @@ and tail, computed once per novel node.
 - A primitive returns as-is, except `-0` → `+0`.
 - An object marked `[interned]` (a class instance) or present in the hash
   cache returns immediately.
-- An **array** is interned bottom-up: each own slot interned (a hole reads
-  as `undefined`, never through to `Array.prototype`), then the array is
+- An **array** is interned bottom-up: each index interned into a fresh dense
+  array (a hole becomes an own `undefined`), then the array is
   hashed with its accumulator, looked up by shallow SameValueZero on the
   interned children, and on a miss given meta, frozen, and registered.
 - A **record** is interned bottom-up, and the hash is folded from the
@@ -838,15 +838,9 @@ history that costs its distinct states (D40). Numbers: BENCHMARKS.md.
   interning, drafting, snapshots) enumerates own enumerable keys and reads
   with `hasOwn`, never `in` or `for…in`; a `__proto__` key in input becomes
   an own data property (`defineRecordField`); registry dispatch keys on the
-  prototype's constructor. **Arrays are their own elements** the same way:
-  every walk over a possibly-raw array reads through `ownAt`/`ownElements`
-  (`shared.ts`), never a bare `arr[i]`, `slice`, spread, `map` or `for…of`,
-  all of which read a hole off the prototype chain; holes canonicalise to
-  `undefined`. `ownAt` is a plain read plus `i in CHAIN` on an empty array,
-  which asks whether the chain has that index at all, and falls back to
-  `hasOwn` only when it does, or when the array's prototype is not this
-  realm's `Array.prototype`. Internal arrays are filled before they are read
-  (D44).
+  prototype's constructor. Arrays are read with a plain `arr[i]` in every
+  walk, so a hole is `undefined` and canonical arrays are dense; index
+  properties on a built-in prototype are outside the threat model (D44).
 - **Patches are validated.** Paths follow own keys, in-range integer
   indices and a kind's `childAt` only; keys and indices are type-checked;
   values are interned on application.

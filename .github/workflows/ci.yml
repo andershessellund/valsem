@@ -30,7 +30,4 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
-      # The same suite with Array.prototype polluted: catches any read of an
-      # array hole, in input handling or in the library's own arrays.
-      - run: pnpm test:polluted
       - run: pnpm lint
