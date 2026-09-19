@@ -70,9 +70,9 @@
 //   --quick              live 0.05, short phases: a smoke test of the harness
 //   --out file.json      also write every result as JSON
 //
-// The default is two processes and about four minutes. valsem has a ceiling of
-// 2^24 (16.7M) live canonical objects today, V8's limit on one Map, and an
-// entity here is two of them.
+// The default is two processes and about four minutes. An entity here is two
+// canonical records. What this harness found is in DECISIONS.md: D48 (the
+// pool index, sharded since) and D49 (the meta WeakMap's rebuild pause).
 // ---------------------------------------------------------------------------
 
 import { spawnSync } from 'node:child_process';
