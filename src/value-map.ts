@@ -6,8 +6,8 @@
 //
 //   * deep equality of two ValueMaps is `#root === #root` — O(1), lineage-free
 //     (two maps built independently, in any order, converge);
-//   * the wrapper itself canonicalizes through a WeakMap keyed by root
-//     (ephemeron semantics — no scan, no sweep needed);
+//   * the wrapper itself canonicalizes through a field on its root node:
+//     root and wrapper hold each other and die together (D50);
 //   * updates path-copy O(log n) nodes and share the rest with every other
 //     map holding equal subtrees — memory sits at the distinct-subtree floor;
 //   * iteration order is structure-determined, hence content-determined: two
@@ -39,9 +39,6 @@ import {
 } from './hamt.js';
 
 const CFG = createTrieConfig(2);
-
-/** Canonical wrapper per root — ephemeron-collected with the root itself. */
-const wrappers = new WeakMap<HNode, ValueMap<unknown, unknown>>();
 
 /**
  * Persistent (immutable) map with structural identity.
@@ -84,10 +81,10 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   static #for<K, V>(root: HNode): ValueMap<K, V> {
-    const hit = wrappers.get(root);
+    const hit = root.w;
     if (hit !== undefined) return hit as ValueMap<K, V>;
     const fresh = new ValueMap<unknown, unknown>(root);
-    wrappers.set(root, fresh);
+    root.w = fresh; // the root holds its wrapper: the WeakMap's ephemeron lifetime, without the WeakMap
     return fresh as ValueMap<K, V>;
   }
 
