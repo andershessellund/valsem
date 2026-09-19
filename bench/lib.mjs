@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 import os from 'node:os';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 
 export const isBun = typeof Bun !== 'undefined';
 export const runtime = isBun
@@ -65,6 +65,43 @@ export function assertEq(a, b, what = '') {
   if (a !== b) throw new Error(`result mismatch ${what}: ${String(a)} vs ${String(b)}`);
 }
 
+/**
+ * Is the measured code what the recorded commit says it is? Two ways it was
+ * not, both of which put wrong provenance into BENCHMARKS.md once:
+ *
+ *   - uncommitted changes (the file claimed a commit that predated a feature
+ *     it measured). What a run writes itself, bench/results and
+ *     BENCHMARKS.md, does not count: `pnpm bench` runs Node, then Bun;
+ *   - a stale build. The suites import dist/, which is not tracked, so a
+ *     clean tree says nothing about it: every src module must be no newer
+ *     than its compiled file.
+ *
+ * Returns the reasons, empty when the run is honest.
+ */
+export function provenanceProblems() {
+  const problems = [];
+  try {
+    const dirty = execSync('git status --porcelain', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .split('\n')
+      .filter((l) => l.trim() !== '' && !/^.. (bench\/results\/|BENCHMARKS\.md$)/.test(l));
+    if (dirty.length !== 0) problems.push(`uncommitted changes (${dirty.length} path${dirty.length === 1 ? '' : 's'}, first: ${dirty[0].slice(3)})`);
+  } catch {
+    /* not a git checkout: nothing to compare with */
+  }
+  const src = new URL('../src/', import.meta.url);
+  const dist = new URL('../dist/', import.meta.url);
+  for (const name of readdirSync(src)) {
+    if (!name.endsWith('.ts') || name.endsWith('.test.ts') || name.endsWith('.test-helpers.ts')) continue;
+    const built = new URL(name.replace(/\.ts$/, '.js'), dist);
+    if (!existsSync(built) || statSync(built).mtimeMs < statSync(new URL(name, src)).mtimeMs) {
+      problems.push(`dist/ is older than src/${name}: run \`pnpm build\``);
+      break;
+    }
+  }
+  return problems;
+}
+
 export function environment() {
   let commit = 'unknown';
   try {
@@ -72,6 +109,7 @@ export function environment() {
   } catch {
     /* not a git checkout */
   }
+  if (provenanceProblems().length !== 0) commit += '-dirty'; // only reachable with --allow-dirty
   const version = (name) => {
     try {
       return JSON.parse(readFileSync(new URL(`../node_modules/${name}/package.json`, import.meta.url), 'utf8')).version;

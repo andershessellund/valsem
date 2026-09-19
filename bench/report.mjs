@@ -50,6 +50,15 @@ for (const id of suiteIds) {
   out.push('');
   out.push(first.description.trim());
   out.push('');
+  // A suite measured at another commit than its file's header (a partial
+  // re-run merged in, or a runtime that has not run this suite since) says so.
+  const strays = per
+    .map((s, i) => (s && s.commit !== undefined && s.commit !== runs[i].commit ? `${runs[i].runtime.name} at \`${s.commit}\` (${s.date})` : null))
+    .filter(Boolean);
+  if (strays.length !== 0) {
+    out.push(`*Measured at another commit than the header's: ${strays.join(', ')}.*`);
+    out.push('');
+  }
   const fmt = first.unit === 'bytes' ? fmtBytes : first.unit === 'ns' ? fmtNs : (v) => (v === null || v === undefined ? '—' : String(v));
   const cols = first.columns;
   const ratio = first.ratio; // [numerator, denominator] column labels → an extra column
