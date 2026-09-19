@@ -23,8 +23,9 @@ except the recurrent row. Arenas:
   back in one job — the regime that pays valsem's in-job WeakRef retention. *Held + macrotask* retains each result in
   a ring of 50 and runs one produce per macrotask, the regime a UI actually runs.
 - **wide-record**: a 1,000-key record (built with \`Object.fromEntries\`, so the fixture is in fast-properties mode),
-  one value edited. Every library's copy site is megamorphic by the time this arena runs, which is the honest state
-  of a copy site in an application.
+  one value edited. Each library's copy site is made megamorphic first (it edits records of 24 other
+  shapes, 60 times each, right before the clock starts), which is the honest state of a copy site in an application: a site that
+  has only ever seen this one record copies it in ~2 µs in every library, and no application has such a site.
 - **value-map / value-list**: a 10,000-entry \`ValueMap\` / 10,000-element \`ValueList\` edited through its draft
   (immer and mutative draft a native \`Map\` / array), and the same edit as a direct persistent operation.
 - **small-churn**: a 3-key record, one field — the per-op floor.
@@ -74,13 +75,21 @@ except the recurrent row. Arenas:
       setAutoFreeze(true);
       const mb = { ...rec };
       const it = 2000;
-      const v = await timeSettled(() => valsemProduce(vb, (d) => { d.key500 = novel(); }), it);
+      // The premise, set up per library: its copy site has seen many shapes.
+      const shapes = Array.from({ length: 24 }, (_, s) => Object.fromEntries(Array.from({ length: 1 + (s % 8) }, (_, k) => [`s${s}_${k}`, k])));
+      const seenManyShapes = (produceFn, admit = (x) => x) => () => {
+        for (const shape of shapes) {
+          const base = admit(shape);
+          for (let r = 0; r < 60; r++) produceFn(base, (d) => { d.extra = novel(); });
+        }
+      };
+      const v = await timeSettled(() => valsemProduce(vb, (d) => { d.key500 = novel(); }), it, undefined, seenManyShapes(valsemProduce, intern));
       setAutoFreeze(true);
-      const ion = await timeSettled(() => immerProduce(ib, (d) => { d.key500 = novel(); }), it);
+      const ion = await timeSettled(() => immerProduce(ib, (d) => { d.key500 = novel(); }), it, undefined, seenManyShapes(immerProduce));
       setAutoFreeze(false);
-      const ioff = await timeSettled(() => immerProduce(ib2, (d) => { d.key500 = novel(); }), it);
+      const ioff = await timeSettled(() => immerProduce(ib2, (d) => { d.key500 = novel(); }), it, undefined, seenManyShapes(immerProduce));
       setAutoFreeze(true);
-      const m = await timeSettled(() => mutativeCreate(mb, (d) => { d.key500 = novel(); }), it);
+      const m = await timeSettled(() => mutativeCreate(mb, (d) => { d.key500 = novel(); }), it, undefined, seenManyShapes(mutativeCreate));
       rows.push(row('wide-record 1000 keys, one edit', { [C.v]: v, [C.ion]: ion, [C.ioff]: ioff, [C.m]: m }));
     }
     {

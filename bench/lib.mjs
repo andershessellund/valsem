@@ -32,8 +32,12 @@ export async function settle() {
 }
 
 /** {@link time}, in a job of its own on a settled heap: what one row should measure. */
-export async function timeSettled(fn, iterations, warmup) {
+export async function timeSettled(fn, iterations, warmup, prepare) {
   await settle();
+  // A row whose premise is engine state (a call site that has seen many
+  // shapes) sets it up here, after the settle and right before the clock:
+  // state left behind by earlier rows is an accident, and does not survive.
+  if (prepare !== undefined) prepare();
   return warmup === undefined ? time(fn, iterations) : time(fn, iterations, warmup);
 }
 
