@@ -3,13 +3,11 @@
 // standalone shell. Writes bench/results/spidermonkey.json, which report.mjs
 // renders as a third runtime.
 //
-//   SPIDERMONKEY_SHELL=/path/to/js node bench/run-spidermonkey.mjs
+//   node bench/run-spidermonkey.mjs
 //
-// Where the shell comes from: Mozilla publishes one with every Firefox release,
-// https://archive.mozilla.org/pub/firefox/releases/<version>/jsshell/ , and
-// `npx jsvu --engines=spidermonkey` installs it as ~/.jsvu/bin/spidermonkey.
-// With no shell to be found this is a no-op that says so: `pnpm bench` must
-// not fail on a machine without one.
+// The shell is the pinned one of bench/engines.json, fetched and verified on
+// first use (fetch-engines.mjs). SPIDERMONKEY_SHELL=/path/to/js overrides it,
+// for trying another build; the version it reports is what gets recorded.
 //
 // Only the suites whose per-engine claims the docs rest on, and which a shell
 // measures honestly: CPU-bound, no comparison libraries, no event loop needed.
@@ -18,18 +16,14 @@
 // there; it is the engine, not the browser (as Bun is not Safari).
 // ---------------------------------------------------------------------------
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { environment, provenanceProblems } from './lib.mjs';
+import { enginePath } from './fetch-engines.mjs';
 import skipFreezing, { rowsWith, WORKER_PATH } from './suites/skip-freezing.mjs';
 import frozenArray from './suites/frozen-array.mjs';
 
-const shell = [process.env.SPIDERMONKEY_SHELL, `${homedir()}/.jsvu/bin/spidermonkey`, `${homedir()}/.jsvu/bin/sm`].find((p) => p && existsSync(p));
-if (shell === undefined) {
-  console.log('valsem bench — spidermonkey: no shell found (set SPIDERMONKEY_SHELL, or `npx jsvu --engines=spidermonkey`); skipped.');
-  process.exit(0);
-}
+const shell = process.env.SPIDERMONKEY_SHELL || (await enginePath('spidermonkey'));
 const problems = provenanceProblems();
 if (problems.length !== 0 && !process.argv.includes('--allow-dirty')) {
   console.error(`valsem bench: refusing to record results, the code measured would not be the commit recorded:\n  - ${problems.join('\n  - ')}\nCommit and build first, or pass --allow-dirty (the commit is then recorded as -dirty).`);

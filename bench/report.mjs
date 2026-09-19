@@ -100,12 +100,16 @@ out.push('## Reproducing');
 out.push('');
 out.push('```bash');
 out.push('pnpm build');
-out.push('pnpm bench            # node, then bun, then the SpiderMonkey shell if there is one, then this file');
-out.push('node bench/run.mjs list memoize   # one or more suites, merged into the node results');
-out.push('npx -y bun@latest bench/run.mjs  # the same on JavaScriptCore');
-out.push('SPIDERMONKEY_SHELL=/path/to/js node bench/run-spidermonkey.mjs   # the engine-level suites on Firefox\'s engine');
+out.push('pnpm bench            # node, then bun, then the SpiderMonkey shell, then this file');
+out.push('node bench/run.mjs list memoize      # one or more suites, merged into the node results');
+out.push('node bench/run-bun.mjs list memoize  # the same on JavaScriptCore');
+out.push('node bench/run-spidermonkey.mjs      # the engine-level suites on Firefox\'s engine');
 out.push('node bench/report.mjs            # re-render BENCHMARKS.md');
 out.push('```');
+out.push('');
+out.push('Bun and the SpiderMonkey shell are **pinned** in `bench/engines.json` and fetched on first use from their vendors, ' +
+  'checksum-verified, into `node_modules/.cache/valsem-bench/` (`bench/fetch-engines.mjs`); Node is the one installed. ' +
+  'A run refuses to record from a tree with uncommitted changes or a stale `dist/` (`--allow-dirty` overrides, and marks the commit).');
 out.push('');
 out.push('The one-off experiments behind the decisions — pool cleanup strategies, retention regimes, the in-job WeakRef ' +
   'effect — live in `scripts/experiments/` and are referenced from [DECISIONS.md](https://github.com/andershessellund/valsem/blob/main/DECISIONS.md).');
