@@ -297,7 +297,7 @@ describe('produce — recipe conventions', () => {
 
 describe('produceWithPatches — semantic patches, both directions', () => {
   it('the patches are frozen, envelope and all, and still apply', () => {
-    const base = intern({ a: { b: 1 }, l: [1, 2, 3], list: ValueList.of(1), m: ValueMap.from([['k', 1]]) });
+    const base = intern({ a: { b: 1 }, l: [1, 2, 3], list: ValueList.of(1), m: ValueMap.from<string, unknown>([['k', 1]]) });
     const [result, patches, inverse] = produceWithPatches(base, (d) => {
       d.a.b = 2;
       d.l.splice(1, 1, 8, 9);
@@ -313,7 +313,7 @@ describe('produceWithPatches — semantic patches, both directions', () => {
       }
     }
     expect(() => (patches as unknown[]).push({})).toThrow(TypeError);
-    expect(() => ((patches[0] as { path: unknown[] }).path.push('x'))).toThrow(TypeError);
+    expect(() => (patches[0]!.path as unknown[]).push('x')).toThrow(TypeError);
     expect(applyPatches(base, patches)).toBe(result);
     expect(applyPatches(result, inverse)).toBe(base);
     // An empty recipe's lists are frozen too: one rule, no "unless nothing happened".
