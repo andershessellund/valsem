@@ -198,3 +198,28 @@ describe('deepEqual on cyclic raw input throws rather than hanging', () => {
     expect(() => deepEqual(a, b)).toThrow(RangeError);
   });
 });
+
+describe('applyPatches says what is wrong with a malformed patch list', () => {
+  const base = intern({ a: 1 });
+  const apply = (patches: unknown): unknown => applyPatches(base, patches as Patch[]);
+
+  it('what is not a list of patches', () => {
+    for (const bad of [null, undefined, 5, 'abc', {}]) {
+      expect(() => apply(bad)).toThrow(/^valsem: applyPatches expects a list of patches, got /);
+    }
+    expect(() => apply({ kind: 'record.set', path: [], key: 'a', value: 2 })).toThrow(/a single 'record.set' patch — wrap it in an array/);
+  });
+
+  it('what is not a patch, by its index, before anything is applied', () => {
+    const good = { kind: 'record.set', path: [], key: 'a', value: 2 };
+    for (const bad of [null, undefined, 5, 'x', [], {}, { path: [] }, { kind: 1, path: [] }, { kind: 'record.set' }, { kind: 'record.set', path: 'a' }]) {
+      expect(() => apply([good, bad])).toThrow(/^valsem: malformed patch at index 1 — expected an object with a `kind` string and a `path` array/);
+    }
+    for (const bad of [null, 'abc', [[]], [null]]) expect(() => apply(bad)).toThrow(TypeError);
+  });
+
+  it('any iterable of patches will do', () => {
+    const patches = new Set([{ kind: 'record.set', path: [], key: 'a', value: 2 }]);
+    expect(apply(patches)).toBe(intern({ a: 2 }));
+  });
+});
