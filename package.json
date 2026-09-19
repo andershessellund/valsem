@@ -60,6 +60,7 @@
     "bench:pool": "node --expose-gc scripts/experiments/pool-gc-bench.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.tests.json",
+    "check:package": "publint --strict && attw --pack . --profile esm-only",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
@@ -71,6 +72,7 @@
   },
   "packageManager": "pnpm@12.3.4",
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@conventional-commits/parser": "0.4.1",
     "@types/node": "^22.0.0",
     "eslint": "^10.10.0",
@@ -79,6 +81,7 @@
     "immer": "^11.1.18",
     "immutable": "^5.1.9",
     "mutative": "^1.3.0",
+    "publint": "^0.3.24",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0",
     "vitepress": "^1.6.4",
