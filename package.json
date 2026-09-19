@@ -59,6 +59,7 @@
     "bench:spidermonkey": "node bench/run-spidermonkey.mjs",
     "bench:report": "node bench/report.mjs",
     "bench:pool": "node --expose-gc scripts/experiments/pool-gc-bench.mjs",
+    "bench:soak": "pnpm build && node scripts/experiments/soak.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.tests.json",
     "check:package": "publint --strict && attw --pack . --profile esm-only",

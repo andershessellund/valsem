@@ -31,7 +31,7 @@ import {
   _protocolEquals,
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord, _isForeignObjectPrototype } from './deep-equal.js';
-import { createInternPool } from './intern-pool.js';
+import { createInternPool, _poolStats } from './intern-pool.js';
 import { same } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
@@ -409,6 +409,11 @@ function shallowRefEqual(a: object, b: object): boolean {
 /** @internal Live pool size — exposed for tests. */
 export function _internPoolSize(): number {
   return pool.size();
+}
+
+/** @internal Slots the global pool stores (live, or dead and awaiting reclaim) and its bucket count — for the soak harness. */
+export function _internPoolStats(): { slots: number; buckets: number } {
+  return _poolStats(pool);
 }
 
 /** @internal O(1) probe: is this object canonical plain data (hash cached)? */
