@@ -196,6 +196,63 @@ export class DraftList<T> implements Iterable<T> {
     return removed as T[];
   }
 
+  /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.insert`. */
+  insert(index: number, value: T): this {
+    const s = this.#state;
+    this.splice(insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insert'), 0, value);
+    return this;
+  }
+
+  /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`). Returns it. */
+  remove(index: number): T {
+    const s = this.#state;
+    return this.splice(elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1)[0] as T;
+  }
+
+  /** Remove and return the first element, `undefined` when empty, as `Array.prototype.shift`. */
+  shift(): T | undefined {
+    return this.length === 0 ? undefined : this.splice(0, 1)[0];
+  }
+
+  /** Insert `values` at the front; the new length, as `Array.prototype.unshift`. */
+  unshift(...values: T[]): number {
+    this.splice(0, 0, ...values);
+    return this.length;
+  }
+
+  /**
+   * Set many elements at once: `[index, value]` pairs, the last write to an
+   * index winning, as `ValueList.setMany`. Every index is checked before
+   * anything is written, so a bad one leaves the draft untouched.
+   */
+  setMany(edits: readonly (readonly [number, T])[]): this {
+    const s = this.#state;
+    const len = s.work.length + s.tail.length;
+    for (const [i] of edits) elementIndex(i, len, 'DraftList.setMany');
+    for (const [i, v] of edits) this.set(i, v);
+    return this;
+  }
+
+  // What does not edit answers about the VALUE this draft would be right now
+  // (its snapshot, `current(draft)`), and gives back values, not drafts: only
+  // `get` hands out a draft. Assign the result into a slot to keep it.
+
+  /** Elements `[start, end)` of the list as it is right now, as `ValueList.slice`: a value, not a draft. */
+  slice(start?: number, end?: number): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).slice(start, end);
+  }
+
+  /** The list as it is right now, followed by `other`, as `ValueList.concat`: a value, not a draft. */
+  concat(other: ValueList<T>): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).concat(other);
+  }
+
+  /** Visit every element in index order, as it is right now (iteration's view: a child already drafted comes as its draft). */
+  forEach(fn: (value: T, index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
+    let i = 0;
+    for (const v of this) fn.call(thisArg, v, i++, this);
+  }
+
   *[Symbol.iterator](): IterableIterator<T> {
     const s = this.#state;
     if (s.overlay.size === 0) {

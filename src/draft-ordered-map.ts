@@ -36,6 +36,7 @@ import {
 } from './draft-core.js';
 import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
+import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
 
 const INTERNAL = Symbol('valsem.draft-ordered-map');
@@ -120,6 +121,24 @@ export class DraftOrderedMap<K, V> {
 
   indexOf(key: K): number {
     return this.#state.work.indexOf(intern(key));
+  }
+
+  /** The keys in order, as the canonical `ValueList` of the map this draft would be right now (its snapshot). */
+  get keyList(): ValueList<K> {
+    return (snapshotOf(this) as OrderedMap<K, V>).keyList;
+  }
+  /** The values in key order, likewise: values, not drafts. */
+  get valueList(): ValueList<V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).valueList;
+  }
+
+  /**
+   * The value at `index` (drafted, if it can be), which must name an entry:
+   * an integer in `[0, size)`, or a `RangeError`. Typed `Draft<V>`, spelled so
+   * that the class stays covariant (see `DraftList.get`).
+   */
+  valueAt(index: number): Draft<V> | (V & undefined) {
+    return this.get(this.#state.work.keyAt(index) as K) as Draft<V> | (V & undefined); // keyAt checks the index
   }
 
   /** The key at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */

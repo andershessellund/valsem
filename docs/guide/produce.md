@@ -22,7 +22,10 @@ Plain objects and arrays draft through proxies (any syntax works, including
 array methods); `ValueMap`/`ValueSet`/`ValueList` slots hand out
 `DraftMap`/`DraftSet`/`DraftList` (and `OrderedMap`/`OrderedSet` slots
 `DraftOrderedMap`/`DraftOrderedSet`) — mutable twins with the native-collection
-API. Raw material assigned into a draft is **adopted**: interned on the way
+API: a draft has every method of its value. What edits, edits the draft in
+place; what does not (`slice`, `concat`, the set algebra) answers about the
+value the draft would be right now, as `current(draft)` would, and returns a
+value, not a draft. Raw material assigned into a draft is **adopted**: interned on the way
 into the result, exactly like the collections' intern-on-entry. Drafts are
 revoked when `produce` returns — using a leaked draft throws.
 

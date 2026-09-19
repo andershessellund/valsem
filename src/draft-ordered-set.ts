@@ -24,6 +24,7 @@ import {
 } from './draft-core.js';
 import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
 import type { OrderedSet } from './ordered-set.js';
+import type { ValueList } from './value-list.js';
 
 const INTERNAL = Symbol('valsem.draft-ordered-set');
 
@@ -71,6 +72,11 @@ export class DraftOrderedSet<T> implements Iterable<T> {
 
   indexOf(value: T): number {
     return this.#state.work.indexOf(value);
+  }
+
+  /** The members in order, as the canonical `ValueList` of the set this draft would be right now (its snapshot). */
+  get valueList(): ValueList<T> {
+    return (snapshotOf(this) as OrderedSet<T>).valueList;
   }
 
   /** The member at `index`, which must name one: an integer in `[0, size)`, or a `RangeError`. */

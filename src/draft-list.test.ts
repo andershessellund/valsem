@@ -77,6 +77,10 @@ describe('ValueList inside produce — the chunked draft', () => {
       fc.record({ kind: fc.constant('push' as const), v: item }),
       fc.record({ kind: fc.constant('pop' as const) }),
       fc.record({ kind: fc.constant('splice' as const), i: fc.nat(), del: fc.nat(4), items: fc.array(item, { maxLength: 4 }) }),
+      fc.record({ kind: fc.constant('insert' as const), i: fc.nat(), v: item }),
+      fc.record({ kind: fc.constant('remove' as const), i: fc.nat() }),
+      fc.record({ kind: fc.constant('shift' as const) }),
+      fc.record({ kind: fc.constant('unshift' as const), items: fc.array(item, { maxLength: 3 }) }),
     );
     fc.assert(
       fc.property(fc.array(item, { maxLength: 150 }), fc.array(op, { maxLength: 30 }), (init, ops) => {
@@ -90,6 +94,10 @@ describe('ValueList inside produce — the chunked draft', () => {
               case 'push': mirror.push(o.v); d.push(o.v); break;
               case 'pop': mirror.pop(); d.pop(); break;
               case 'splice': { const i = o.i % (n + 1); mirror.splice(i, o.del, ...o.items); d.splice(i, o.del, ...o.items); } break;
+              case 'insert': { const i = o.i % (n + 1); mirror.splice(i, 0, o.v); expect(d.insert(i, o.v)).toBe(d); } break;
+              case 'remove': if (n === 0) break; { const i = o.i % n; expect(d.remove(i)).toBe(mirror.splice(i, 1)[0]); } break;
+              case 'shift': expect(d.shift()).toBe(mirror.shift()); break;
+              case 'unshift': expect(d.unshift(...o.items)).toBe(mirror.unshift(...o.items)); break;
             }
             expect(d.length).toBe(mirror.length);
           }
