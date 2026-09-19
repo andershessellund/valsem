@@ -78,6 +78,11 @@ for (const id of suiteIds) {
     out.push(`*Cells: ${ran.map((r) => r.runtime.name).join(' / ')}.*`);
     out.push('');
   }
+  const processes = Math.max(1, ...per.filter(Boolean).map((s) => s.processes ?? 1));
+  if (processes > 1) {
+    out.push(`*Each cell is the median of ${processes} processes: the hash seed is drawn per process, and the shapes of these structures follow the hashes.*`);
+    out.push('');
+  }
   const fmt = first.unit === 'bytes' ? fmtBytes : first.unit === 'ns' ? fmtNs : (v) => (v === null || v === undefined ? '—' : String(v));
   const cols = first.columns;
   const ratio = first.ratio; // [numerator, denominator] column labels → an extra column
