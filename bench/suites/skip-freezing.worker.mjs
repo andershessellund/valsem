@@ -2,13 +2,15 @@
 // is a one-way switch per process. Prints { "row name": ns } as JSON.
 //
 //   node bench/suites/skip-freezing.worker.mjs on|off
-import { time, timeHeld } from '../lib.mjs';
+//   js -m bench/suites/skip-freezing.worker.mjs on|off      (the SpiderMonkey shell)
+import { args } from '../shell-compat.mjs'; // first: see the file
+import { time, timeHeld } from '../timing.mjs';
 import { intern } from '../../dist/intern.js';
 import { produce } from '../../dist/produce.js';
 import { skipFreezing } from '../../dist/checks.js';
 import { ValueList } from '../../dist/value-list.js';
 
-if (process.argv[2] === 'off') skipFreezing();
+if (args[0] === 'off') skipFreezing();
 
 const N = 10_000;
 const records = () => Array.from({ length: N }, (_, i) => ({ id: i, v: i, tags: ['a', 'b'] }));
@@ -35,7 +37,9 @@ const best = async (measure) => {
 // --- valsem's own operations ------------------------------------------------
 {
   const base = intern({ arr: records() });
-  out['produce: one edit in a 10,000-record plain array'] = await best(() => timeHeld((i) => produce(base, (d) => { d.arr[N >> 1].v = -i; }), 1500));
+  // A shell has no macrotasks to yield to, so there the row runs synchronously, results retained.
+  const held = typeof setImmediate === 'function' ? timeHeld : async (fn, n) => time((i) => keep(fn(i)), n);
+  out['produce: one edit in a 10,000-record plain array'] = await best(() => held((i) => produce(base, (d) => { d.arr[N >> 1].v = -i; }), 1500));
 }
 {
   const base = intern({ list: ValueList.from(records()) });

@@ -1,4 +1,4 @@
-import { time, row } from '../lib.mjs';
+import { time, row } from '../timing.mjs'; // no Node imports: this suite also runs in the SpiderMonkey shell
 
 const N = 10_000;
 

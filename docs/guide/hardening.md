@@ -109,7 +109,10 @@ on a raw argument at a *canonical only* call site is a silent wrong answer
 instead of a thrown one. Semantics are untouched — non-values are still
 rejected, results are still canonical.
 
-**What `skipFreezing()` buys, and costs.** Frozen arrays are slow in V8.
+**What `skipFreezing()` buys, and costs.** That depends on the engine: nothing
+on SpiderMonkey (Firefox), where freezing is cheap and frozen arrays read at
+full speed; your own loops on V8; and valsem's edits of large arrays as well
+on JavaScriptCore. Frozen arrays are slow in V8.
 The freeze call itself is nearly free for an array of integers or of objects
 (a map transition, ~0.1 µs at any size; an array of doubles is converted
 element by element, ~150 µs for 10,000), but the frozen *state* is not:

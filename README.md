@@ -100,6 +100,8 @@ and a loss for state built once and thrown away.
 Freezing is on by default and stays on: it is what turns a stray mutation of
 shared state into an exception. What it costs depends on the engine.
 
+- On **SpiderMonkey** (Firefox) it costs nothing: the freeze is cheap and a
+  frozen array reads as fast as an unfrozen one.
 - On **V8** (Chrome, Node, Deno) the freeze itself is nearly free. The cost is
   in *your* code that reads canonical **plain arrays**: V8 has no fast path
   for frozen elements in several builtins, so `for…of`, `filter` and
