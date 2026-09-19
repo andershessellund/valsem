@@ -495,6 +495,75 @@ function buildNode(
 }
 
 // ---------------------------------------------------------------------------
+// Batch payload update — the last slot of many present entries, in one pass
+// ---------------------------------------------------------------------------
+
+/**
+ * Set the LAST payload slot (the anchor, in the ordered collections' tries)
+ * of every entry `ks[id]` for `id` in `ids` to `vs[id]` (`hs[id]` is the
+ * key's hash). Keys the trie does not hold are skipped, and so are entries
+ * whose slot already holds the value. One descent for the whole batch: every
+ * touched node is rebuilt and consed once, where one insert per entry would
+ * path-copy (and cons) from the root each time. Returns `node` itself when
+ * nothing changed. The shape cannot change — no entry is added or removed —
+ * so each node keeps its bitmaps.
+ */
+export function trieSetLast(
+  cfg: TrieConfig,
+  node: HNode,
+  shift: number,
+  hs: readonly number[],
+  ks: readonly unknown[],
+  vs: readonly unknown[],
+  ids: readonly number[],
+): HNode {
+  const stride = cfg.stride;
+  const last = stride - 1;
+  let slots: unknown[] | null = null;
+  if (node.t === 1) {
+    for (let j = 0; j < ids.length; j++) {
+      const id = ids[j]!;
+      if (hs[id] !== node.khash) continue;
+      for (let i = 0; i < node.slots.length; i += stride) {
+        if (!same(node.slots[i], ks[id])) continue;
+        if (!same(node.slots[i + last], vs[id])) (slots ??= node.slots.slice())[i + last] = vs[id];
+        break;
+      }
+    }
+    return slots === null ? node : consC(cfg, node.khash, slots);
+  }
+  const dataEnd = popcount(node.dmap) * stride;
+  let groups: (number[] | undefined)[] | null = null;
+  for (let j = 0; j < ids.length; j++) {
+    const id = ids[j]!;
+    const b = (hs[id]! >>> shift) & 31;
+    const bit = 1 << b;
+    if (node.dmap & bit) {
+      const i = popcount(node.dmap & (bit - 1)) * stride;
+      if (same(node.slots[i], ks[id]) && !same(node.slots[i + last], vs[id])) {
+        (slots ??= node.slots.slice())[i + last] = vs[id];
+      }
+    } else if (node.nmap & bit) {
+      const g = (groups ??= new Array(32))[b];
+      if (g === undefined) groups[b] = [id];
+      else g.push(id);
+    }
+  }
+  if (groups !== null) {
+    for (let b = 0; b < 32; b++) {
+      const g = groups[b];
+      if (g === undefined) continue;
+      const bit = 1 << b;
+      const ni = dataEnd + popcount(node.nmap & (bit - 1));
+      const child = node.slots[ni] as HNode;
+      const next = trieSetLast(cfg, child, shift + 5, hs, ks, vs, g);
+      if (next !== child) (slots ??= node.slots.slice())[ni] = next;
+    }
+  }
+  return slots === null ? node : consB(cfg, node.dmap, node.nmap, slots);
+}
+
+// ---------------------------------------------------------------------------
 // Remove
 // ---------------------------------------------------------------------------
 
