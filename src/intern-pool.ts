@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // intern-pool — weak pools; the engine reports deaths, idle time buries them.
 //
-// A pool is a Map from a 30-bit key to a bucket: one Slot (the overwhelmingly
+// A pool is a Map from a 30-bit key to a bucket (64 Maps in fact, sharded by
+// hash: see SHARDS): one Slot (the overwhelmingly
 // common case) or an array when two slots share a key. A Slot IS the WeakRef
 // to the pooled object, carrying its full 32-bit hash and its pool — one
 // allocation per registration, and the registry's holdings are the slot
@@ -68,6 +69,26 @@ type Bucket = Slot | Slot[];
 
 /** Map key for a full 32-bit hash: the low 30 bits, always a Smi. */
 const KEY_MASK = 0x3fffffff;
+
+/**
+ * The index is SHARDS Maps, not one. Two reasons, both about size: an engine
+ * grows a hash table by rehashing all of it inside the one `set` that tipped
+ * it over (20 ms for a Map of a million entries on V8, and every canonical
+ * object is an entry), and V8 refuses a Map more than 2^24 entries, which one
+ * index reached at 16.7M live canonical objects with a RangeError out of
+ * `intern`. With 64 shards a rehash touches a 64th of the pool and the
+ * ceiling is a billion. Shards are created on first use: most pools are small.
+ */
+const SHARD_BITS = 6;
+const SHARDS = 1 << SHARD_BITS;
+
+/**
+ * Shard of a hash. Multiplied first (Fibonacci hashing), so that a hash with
+ * all its entropy in the low bits — a consumer's `x + 31 * y` — still spreads.
+ */
+function shardOf(hash: number): number {
+  return Math.imul(hash, 0x9e3779b1) >>> (32 - SHARD_BITS);
+}
 
 /** Remove a dead slot from its pool. Idempotent: tolerates "already pruned". */
 function reclaim(slot: Slot): void {
@@ -193,15 +214,17 @@ export interface InternPool<T extends object> {
 }
 
 class InternPoolImpl<T extends object> implements InternPool<T> {
-  readonly #buckets = new Map<number, Bucket>();
+  readonly #shards: (Map<number, Bucket> | undefined)[] = new Array<Map<number, Bucket> | undefined>(SHARDS).fill(undefined);
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
-    const b = this.#buckets.get(hash & KEY_MASK);
+    const b = this.#shards[shardOf(hash)]?.get(hash & KEY_MASK);
     if (b === undefined) return undefined;
     if (Array.isArray(b)) {
       for (let i = 0; i < b.length; i++) {
         const slot = b[i]!;
-        if (slot.hash !== hash) continue; // shares the 30-bit key, not a candidate
+        // Shares the 30-bit key without sharing the hash: not a candidate. (The
+        // shard function happens to separate such pairs today; this does not rely on it.)
+        if (slot.hash !== hash) continue;
         const candidate = slot.deref();
         if (candidate !== undefined && predicate(candidate as T)) return candidate as T;
       }
@@ -216,9 +239,10 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     const slot = new Slot(value, hash, this as unknown as InternPoolImpl<object>);
     registry.register(value, slot);
     const key = hash & KEY_MASK;
-    const b = this.#buckets.get(key);
+    const buckets = (this.#shards[shardOf(hash)] ??= new Map());
+    const b = buckets.get(key);
     if (b === undefined) {
-      this.#buckets.set(key, slot);
+      buckets.set(key, slot);
     } else if (Array.isArray(b)) {
       // Prune dead members in passing (their reclaim may still be pending), then append.
       let w = 0;
@@ -226,9 +250,9 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       b.length = w;
       b.push(slot);
     } else if (b.deref() === undefined) {
-      this.#buckets.set(key, slot); // replace the dead singleton in place
+      buckets.set(key, slot); // replace the dead singleton in place
     } else {
-      this.#buckets.set(key, [b, slot]);
+      buckets.set(key, [b, slot]);
     }
     return value;
   }
@@ -236,14 +260,16 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   /** @internal Remove `slot` if it is still in its bucket. Idempotent. */
   _reclaim(slot: Slot): void {
     const key = slot.hash & KEY_MASK;
-    const b = this.#buckets.get(key);
+    const buckets = this.#shards[shardOf(slot.hash)];
+    if (buckets === undefined) return;
+    const b = buckets.get(key);
     if (b === slot) {
-      this.#buckets.delete(key);
+      buckets.delete(key);
     } else if (Array.isArray(b)) {
       const k = b.indexOf(slot);
       if (k < 0) return; // already pruned in passing
       b.splice(k, 1);
-      if (b.length === 1) this.#buckets.set(key, b[0]!);
+      if (b.length === 1) buckets.set(key, b[0]!);
     }
     // else: replaced in place by a live member — nothing to do
   }
@@ -264,11 +290,14 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
   size(): number {
     let n = 0;
-    for (const b of this.#buckets.values()) {
-      if (Array.isArray(b)) {
-        for (let k = 0; k < b.length; k++) if (b[k]!.deref() !== undefined) n++;
-      } else if (b.deref() !== undefined) {
-        n++;
+    for (const buckets of this.#shards) {
+      if (buckets === undefined) continue;
+      for (const b of buckets.values()) {
+        if (Array.isArray(b)) {
+          for (let k = 0; k < b.length; k++) if (b[k]!.deref() !== undefined) n++;
+        } else if (b.deref() !== undefined) {
+          n++;
+        }
       }
     }
     return n;
@@ -277,8 +306,13 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   /** @internal Test-only: slots stored (live or awaiting reclaim), and bucket count. */
   _stats(): { slots: number; buckets: number } {
     let slots = 0;
-    for (const b of this.#buckets.values()) slots += Array.isArray(b) ? b.length : 1;
-    return { slots, buckets: this.#buckets.size };
+    let count = 0;
+    for (const buckets of this.#shards) {
+      if (buckets === undefined) continue;
+      count += buckets.size;
+      for (const b of buckets.values()) slots += Array.isArray(b) ? b.length : 1;
+    }
+    return { slots, buckets: count };
   }
 }
 

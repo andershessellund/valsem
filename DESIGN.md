@@ -293,11 +293,14 @@ any number created by `createInternPool`. (`ValueMap` and `ValueSet`
 wrappers need no pool: they canonicalise through a `WeakMap` keyed by root,
 §6.3.) A pool
 is a `Map` from a 30-bit key (`hash & 0x3fffffff`, so it is always a Smi)
-to a bucket: one `Slot`, or an array of slots when two keys collide. A
+to a bucket: one `Slot`, or an array of slots when two keys collide. The
+index is in fact 64 such Maps, a shard chosen from the hash and created on
+first use, so that growing the index rehashes a 64th of it and no single
+Map approaches the engine's size limit. A
 `Slot` *is* the `WeakRef` to the pooled object (a subclass), carrying the
 full 32-bit hash and its pool; `lookup(hash, predicate)` pre-checks
 `slot.hash` before dereferencing. `register(value, hash)` prunes dead
-members of the bucket in passing. Why: D3.
+members of the bucket in passing. Why: D3, D48.
 
 Cleanup: one global `FinalizationRegistry` reports each death after the
 major GC that clears its `WeakRef`. The callback pushes the slot on a

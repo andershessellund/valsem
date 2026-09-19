@@ -252,6 +252,30 @@ keys are boxed; masking to 30 bits fixed a 2× hit cost at 200k entries.
 the `WeakRef` (a subclass): zero deoptimisations, one object header less
 per member. DESIGN.md §4.2.
 
+### D48. The pool index is 64 Maps, sharded by hash
+
+`shard = imul(hash, 0x9e3779b1) >>> 26`; each shard is the `Map` of D3,
+created on first use.
+
+**Why.** A soak run (`scripts/experiments/soak.mjs`) held millions of
+canonical objects alive, which no benchmark had, and found two properties of
+one large `Map`. V8 refuses a `Map` more than 2^24 entries: at 16.9M live
+canonical objects `intern` threw `RangeError: Map maximum size exceeded`.
+And a hash table grows by rehashing all of itself inside the `set` that
+tipped it over: measured on the pool alone, with collections told apart,
+1.3 ms at 131k entries, 12 ms at 1M, 29 ms at 2M, doubling with the table.
+Sharded, 20M objects intern without error and no `register` takes over a
+millisecond outside a collection; registration and lookup cost the same
+within noise at 1k, 100k, 1M and 4M members (one multiply, a shift and an
+array load per operation). The multiply is there for consumer pools: a
+`[hashCode]` with its entropy in the low bits still spreads, and one that
+does not spread degenerates to the single Map this replaced. Shards are
+lazy because most pools are small. **Rejected:** growing the shard count
+with the pool (a split is the same stall, moved), and a hand-rolled table
+(D3). **Not covered:** the meta `WeakMap` of D11 is one table too, and V8
+grows a `WeakMap` far more slowly than a `Map` (0.4 s at 1M keys); that is
+a separate decision. DESIGN.md §4.2.
+
 ### D11. One meta object per canonical, in a `WeakMap`, with no back-reference
 
 Each canonical object's hash and incremental-hash accumulator live in one
