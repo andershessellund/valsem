@@ -49,6 +49,24 @@ The title must be a [Conventional Commit](https://www.conventionalcommits.org):
 | `feat!: …` / `fix!: …` | a breaking change | major |
 | `docs:` `test:` `refactor:` `perf:` `ci:` `build:` `chore:` | no change a user can observe | none |
 
+**The description is part of the commit too**, and release-please parses the
+whole message with a strict grammar. A commit it cannot parse is dropped from
+the changelog without an error, which once lost two real fixes. The usual
+cause is a line of code that starts like a commit header, such as
+`produce(intern(x), …)`. The `release notes can be generated` check runs the
+same parser on what the squash commit will be, and tells you the offending
+line. Reword it, or add an override block to the description; release-please
+then reads only what is between the markers:
+
+```
+BEGIN_COMMIT_OVERRIDE
+fix: one line per changelog entry
+END_COMMIT_OVERRIDE
+```
+
+The same block, added to an already merged PR, corrects its release notes
+after the fact.
+
 A breaking change also carries a `BREAKING CHANGE: …` paragraph in the
 description, saying what breaks and what to do instead. Write the title as the
 changelog line you would want to read: it is one.
