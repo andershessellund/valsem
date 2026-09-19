@@ -43,7 +43,7 @@ full speed; your own loops on V8; and valsem's edits of large arrays as well
 on JavaScriptCore. Frozen arrays are slow in V8.
 The freeze call itself is nearly free for an array of integers or of objects
 (a map transition, ~0.1 µs at any size; an array of doubles is converted
-element by element, ~150 µs for 10,000), but the frozen *state* is not:
+element by element, 150–200 µs for 10,000), but the frozen *state* is not:
 `forEach` runs 3–9× slower, `filter` 2–3×, `slice` and `concat` 10–150×,
 `JSON.stringify` 2–5×, and an indexed loop over an array of small integers
 12× (over objects or doubles it barely moves), and that cost lands in your

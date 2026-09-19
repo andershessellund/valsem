@@ -218,7 +218,7 @@ price is an object where a primitive was: reads go through `.value`, and
 `typeof` says `'object'`. Ids, names and short strings do not need it —
 hashing them costs less than the wrapper.
 
-`RawArray` is the large-response tool. Admitting a response costs ~1.5 µs
+`RawArray` is the large-response tool. Admitting a response costs ~1.6 µs
 per 10-field record, paid for every record whether or not anything looks
 at it, and a 100k-row response is admitted to show 100 rows. A `RawArray`
 holds the response as received and admits on demand: `slice(a, b)` returns
@@ -265,7 +265,7 @@ HashSet.from(points).size; // duplicates collapse
 Underneath is a native `Map` (or `Set`) keyed by the canonical key: every
 key is **interned on the way in**, on `set` and on every lookup alike. A key
 that is already canonical — your state, anything out of `intern`, `produce`
-or a collection — costs one cache probe over the native lookup, about 20 ns.
+or a collection — costs one cache probe over the native lookup, 10–20 ns.
 A raw key is interned first: a pool lookup, about 300 ns for a small record,
 and a copy into the pool when the key is new. Two consequences: iteration
 yields canonical keys, ready for `fastEquals` or a native `Map`; and a key
@@ -296,14 +296,14 @@ const visible = memoize(
 );
 
 visible(state.todos, { done: false }); // runs
-visible(state.todos, { done: false }); // ~40 ns, and the SAME array instance — a fresh literal is the same value
+visible(state.todos, { done: false }); // 40–50 ns, and the SAME array instance — a fresh literal is the same value
 ```
 
 `memoize` caches results keyed on the argument tuple **by value**: two
 calls with structurally equal arguments are one call, whatever the
 references. It is built on the premise the rest of valsem runs on: you
 interned your state when it was constructed, so a hit on canonical
-arguments is O(1) at any size, about 40 ns, because the hash is already on
+arguments is O(1) at any size, 40–50 ns, because the hash is already on
 the value and equality is `===`. A small config literal built fresh each
 call still hits, matched by value, the case reference-keyed memoizers miss
 every time. Hand it raw payloads instead and it is **slow**: a full
