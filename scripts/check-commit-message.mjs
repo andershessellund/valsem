@@ -65,7 +65,8 @@ export function wrapLikeGitHub(text, width = 72) {
  * gets is not known yet, so both are checked.
  */
 function candidateMessages(title, body, number) {
-  const override = (body.split('BEGIN_COMMIT_OVERRIDE')[1] || '').split('END_COMMIT_OVERRIDE')[0].trim();
+  const sections = body.split('BEGIN_COMMIT_OVERRIDE');
+  const override = sections.length > 1 ? sections[1].split('END_COMMIT_OVERRIDE')[0].trim() : '';
   if (override) return { messages: [override], overridden: true };
   const base = `${title} (#${number})\n\n${wrapLikeGitHub(body)}`.trim();
   const trailer = 'Co-authored-by: Someone <someone@example.com>';
