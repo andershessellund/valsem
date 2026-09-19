@@ -274,6 +274,11 @@ so `produce` can edit your type in place, with patches.
 - **`{ a: undefined }` is `{}`.** Records drop undefined-valued keys; use
   `null` for "present but empty". (`ValueMap` is the opposite: storing
   `undefined` is a real entry.)
+- **`JSON.stringify` works on the collections, as a view.** Lists and sets
+  stringify as arrays, maps as `[key, value]` pairs (what `from()` takes).
+  For `ValueMap`/`ValueSet` the order follows the per-process hash seed, so
+  the string differs between processes: never compare or key by it, and
+  persist `OrderedMap`/`OrderedSet` when order must hold.
 - **Drafts do not escape.** A draft used after its `produce` call throws, and
   so does a draft handed to a different `produce` call, however deeply it is
   wrapped; pass `current(draft)` to give its value to another recipe.

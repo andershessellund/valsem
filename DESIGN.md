@@ -426,6 +426,13 @@ and does not pretend to be (D29).
 - **Explicit-stack iterators** extending the global `Iterator` where it
   exists, so the ES2025 helpers work (D6).
 - **Drafting** through `[toDraft]` (§7), with a mutable twin per class.
+- **A `toJSON`**, so `JSON.stringify` sees the contents where `#private`
+  state would give `{}`: lists and sets as an array of their elements, maps
+  as an array of `[key, value]` pairs (keys are values, so there is no
+  object form; pairs are what `from()` takes), `HashMap`/`HashSet` and the
+  draft twins the same. A fresh unfrozen array per call, nothing kept. A
+  view and not a wire format: the unordered collections' output order
+  follows the per-process hash seed (D46).
 
 ### 6.3 `ValueMap` / `ValueSet`: the hash-consed CHAMP trie
 

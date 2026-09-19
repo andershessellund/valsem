@@ -168,6 +168,11 @@ export class DraftMap<K, V> {
   forEach(fn: (value: V, key: K, map: DraftMap<K, V>) => void, thisArg?: unknown): void {
     for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
   }
+
+  /** What `JSON.stringify` sees: what the draft holds right now, in its value twin's shape (`[key, value]` pairs). A look, not an edit. */
+  toJSON(): [K, V][] {
+    return [...this.entries()];
+  }
 }
 
 

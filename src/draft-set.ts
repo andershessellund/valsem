@@ -112,6 +112,11 @@ export class DraftSet<T> {
   forEach(fn: (value: T, value2: T, set: DraftSet<T>) => void, thisArg?: unknown): void {
     for (const v of this.values()) fn.call(thisArg, v, v, this);
   }
+
+  /** What `JSON.stringify` sees: what the draft holds right now, in its value twin's shape (an array). A look, not an edit. */
+  toJSON(): T[] {
+    return [...this.values()];
+  }
 }
 
 

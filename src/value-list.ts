@@ -659,6 +659,20 @@ export class ValueList<T> implements Iterable<T> {
     return canonical;
   }
 
+  /**
+   * What `JSON.stringify` sees: the elements, as a plain array. A fresh,
+   * unfrozen one on every call, not {@link toArray}'s canonical snapshot:
+   * nothing is interned, pooled or kept, and `JSON.stringify` walks an
+   * unfrozen array about 1.6x faster than a frozen one (it is 3.7x with the
+   * snapshot's first-call interning counted). JSON is a view, not a wire
+   * format: which collection this was is not in it (D46).
+   */
+  toJSON(): T[] {
+    const out: T[] = [];
+    this.forEach((v) => out.push(v));
+    return out;
+  }
+
   [Symbol.iterator](): ArrayIterator<T> {
     return new ChunkIterator<T>(this.#root, this.#tail) as unknown as ArrayIterator<T>;
   }

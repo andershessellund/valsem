@@ -204,6 +204,11 @@ export class DraftList<T> implements Iterable<T> {
   toArray(): readonly T[] {
     return [...this];
   }
+
+  /** What `JSON.stringify` sees: what the draft holds right now, in its value twin's shape (an array). A look, not an edit. */
+  toJSON(): T[] {
+    return [...this];
+  }
 }
 
 /** Draft `base` under `parent`. */

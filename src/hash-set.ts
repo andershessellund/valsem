@@ -77,4 +77,9 @@ export class HashSet<T> {
   [Symbol.iterator](): IterableIterator<T> {
     return this.#set.values();
   }
+
+  /** What `JSON.stringify` sees: the members in insertion order, as a fresh plain array, where a native `Set` gives `{}`. */
+  toJSON(): T[] {
+    return [...this.#set];
+  }
 }
