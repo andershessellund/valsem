@@ -13,7 +13,8 @@ import { ValueList } from './value-list.js';
 import { RawArray } from './raw-array.js';
 import { OrderedSet } from './ordered-set.js';
 import { OrderedMap } from './ordered-map.js';
-import { produce } from './produce.js';
+import { applyPatches, produce, produceWithPatches } from './produce.js';
+import { intern } from './intern.js';
 import { toInteger } from './shared.js';
 
 const ODD = [NaN, 0.5, 1.5, -1.5, -0, -0.5, 2.999, Infinity, -Infinity, 1e9, -1e9, 3, -3, 0] as const;
@@ -133,5 +134,75 @@ describe('the other index-taking entry points', () => {
       }),
       { numRuns: 300 },
     );
+  });
+});
+
+// A plain array inside a recipe IS an Array, so its `splice` answers to the
+// same oracle. It was the one index-taking entry point the suites above left
+// out, and it truncated instead of coercing: a NaN start stayed NaN. The
+// native splice underneath then coerced it on its own, so the edit happened
+// at index 0 while the recorded intent said index NaN, and the NaN went out
+// in the patches, which `applyPatches` rejects as malformed.
+describe('a plain-array draft’s splice reads its arguments as Array’s does', () => {
+  type Splice = (...args: unknown[]) => unknown[];
+  // What a JavaScript caller can put in an index position, numbers and not.
+  const loose = fc.oneof(odd, fc.constantFrom(undefined, null, '2', '-1', 'x', true));
+  // Every argument-list shape: the delete count depends on how many arguments
+  // were PASSED (none: remove nothing; a start alone: through the end), not
+  // on their values (an explicit `undefined` count is 0).
+  const call: fc.Arbitrary<readonly unknown[]> = fc.oneof(
+    fc.constant([]),
+    fc.tuple(loose),
+    fc.tuple(loose, loose),
+    fc.tuple(loose, loose, fc.integer()),
+    fc.tuple(loose, loose, fc.integer(), fc.integer()),
+  );
+  // Either side of the size where produce copies a frozen base differently.
+  const len = fc.constantFrom(0, 1, 5, 80);
+
+  it('the result and the removed elements match, for every argument list', () => {
+    fc.assert(
+      fc.property(len, call, (n, args) => {
+        const expected = range(n);
+        const removed = (expected.splice as Splice)(...args);
+        let got: unknown[] = [];
+        const next = produce(range(n), (d) => void (got = (d.splice as Splice)(...args)));
+        expect(next).toEqual(expected);
+        expect(got).toEqual(removed);
+      }),
+      { numRuns: 600 },
+    );
+  });
+
+  it('the patches it emits are well-formed and apply in both directions', () => {
+    fc.assert(
+      fc.property(len, call, (n, args) => {
+        const base = intern(range(n));
+        const [result, patches, inverse] = produceWithPatches(base, (d) => void (d.splice as Splice)(...args));
+        for (const p of [...patches, ...inverse]) {
+          if (p.kind !== 'list.splice') continue;
+          expect(Number.isInteger(p.index)).toBe(true);
+          expect(Number.isInteger(p.remove)).toBe(true);
+        }
+        expect(applyPatches(base, patches)).toBe(result);
+        expect(applyPatches(result, inverse)).toBe(base);
+      }),
+      { numRuns: 600 },
+    );
+  });
+
+  it.each<[string, readonly unknown[], number[]]>([
+    ['no arguments remove nothing', [], [0, 1, 2, 3, 4]],
+    ['a NaN start is 0', [NaN, 1], [1, 2, 3, 4]],
+    ['a NaN start alone removes everything', [NaN], []],
+    ['a NaN start with an insertion', [NaN, 1, 9], [9, 1, 2, 3, 4]],
+    ['an explicit undefined count is 0', [1, undefined, 9], [0, 9, 1, 2, 3, 4]],
+    ['a NaN count is 0', [1, NaN, 9], [0, 9, 1, 2, 3, 4]],
+  ])('%s', (_, args, expected) => {
+    const base = intern(range(5));
+    const [result, patches, inverse] = produceWithPatches(base, (d) => void (d.splice as Splice)(...args));
+    expect(result).toEqual(expected);
+    expect(applyPatches(base, patches)).toBe(result);
+    expect(applyPatches(result, inverse)).toBe(base);
   });
 });
