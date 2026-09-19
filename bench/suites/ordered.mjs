@@ -8,6 +8,7 @@ import { OrderedMap as IOMap, OrderedSet as IOSet, is as iIs } from 'immutable';
 export default {
   id: 'ordered',
   title: 'OrderedMap, OrderedSet — against Immutable.js',
+  processes: 5, // shapes follow the per-process hash seed: report the median, not one draw
   description: `
 Insertion-ordered collections with canonical instances. Immutable's \`OrderedMap\` keeps a map from key to list
 index and leaves holes in the list on delete, compacting when holes outnumber entries — a representation that

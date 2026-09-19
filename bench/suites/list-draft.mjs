@@ -8,6 +8,7 @@ const N = 100_000;
 export default {
   id: 'list-draft',
   title: 'ValueList inside produce — batched updates',
+  processes: 5, // shapes follow the per-process hash seed: report the median, not one draw
   description: `
 One \`produce\` per row over a 100,000-record \`ValueList\`, through its draft. The draft never materialises: structural
 ops go to a persistent working list as they happen, point edits and child drafts sit in an overlay by current index,

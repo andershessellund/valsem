@@ -10,6 +10,7 @@ import { Map as IMap, Set as ISet, List as IList, is as iIs, hash as iHash } fro
 export default {
   id: 'collections',
   title: 'ValueMap, ValueSet, ValueList — against Immutable.js',
+  processes: 5, // shapes follow the per-process hash seed: report the median, not one draw
   description: `
 The closest structural comparison: Immutable's \`Map\`/\`Set\` are HAMTs like valsem's; its \`List\` is a 32-way
 radix vector, which valsem's \`ValueList\` was until it became a content-chunked tree. Primitive keys and values, so

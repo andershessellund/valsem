@@ -7,6 +7,7 @@ const N = 100_000;
 export default {
   id: 'list',
   title: 'ValueList — operations and diff at 100k elements',
+  processes: 5, // shapes follow the per-process hash seed: report the median, not one draw
   description: `
 \`ValueList\` is a content-chunked, hash-consed tree with the open last run kept in a tail array. A leaf boundary
 falls after any element whose seeded hash says so (1 in 32; runs cap at 64), and branch runs follow the same rule on
