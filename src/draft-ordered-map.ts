@@ -120,6 +120,15 @@ export class DraftOrderedMap<K, V> {
     return this.#state.work.indexOf(intern(key));
   }
 
+  /**
+   * The value at `index` (drafted, if it can be), which must name an entry:
+   * an integer in `[0, size)`, or a `RangeError`. Typed `Draft<V>`, spelled so
+   * that the class stays covariant (see `DraftList.get`).
+   */
+  valueAt(index: number): Draft<V> | (V & undefined) {
+    return this.get(this.#state.work.keyAt(index) as K) as Draft<V> | (V & undefined); // keyAt checks the index
+  }
+
   /** The key at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */
   keyAt(index: number): K {
     return this.#state.work.keyAt(index) as K;

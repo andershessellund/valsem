@@ -110,6 +110,11 @@ export class DraftSet<T> {
     return this.values();
   }
 
+  /** `[value, value]` pairs, as `Set.prototype.entries` gives them. */
+  *entries(): IterableIterator<[T, T]> {
+    for (const v of this.values()) yield [v, v];
+  }
+
   forEach(fn: (value: T, value2: T, set: DraftSet<T>) => void, thisArg?: unknown): void {
     for (const v of this.values()) fn.call(thisArg, v, v, this);
   }

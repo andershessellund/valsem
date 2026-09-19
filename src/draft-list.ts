@@ -195,6 +195,36 @@ export class DraftList<T> implements Iterable<T> {
     return removed as T[];
   }
 
+  /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.insert`. */
+  insert(index: number, value: T): this {
+    const s = this.#state;
+    this.splice(insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insert'), 0, value);
+    return this;
+  }
+
+  /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`). Returns it. */
+  remove(index: number): T {
+    const s = this.#state;
+    return this.splice(elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1)[0] as T;
+  }
+
+  /** Remove and return the first element, `undefined` when empty, as `Array.prototype.shift`. */
+  shift(): T | undefined {
+    return this.length === 0 ? undefined : this.splice(0, 1)[0];
+  }
+
+  /** Insert `values` at the front; the new length, as `Array.prototype.unshift`. */
+  unshift(...values: T[]): number {
+    this.splice(0, 0, ...values);
+    return this.length;
+  }
+
+  /** Visit every element in index order, as it is right now (iteration's view: a child already drafted comes as its draft). */
+  forEach(fn: (value: T, index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
+    let i = 0;
+    for (const v of this) fn.call(thisArg, v, i++, this);
+  }
+
   *[Symbol.iterator](): IterableIterator<T> {
     const s = this.#state;
     if (s.overlay.size === 0) {
