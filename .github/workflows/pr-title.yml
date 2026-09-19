@@ -20,10 +20,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The squash commit is the title PLUS the description, and release-please
-  # parses all of it with a strict grammar. A commit it cannot parse is dropped
-  # from the changelog and the version calculation, silently. This runs the
-  # same parser on what the squash commit will be. See the script for details.
+  # The squash commit is the PR title only (a repository setting). Beyond the
+  # title, release-please reads one thing: an override block in the PR
+  # description. What it cannot parse it drops from the changelog and the
+  # version calculation, silently, and a BREAKING CHANGE or Release-As footer
+  # written in the description outside such a block never reaches it at all.
+  # This runs release-please's own parser over both. See the script.
   release-notes:
     name: release notes can be generated
     runs-on: ubuntu-latest

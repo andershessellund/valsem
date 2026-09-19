@@ -1,79 +1,39 @@
 // ---------------------------------------------------------------------------
-// Will release-please be able to read this pull request?
+// Will release-please read this pull request the way its author means?
 //
-// main takes squash merges, and the squash commit is the PR title plus the PR
-// description. release-please parses that WHOLE message with a strict
-// Conventional Commits grammar, and a commit it cannot parse is dropped from
-// the changelog and from the version calculation — silently, with a line in a
-// workflow log nobody reads. It happened to two real fixes: a description line
-// such as `produce(intern([0]), …)` looks like a `type(scope)` header, and
-// the nested parenthesis is a syntax error.
+// main takes squash merges, and the squash commit is the PR TITLE ONLY (a
+// repository setting). release-please therefore reads two things, and nothing
+// else: the title, from the commit, and an optional override block, which it
+// fetches from the PR description:
 //
-// This runs the same parser, at the same version, after the same two
-// preprocessing steps (src/commit.ts in release-please), so it fails exactly
-// when the commit would be dropped.
+//     BEGIN_COMMIT_OVERRIDE
+//     fix: one line per changelog entry
+//     END_COMMIT_OVERRIDE
+//
+// It parses both with a strict Conventional Commits grammar, and what it cannot
+// parse it DROPS — no changelog entry, no effect on the next version — with a
+// line in a workflow log nobody reads. This runs the same parser, at the same
+// version, on those same two things.
+//
+// It also catches the quiet failure the title-only setting introduces: a
+// `BREAKING CHANGE:` or `Release-As:` footer written in the description is no
+// longer part of any commit, so release-please never sees it unless it is
+// inside an override block.
+//
+// (An earlier version checked whole descriptions, because the squash commit
+// then included them. It had to reproduce how GitHub re-wraps a description,
+// which is undocumented and was not exact for HTML. Making the body blank
+// removed that failure by construction, and most of this script with it.)
 //
 // Reads PR_TITLE, PR_BODY and PR_NUMBER from the environment.
 // ---------------------------------------------------------------------------
 import { parser } from '@conventional-commits/parser';
 
 const TYPES = 'feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert';
-/** Types release-please lists in the changelog. Dropping one of these loses release notes. */
-const VISIBLE = new Set(['feat', 'fix', 'perf', 'revert', 'deps']);
+const BEGIN = 'BEGIN_COMMIT_OVERRIDE';
+const END = 'END_COMMIT_OVERRIDE';
 
-/**
- * GitHub does not use the description verbatim in the squash commit: it
- * re-wraps each line at 72 columns, greedily on spaces, leaving fenced code
- * blocks alone. Wrapping creates new line starts, so a harmless mid-sentence
- * `name(` can become the start of a line and break the parser. Reproduced
- * here; verified byte-identical against the squash commits on main.
- */
-export function wrapLikeGitHub(text, width = 72) {
-  let fenced = false;
-  return text
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        fenced = !fenced;
-        return line;
-      }
-      if (fenced || line.length <= width) return line;
-      const out = [];
-      let current = '';
-      for (const word of line.split(' ')) {
-        if (current === '') current = word;
-        else if (`${current} ${word}`.length <= width) current += ` ${word}`;
-        else {
-          out.push(current);
-          current = word;
-        }
-      }
-      out.push(current);
-      return out.join('\n');
-    })
-    .join('\n');
-}
-
-/**
- * The messages release-please may end up parsing for this PR.
- *
- * An override block in the description replaces everything (release-please's
- * preprocessCommitMessage). Otherwise it is the squash commit: title, PR
- * number, the wrapped description, and the co-author trailers GitHub appends,
- * after a `---------` line when the PR has several commits. Which ending a PR
- * gets is not known yet, so both are checked.
- */
-function candidateMessages(title, body, number) {
-  const sections = body.split('BEGIN_COMMIT_OVERRIDE');
-  const override = sections.length > 1 ? sections[1].split('END_COMMIT_OVERRIDE')[0].trim() : '';
-  if (override) return { messages: [override], overridden: true };
-  const base = `${title} (#${number})\n\n${wrapLikeGitHub(body)}`.trim();
-  const trailer = 'Co-authored-by: Someone <someone@example.com>';
-  return { messages: [base, `${base}\n\n${trailer}`, `${base}\n\n---------\n\n${trailer}`], overridden: false };
-}
-
-/** release-please's splitMessages: a body may hold several conventional commits. */
+/** release-please's splitMessages (src/commit.ts): one message may hold several conventional commits. */
 function splitMessages(message) {
   const parts = message.split('BEGIN_NESTED_COMMIT');
   const messages = [parts.shift()];
@@ -86,59 +46,82 @@ function splitMessages(message) {
   return [...split, ...messages.slice(1)];
 }
 
-export function check(title, body, number) {
-  const { messages, overridden } = candidateMessages(title, body ?? '', number);
-  const failures = [];
-  const seen = new Set();
-  for (const message of messages) {
-    for (const part of splitMessages(message)) {
-      try {
-        parser(part);
-      } catch (error) {
-        const at = /at (\d+):(\d+)/.exec(String(error.message));
-        const line = at ? part.split(/\r?\n/)[Number(at[1]) - 1] : undefined;
-        const key = `${error.message}|${line}`;
-        if (!seen.has(key)) failures.push({ error: String(error.message), line });
-        seen.add(key);
-      }
+/** Problems found when parsing `message` as release-please would. */
+function parseProblems(message, what) {
+  const problems = [];
+  for (const part of splitMessages(message)) {
+    try {
+      parser(part);
+    } catch (error) {
+      const at = /at (\d+):(\d+)/.exec(String(error.message));
+      const line = at ? part.split(/\r?\n/)[Number(at[1]) - 1] : part.split(/\r?\n/)[0];
+      problems.push(`${what} cannot be parsed (${error.message}).\n    the line: ${line}`);
     }
   }
-  const type = /^(\w+)(?:\(.*?\))?(!)?:/.exec(title);
-  const matters = overridden || !type || VISIBLE.has(type[1]) || type[2] === '!' || /BREAKING[ -]CHANGE/.test(body ?? '');
-  return { failures, matters, overridden };
+  return problems;
+}
+
+/**
+ * The override block of a description, as release-please extracts it
+ * (preprocessCommitMessage), and the description with that block removed.
+ */
+function splitDescription(body) {
+  const sections = body.split(BEGIN);
+  if (sections.length < 2) return { override: undefined, rest: body, unterminated: false };
+  const afterBegin = sections.slice(1).join(BEGIN);
+  const end = afterBegin.indexOf(END);
+  return {
+    override: (end === -1 ? afterBegin : afterBegin.slice(0, end)).trim(),
+    rest: sections[0] + (end === -1 ? '' : afterBegin.slice(end + END.length)),
+    unterminated: end === -1,
+  };
+}
+
+/** Everything wrong with how release-please will read this PR; empty when all is well. */
+export function check(title, body, number) {
+  const description = (body ?? '').replace(/\r\n/g, '\n');
+  const problems = [...parseProblems(`${title} (#${number})`, 'The PR title')];
+  const { override, rest, unterminated } = splitDescription(description);
+
+  if (override !== undefined) {
+    if (unterminated) problems.push(`The description has ${BEGIN} but no ${END}: release-please would read everything after the marker.`);
+    if (override === '') problems.push(`The override block is empty: release-please ignores an empty block and uses the PR title.`);
+    else problems.push(...parseProblems(override, 'The override block'));
+  }
+
+  // Footers only count inside a commit message, and the description is not one.
+  for (const [pattern, name, consequence] of [
+    [/^BREAKING[ -]CHANGE:/m, 'BREAKING CHANGE:', 'the changelog will not carry this explanation'],
+    [/^Release-As:/im, 'Release-As:', 'the version will NOT be forced'],
+  ]) {
+    if (pattern.test(rest)) {
+      problems.push(
+        `The description has a "${name}" line outside an override block. The squash commit is the title only, ` +
+          `so release-please never sees it: ${consequence}. Move it into an override block, below a header line.`,
+      );
+    }
+  }
+  return { problems, overridden: override !== undefined };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { PR_TITLE: title = '', PR_BODY: body = '', PR_NUMBER: number = '0' } = process.env;
-  const { failures, matters, overridden } = check(title, body, number);
-  if (failures.length === 0) {
-    console.log(`ok: release-please can parse this${overridden ? ' (using the COMMIT_OVERRIDE block)' : ''}.`);
+  const { problems, overridden } = check(title, body, number);
+  if (problems.length === 0) {
+    console.log(`ok: release-please will read ${overridden ? 'the override block in the description' : 'the PR title'}.`);
     process.exit(0);
   }
-  for (const f of failures) {
-    console.log(`release-please cannot parse this commit message: ${f.error}`);
-    if (f.line !== undefined) console.log(`  the line: ${f.line}`);
-  }
-  if (!matters) {
-    console.log(`\nNot fatal: a "${title.split(':')[0]}" commit is hidden from the changelog, so dropping it loses nothing.`);
-    process.exit(0);
-  }
-  console.log(`
-When release-please cannot parse a squash commit it DROPS it: no changelog
-entry, and it does not count towards the next version. The message it parses
-is this PR's title plus its description.
+  for (const problem of problems) console.log(`- ${problem}\n`);
+  console.log(`release-please reads the PR title and, if present, an override block in the
+description. What it cannot parse it drops without an error. An override block
+looks like this; a footer goes below a header line, after a blank line:
 
-The usual cause is a description line that starts like a commit header, such
-as a line of code beginning with name( and containing another parenthesis.
+  ${BEGIN}
+  feat!: the changelog entry
 
-Fix it either way:
-  - reword or indent the line shown above, or
-  - add this to the PR description. release-please then reads ONLY what is
-    between the markers, so the rest of the description can say anything:
+  BREAKING CHANGE: what breaks, and what to do instead
+  ${END}
 
-      BEGIN_COMMIT_OVERRIDE
-      fix: one line per changelog entry
-      END_COMMIT_OVERRIDE
-`);
+See CONTRIBUTING.md, "Pull requests".`);
   process.exit(1);
 }
