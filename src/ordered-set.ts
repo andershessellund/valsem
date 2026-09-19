@@ -196,6 +196,11 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     this.#list.forEach((v) => fn.call(thisArg, v, v, this));
   }
 
+  /** What `JSON.stringify` sees: the members in order, as a fresh plain array; the order is the value's, so the string is stable (D46). */
+  toJSON(): T[] {
+    return this.#list.toJSON();
+  }
+
   /** The `produce` draft protocol: a {@link DraftOrderedSet} over this set. */
   [toDraft](parent?: DraftState): OrderedSetState<T> {
     return createOrderedSetDraft(this, parent, OrderedSet.empty);

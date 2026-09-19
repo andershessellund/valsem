@@ -212,6 +212,17 @@ export class DraftList<T> implements Iterable<T> {
   toArray(): readonly T[] {
     return [...this];
   }
+
+  /**
+   * What `JSON.stringify` sees: the JSON of the value this draft would be
+   * right now (an array), which is `current(draft).toJSON()`. Through the
+   * snapshot and not by iterating the draft: iteration hands out child
+   * drafts, and a drafted element of a `[toDraft]` type of your own would
+   * stringify as its draft object, not as its value. A look, not an edit.
+   */
+  toJSON(): T[] {
+    return (snapshotOf(this) as ValueList<T>).toJSON();
+  }
 }
 
 /** Draft `base` under `parent`. */

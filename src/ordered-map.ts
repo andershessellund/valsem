@@ -234,6 +234,19 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     this.#keys.forEach((k, i) => fn.call(thisArg, vals.get(i) as V, k, this));
   }
 
+  /**
+   * What `JSON.stringify` sees: the entries in order, as a fresh array of
+   * `[key, value]` pairs, the shape {@link from} takes. Keys are values, not
+   * strings, so there is no object form. The order is the value's, so the
+   * string is stable (D46).
+   */
+  toJSON(): [K, V][] {
+    const vals = this.#vals.toJSON();
+    const out: [K, V][] = [];
+    this.#keys.forEach((k, i) => out.push([k, vals[i] as V]));
+    return out;
+  }
+
   /** The `produce` draft protocol: a {@link DraftOrderedMap} over this map. */
   [toDraft](parent?: DraftState): OrderedMapState<K, V> {
     return createOrderedMapDraft(this, parent, OrderedMap.empty);

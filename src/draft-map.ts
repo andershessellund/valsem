@@ -168,6 +168,17 @@ export class DraftMap<K, V> {
   forEach(fn: (value: V, key: K, map: DraftMap<K, V>) => void, thisArg?: unknown): void {
     for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
   }
+
+  /**
+   * What `JSON.stringify` sees: the JSON of the value this draft would be
+   * right now (`[key, value]` pairs), which is `current(draft).toJSON()`. Through the
+   * snapshot and not by iterating the draft: iteration hands out child
+   * drafts, and a drafted element of a `[toDraft]` type of your own would
+   * stringify as its draft object, not as its value. A look, not an edit.
+   */
+  toJSON(): [K, V][] {
+    return (snapshotOf(this) as ValueMap<K, V>).toJSON();
+  }
 }
 
 

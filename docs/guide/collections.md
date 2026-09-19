@@ -111,6 +111,40 @@ amortised rebuild anywhere. `InternedString` *does* expose its datum —
 is a primitive. The rule: the representation is public exactly where the
 runtime can actually protect it.
 
+### `JSON.stringify`
+
+Every collection has a `toJSON`, so a state tree stringifies whole, where a
+class with private state would come out as `{}`. Lists and sets are an array
+of their elements. Maps are an array of `[key, value]` pairs: keys are
+values, not strings, so there is no object form, and pairs are what `from()`
+takes. `HashMap`, `HashSet` and the drafts inside a recipe follow the same
+shapes.
+
+```ts
+const state = intern({
+  todos: ValueList.of({ id: 1 }, { id: 2 }),
+  byId: OrderedMap.from([[1, 'first'], [2, 'second']]),
+});
+JSON.stringify(state);
+// {"todos":[{"id":1},{"id":2}],"byId":[[1,"first"],[2,"second"]]}
+
+OrderedMap.from(JSON.parse('[[1,"first"],[2,"second"]]')) === state.byId; // true
+```
+
+Two things to know before relying on it:
+
+- **It is a view, not a wire format.** Which collection it was is not in the
+  JSON (a `ValueList` and a plain array stringify alike), and `undefined` and
+  symbols go the way they go in any array. Content JSON can represent makes
+  the round trip through `from()`; for anything more, that is what a binding
+  is for.
+- **`ValueMap` and `ValueSet` stringify in no stable order.** Their
+  iteration order follows the hash seed, which is drawn per process, so the
+  same value gives a different string in another process. Read it and log
+  it; do not compare it, key by it or diff it. When the order has to hold,
+  use `OrderedMap` and `OrderedSet`, whose order is part of the value and
+  whose strings are stable.
+
 ## `OrderedMap` and `OrderedSet` — insertion order as part of the value
 
 `ValueMap` and `ValueSet` iterate in a content-determined order, which is

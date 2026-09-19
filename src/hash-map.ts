@@ -109,4 +109,14 @@ export class HashMap<K, V> {
   [Symbol.iterator](): IterableIterator<[K, V]> {
     return this.#map.entries();
   }
+
+  /**
+   * What `JSON.stringify` sees: the entries in insertion order, as a fresh
+   * array of `[key, value]` pairs, where a native `Map` gives `{}`. Keys are
+   * canonical values; values are stored as they are, so they stringify as
+   * they are.
+   */
+  toJSON(): [K, V][] {
+    return [...this.#map];
+  }
 }

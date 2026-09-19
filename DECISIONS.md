@@ -659,6 +659,55 @@ type, its markers moved from own class fields to prototype getters over a
 private field (9 ns more to construct, no own symbol properties), so a
 spread copy carries no marker. DESIGN.md §6.7.
 
+### D46. `JSON.stringify` sees the collections: arrays, and `[key, value]` pairs
+
+Every collection has a `toJSON`: `ValueList`, `ValueSet`, `OrderedSet` and
+`HashSet` give an array of their elements; `ValueMap`, `OrderedMap` and
+`HashMap` give an array of `[key, value]` pairs; the draft twins give what
+they hold at that moment, in the same shapes. Each call builds a fresh,
+unfrozen plain array and keeps nothing.
+
+**Why.** A class with `#private` state stringifies as `{}`, so
+`JSON.stringify(state)` lost the contents of every collection in the tree,
+without an error: the silent wrong answer the library exists to refuse, in
+the one serialisation every JavaScript program reaches for (a log line, an
+error report, `localStorage`, a devtools panel). The leaf value types already
+had JSON parity (`ValueDate`, `InternedString`, `RawArray`: D17); the
+containers were the gap, and it is closed now because after 1.0 it cannot be
+closed quietly: the output of `JSON.stringify` on existing state would
+change under everyone. For maps, pairs and not `{key, value}` records: pairs
+are what `from()` takes, what `Object.entries` and `new Map(...)` speak, and
+half the envelope on a large map, so JSON-representable content makes the
+round trip through `from()` and no new vocabulary is invented.
+**Rejected:** an object form when every key is a string. Keys are values; a
+shape that depends on the data changes the day a map gains its first
+non-string key, and a stable shape is worth more than a prettier common
+case. `ValueMap.fromObject` stays a convenience constructor, not a claim
+about the map's form.
+
+It is a view, not a wire format (a non-goal; bindings own that): which
+collection it was is not in the JSON, `undefined` and symbols go the way
+they go in any array, and for `ValueMap`, `ValueSet` the order of the output
+follows the per-process hash seed, so the same value stringifies differently
+in another process. No sort can fix that: there is no total order over
+arbitrary values, and ordering by hash inherits the seed. So the string is
+for reading, never for comparing, keying or diffing; where order must hold,
+that is what `OrderedMap` and `OrderedSet` are, and their strings are
+stable. **Rejected:** `ValueList.toJSON()` returning `toArray()`'s canonical
+snapshot. It looked free (already memoised, already under the cache law of
+D33) and measured worse in every regime: `JSON.stringify` walks a frozen
+array 1.6× slower than an unfrozen one, and 3.7× slower when the snapshot's
+first-call interning is counted (100k records: 20.3 ms against 5.6 ms). A
+fresh array also makes the cache law trivial: nothing is kept. **Rejected:**
+a draft's `toJSON` iterating the draft (`[...this]`). Iteration hands out
+child drafts, and a drafted element of a `[toDraft]` type of the user's own
+stringified as its draft object, `{}`, not as its value. A draft's JSON is
+`current(draft)`'s, through the snapshot (`snapshotOf`, not `current`
+itself, which would pull `produce` into a `ValueList`-only bundle, D7): one
+source of truth for the shapes, the result's order for the unordered
+collections, and nothing to pay for an unmodified draft, whose snapshot is
+its base. DESIGN.md §6.2.
+
 ### D21. Interning is never optional; large responses get `RawArray`
 
 **Why.** Making interning optional throughout (a flag on `produce`, on the

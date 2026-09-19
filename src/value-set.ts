@@ -144,6 +144,19 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
     trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i] as T, slots[i] as T, this));
   }
 
+  /**
+   * What `JSON.stringify` sees: the members, as a fresh plain array. The
+   * order is this set's iteration order, which follows the per-process hash
+   * seed: the same set stringifies differently in another process, so the
+   * string is for reading and logging, never for comparing or keying. Where
+   * the order must hold, that is an `OrderedSet` (D46).
+   */
+  toJSON(): T[] {
+    const out: T[] = [];
+    trieForEach(CFG, this.#root, (slots, i) => out.push(slots[i] as T));
+    return out;
+  }
+
   // -------------------------------------------------------------------------
   // Set algebra — taking any iterable of values, returning ValueSets.
   //

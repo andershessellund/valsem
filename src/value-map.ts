@@ -133,6 +133,22 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i + 1] as V, slots[i] as K, this));
   }
 
+  /**
+   * What `JSON.stringify` sees: the entries, as a fresh array of
+   * `[key, value]` pairs. Keys are values, not strings, so there is no
+   * object form, and no conditional one either: the shape must not change
+   * the day a map gains its first non-string key. Pairs are what
+   * {@link from} takes, so JSON-representable content makes the round trip.
+   * The order is this map's iteration order, which follows the per-process
+   * hash seed: the string is for reading and logging, never for comparing
+   * or keying. Where the order must hold, that is an `OrderedMap` (D46).
+   */
+  toJSON(): [K, V][] {
+    const out: [K, V][] = [];
+    trieForEach(CFG, this.#root, (slots, i) => out.push([slots[i] as K, slots[i + 1] as V]));
+    return out;
+  }
+
   [equalsSym](other: unknown): boolean {
     // Hash consing makes deep equality a pointer comparison on roots.
     return other instanceof ValueMap && (other as ValueMap<K, V>).#root === this.#root;

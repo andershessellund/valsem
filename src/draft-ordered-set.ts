@@ -19,6 +19,7 @@ import {
   type Patch,
   type PatchPath,
   type PatchRecorder,
+  snapshotOf,
 } from './draft-core.js';
 import type { OrderedSet } from './ordered-set.js';
 
@@ -142,6 +143,17 @@ export class DraftOrderedSet<T> implements Iterable<T> {
 
   forEach(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => void, thisArg?: unknown): void {
     for (const v of this.values()) fn.call(thisArg, v, v, this);
+  }
+
+  /**
+   * What `JSON.stringify` sees: the JSON of the value this draft would be
+   * right now (an array, in order), which is `current(draft).toJSON()`. Through the
+   * snapshot and not by iterating the draft: iteration hands out child
+   * drafts, and a drafted element of a `[toDraft]` type of your own would
+   * stringify as its draft object, not as its value. A look, not an edit.
+   */
+  toJSON(): T[] {
+    return (snapshotOf(this) as OrderedSet<T>).toJSON();
   }
 }
 
