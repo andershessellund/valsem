@@ -32,7 +32,7 @@ import {
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord, _isForeignObjectPrototype } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
-import { same, ownAt } from './shared.js';
+import { same } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
 
@@ -195,12 +195,13 @@ export function intern<T>(value: T): T {
     depth++; // inside the try's reach: the cap throw must unwind it too
     try {
       if (depth > _maxDepth()) throw _depthError('intern');
-      // Index by index, own slots only: `map` would preserve holes, and a hole
-      // reads through to Array.prototype (a polluted one would leak in).
+      // Index by index, not `map`: `map` would preserve holes, and a canonical
+      // array is dense — a hole becomes an own `undefined`. The read is a plain
+      // `obj[i]`, the same read deepEqual and deepHash use, so all three agree
+      // on what an array contains. (Index properties on a built-in prototype
+      // are outside the threat model: see D44.)
       const internalized = new Array<unknown>(obj.length);
-      for (let i = 0; i < obj.length; i++) {
-        internalized[i] = intern(ownAt(obj, i));
-      }
+      for (let i = 0; i < obj.length; i++) internalized[i] = intern(obj[i]);
       return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
     } finally {
       depth--;

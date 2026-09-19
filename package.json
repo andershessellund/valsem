@@ -53,7 +53,6 @@
     "build": "tsc",
     "dev": "tsc -w",
     "test": "vitest run",
-    "test:polluted": "vitest run --config vitest.polluted.config.ts",
     "bench": "pnpm bench:node && pnpm bench:bun && pnpm bench:report",
     "bench:node": "node --expose-gc bench/run.mjs",
     "bench:bun": "npx -y bun@latest bench/run.mjs",

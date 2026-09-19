@@ -13,7 +13,6 @@
 //   7. Class without handler → throw
 // ---------------------------------------------------------------------------
 
-import { ownAt } from './shared.js';
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype } from './deep-equal.js';
 import { hashString, hashNumber, mix } from './hasher.js';
@@ -295,7 +294,7 @@ function hashObjectValue(obj: object): number {
   if (Array.isArray(obj)) {
     let acc = 0;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + _elementTerm(i, deepHash(ownAt(obj, i)))) | 0;
+      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
     }
     return _arrayHashOf(obj.length, acc);
   }
@@ -350,7 +349,7 @@ export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: numb
   if (Array.isArray(obj)) {
     let acc = 0;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + _elementTerm(i, deepHash(ownAt(obj, i)))) | 0;
+      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
     }
     return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
   }

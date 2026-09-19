@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, toInteger, ownAt, ownElements, ownPair } from './shared.js';
+import { same, sameSlots, IteratorBase, toInteger } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -411,7 +411,8 @@ export class ValueList<T> implements Iterable<T> {
   static from<T>(items: Iterable<T> | ArrayLike<T>): ValueList<T> {
     const arr = Array.isArray(items) ? items : Array.from(items as Iterable<T>);
     const head = new Array<unknown>(arr.length);
-    for (let i = 0; i < arr.length; i++) head[i] = intern(ownAt(arr, i));
+    // Index by index: the list is dense, so a hole becomes `undefined` (D44).
+    for (let i = 0; i < arr.length; i++) head[i] = intern(arr[i]);
     return ValueList.#fromFull<T>(merge([], head, null));
   }
 
@@ -499,7 +500,7 @@ export class ValueList<T> implements Iterable<T> {
     const s = pathTo(root, start);
     const e = end === start ? s : pathTo(root, end);
     const head: unknown[] = s.leaf.kids.slice(0, s.off);
-    for (let i = 0; i < items.length; i++) head.push(intern(ownAt(items, i)));
+    for (let i = 0; i < items.length; i++) head.push(intern(items[i]));
     for (let i = e.off; i < e.leaf.n; i++) head.push(e.leaf.kids[i]);
     const stack: Frame[] = [{ node: superRoot(root), i: 1 }];
     for (let i = 0; i < e.frames.length; i++) {
@@ -567,13 +568,7 @@ export class ValueList<T> implements Iterable<T> {
   setMany(edits: readonly (readonly [number, T])[]): ValueList<T> {
     if (edits.length === 0) return this;
     const n = this.length;
-    // Own elements and own entry slots: `map` and destructuring are native walks.
-    const sorted = ownElements(edits)
-      .map((edit) => {
-        const [i, v] = ownPair(edit);
-        return [i, intern(v)] as [number, unknown];
-      })
-      .sort((a, b) => a[0] - b[0]);
+    const sorted = edits.map(([i, v]) => [i, intern(v)] as [number, unknown]).sort((a, b) => a[0] - b[0]);
     const idx: number[] = [];
     const vals: unknown[] = [];
     for (const [i, v] of sorted) {
@@ -589,10 +584,7 @@ export class ValueList<T> implements Iterable<T> {
     if (idx.length === 1) return this.set(idx[0]!, vals[0] as T); // the path-copy fast path
     const root = this.#full()!;
     const ed: EditStream = { idx, vals, pos: 0 };
-    // One slot per height, FILLED: rebuild reads `carry[h]` before it writes it,
-    // and a hole reads through to Array.prototype — with `Array.prototype[0] =
-    // []`, every rebuild would have pushed its open run into that shared array.
-    const carry: Carry = new Array<unknown[] | null>(root.ht + 1).fill(null);
+    const carry: Carry = [];
     let top = rebuild(root, 0, ed, carry);
     // The list end closes every open run, bottom-up.
     for (let h = 0; h < root.ht; h++) {

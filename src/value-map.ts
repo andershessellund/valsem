@@ -22,7 +22,6 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createMapDraft, type MapState } from './draft-map.js';
-import { ownIterable, ownPair } from './shared.js';
 import {
   createTrieConfig,
   trieGet,
@@ -182,8 +181,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
     const keys: unknown[] = [];
     const vals: unknown[] = [];
-    for (const entry of ownIterable(entries)) {
-      const [rawK, rawV] = ownPair(entry);
+    for (const [rawK, rawV] of entries) {
       keys.push(intern(rawK));
       vals.push(intern(rawV));
     }
