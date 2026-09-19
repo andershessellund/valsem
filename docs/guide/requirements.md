@@ -48,8 +48,10 @@ throws the engine's `TypeError` when it is hashed or interned.
 
 Continuous integration runs the full suite on **Node 22 and the current Node
 release**. That is one engine, V8. The benchmarks also run under Bun, which
-exercises the library on JavaScriptCore, Safari's engine, though as a
-benchmark and not as a correctness suite. No browser runs in CI.
+exercises the library on JavaScriptCore, Safari's engine, and their
+engine-level suites in Mozilla's SpiderMonkey shell, Firefox's engine,
+though as benchmarks and not as a correctness suite, and as engines and not
+as browsers. No browser runs in CI.
 
 So the tables above are a statement about features, not a record of test
 runs: valsem is expected to work wherever the floor is met, and a failure on

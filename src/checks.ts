@@ -31,9 +31,9 @@ export function skipChecks(): void {
 
 /**
  * Stop freezing the plain records and arrays valsem canonicalises. Frozen
- * arrays are slow in V8 — indexed reads 5×, `forEach` 8×, `slice` 100×,
- * `JSON.stringify` 2–5× (see BENCHMARKS.md) — and that cost lands in your
- * own loops over canonical state. What you give up: a mutation of a
+ * arrays are slow in V8 — `forEach` 3–9×, `slice` 150×, `JSON.stringify`
+ * 2–5×, an indexed loop over small integers 12× (see BENCHMARKS.md) — and
+ * that cost lands in your own loops over canonical state. What you give up: a mutation of a
  * canonical value, which throws in strict mode when frozen, goes undetected
  * and corrupts every holder of that value, its cached hash, and the pool.
  * The immer deal applies: freeze in development and test, skip in

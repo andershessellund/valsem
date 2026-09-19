@@ -964,9 +964,19 @@ performance caveat. **Open question, raised by the consolidated Bun run:**
 on JavaScriptCore the freeze *call* is O(n), ~170 ns per element (1.7 ms
 for 10,000 elements against 0.3 µs on V8), and it dominates canonicalising
 a large array there (the 10k-array produce arena runs at 2.4 ms frozen and
-12 µs with `skipFreezing()`). The default stands, since it is the
-enforcement, and the hardening guide says so; whether large arrays should
-be exempt from freezing by default is undecided. DESIGN.md §4.4.
+12 µs with `skipFreezing()`). **Decided for 1.0: freezing stays on by
+default on every engine, large arrays included.** It is the enforcement
+that makes shared canonical state safe to hand around, and the developer's
+experience is not to be made worse because one engine freezes slowly: an
+engine-dependent default, or a size threshold above which mutation silently
+stops being caught, would trade a documented, avoidable cost for a rule
+nobody can keep in their head. The cost is stated where a reader meets it
+(the README's "Freezing, and Safari", the hardening guide), measured per
+engine by the `skip-freezing` benchmark suite (V8: the switch buys 2–3× in
+the reader's own loops and nothing in valsem's operations; JavaScriptCore:
+two orders of magnitude on an edit of a large plain array; SpiderMonkey:
+nothing, freezing is free there), and avoidable with one call in production
+or by holding large sequences in a `ValueList`. DESIGN.md §4.4.
 
 ## Packaging and publication
 
@@ -1154,7 +1164,5 @@ Decided-but-unbuilt or undecided items, each with its entry:
   urgency.
 - Ordered-collection delete: skip the no-op anchor lookups and batch the
   trie update (D23).
-- Whether large arrays should be exempt from freezing by default on
-  JavaScriptCore (D16).
 - Schema-compiled accessor drafts for closed-schema records, proxy-free,
   with fallback to the proxy path; invisible by rule 4 of D29.

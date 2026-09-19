@@ -109,15 +109,26 @@ on a raw argument at a *canonical only* call site is a silent wrong answer
 instead of a thrown one. Semantics are untouched — non-values are still
 rejected, results are still canonical.
 
-**What `skipFreezing()` buys, and costs.** Frozen arrays are slow in V8.
-The freeze call itself is free (a map transition, ~0.1 µs at any size), but
-the frozen *state* is not: indexed reads run 5–12× slower, `forEach` 8×,
-`filter` 2–3×, `slice` and `concat` 10–150×, `JSON.stringify` 2–5×, and
-that cost lands in your own loops over canonical state (the frozen-array
+**What `skipFreezing()` buys, and costs.** That depends on the engine: nothing
+on SpiderMonkey (Firefox), where freezing is cheap and frozen arrays read at
+full speed; your own loops on V8; and valsem's edits of large arrays as well
+on JavaScriptCore. Frozen arrays are slow in V8.
+The freeze call itself is nearly free for an array of integers or of objects
+(a map transition, ~0.1 µs at any size; an array of doubles is converted
+element by element, ~150 µs for 10,000), but the frozen *state* is not:
+`forEach` runs 3–9× slower, `filter` 2–3×, `slice` and `concat` 10–150×,
+`JSON.stringify` 2–5×, and an indexed loop over an array of small integers
+12× (over objects or doubles it barely moves), and that cost lands in your
+own loops over canonical state (the frozen-array
 suite in the repository's `BENCHMARKS.md`). On JavaScriptCore (Safari, Bun)
 the freeze *call* is O(n) as well — ~1.7 ms for a 10,000-element array
 against 0.3 µs on V8 — so there `skipFreezing()` is the difference between
-microseconds and milliseconds per edit of a large array. Records are unaffected,
+microseconds and milliseconds per edit of a large array: about 3 ms against
+15 µs for one edit in a 10,000-record array (the `skipFreezing()` suite in
+`BENCHMARKS.md` runs valsem's own operations and a reader's loops with the
+switch on and off, on both engines). Freezing stays the default all the same:
+it is the enforcement that makes shared canonical state safe to hand around,
+and the cost is one engine's, avoidable in production with one call. Records are unaffected,
 and `ValueList` never pays it — its leaves are unfrozen inside a frozen
 wrapper. What you give up: a mutation of a canonical value goes undetected
 and corrupts every holder of that value, its cached hash, and the pool. The
