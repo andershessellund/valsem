@@ -44,6 +44,13 @@ out.push('Methodology, applied by every suite: results are retained where the ho
   'there is one, fixtures are built in fast-properties mode (`Object.fromEntries`), and a novel state is produced per ' +
   'iteration unless the row says otherwise.');
 out.push('');
+out.push('Every row is timed in a job of its own, on a settled heap (a few hundred event-loop turns and a collection first). ' +
+  'An engine keeps the target of every `WeakRef` alive until the job that created or read it ends, and valsem makes one ' +
+  'per canonical object and per collection node: rows run back to back in one job each pay the collector for all the ' +
+  'rows before them, the other library\'s column included. Within a row the loop is still one job, so a long loop of ' +
+  'updates costs more per operation than the same updates spread over tasks; the `produce` section shows both regimes. ' +
+  'The two engine-level suites make no `WeakRef`s and stay synchronous, which is what lets them run in a shell.');
+out.push('');
 
 const suiteIds = [];
 for (const r of runs) for (const s of r.suites) if (!suiteIds.includes(s.id)) suiteIds.push(s.id);

@@ -12,6 +12,30 @@ export const runtime = isBun
   : { name: 'node', version: process.version.slice(1), engine: 'V8' };
 
 export { time, timeHeld, row, shuffled, assertEq } from './timing.mjs';
+import { time } from './timing.mjs';
+
+/**
+ * Let the process settle: yield a few hundred turns and collect. The end of
+ * a turn is what releases the targets of every WeakRef created in it (the
+ * kept-objects list; valsem makes one per canonical object and trie node),
+ * and the idle turns are when the pool drains its parked slots. Without it,
+ * a synchronous `rows()` is ONE job: every row's garbage stays alive to the
+ * end of the suite, and each row pays GC for all the rows before it.
+ */
+export async function settle() {
+  const gc = globalThis.gc ?? (typeof Bun !== 'undefined' ? () => Bun.gc(true) : null);
+  for (let round = 0; round < 3; round++) {
+    gc?.();
+    for (let i = 0; i < 100; i++) await new Promise((r) => setImmediate(r));
+  }
+  gc?.();
+}
+
+/** {@link time}, in a job of its own on a settled heap: what one row should measure. */
+export async function timeSettled(fn, iterations, warmup) {
+  await settle();
+  return warmup === undefined ? time(fn, iterations) : time(fn, iterations, warmup);
+}
 
 /**
  * Is the measured code what the recorded commit says it is? Two ways it was

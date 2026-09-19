@@ -1,4 +1,4 @@
-import { time, row } from '../lib.mjs';
+import { timeSettled, row } from '../lib.mjs';
 import { deepEqual } from '../../dist/deep-equal.js';
 import { intern } from '../../dist/intern.js';
 import fastDeepEqual from 'fast-deep-equal';
@@ -36,36 +36,36 @@ semantics differ (\`NaN\` and undefined-valued keys). Rows:
   columns: ['valsem', 'fast-deep-equal'],
   unit: 'ns',
   ratio: ['valsem', 'fast-deep-equal'],
-  rows() {
+  async rows() {
     const rows = [];
-    const cmp = (name, a, b, it) => {
+    const cmp = async (name, a, b, it) => {
       const expected = fastDeepEqual(a, b);
       if (deepEqual(a, b) !== expected) throw new Error(`verdict mismatch on ${name}`);
-      rows.push(row(name, { valsem: time(() => deepEqual(a, b), it), 'fast-deep-equal': time(() => fastDeepEqual(a, b), it) }));
+      rows.push(row(name, { valsem: await timeSettled(() => deepEqual(a, b), it), 'fast-deep-equal': await timeSettled(() => fastDeepEqual(a, b), it) }));
     };
     for (const n of [10, 100, 1000]) {
       const it = Math.max(2000, 2_000_000 / n);
-      cmp(`record ${n} keys: raw =`, record(n), record(n), it);
-      cmp(`record ${n} keys: raw ≠`, record(n), record(n, -1), it);
-      cmp(`record ${n} keys: canonical ≠`, intern(record(n)), intern(record(n, -1)), it);
+      await cmp(`record ${n} keys: raw =`, record(n), record(n), it);
+      await cmp(`record ${n} keys: raw ≠`, record(n), record(n, -1), it);
+      await cmp(`record ${n} keys: canonical ≠`, intern(record(n)), intern(record(n, -1)), it);
     }
     for (const n of [10, 100, 1000]) {
       const it = Math.max(2000, 4_000_000 / n);
-      cmp(`number array ${n}: raw =`, numArray(n), numArray(n), it);
-      cmp(`number array ${n}: raw ≠`, numArray(n), numArray(n, -1), it);
-      cmp(`number array ${n}: canonical ≠`, intern(numArray(n)), intern(numArray(n, -1)), it);
+      await cmp(`number array ${n}: raw =`, numArray(n), numArray(n), it);
+      await cmp(`number array ${n}: raw ≠`, numArray(n), numArray(n, -1), it);
+      await cmp(`number array ${n}: canonical ≠`, intern(numArray(n)), intern(numArray(n, -1)), it);
     }
     {
       const it = 40_000;
-      cmp('array of 100 records: raw =', items(100), items(100), it);
-      cmp('array of 100 records: raw ≠', items(100), items(100, -1), it);
-      cmp('array of 100 records: canonical ≠', intern(items(100)), intern(items(100, -1)), it);
+      await cmp('array of 100 records: raw =', items(100), items(100), it);
+      await cmp('array of 100 records: raw ≠', items(100), items(100, -1), it);
+      await cmp('array of 100 records: canonical ≠', intern(items(100)), intern(items(100, -1)), it);
     }
     {
       const shared = intern(items(100));
       const other = intern(items(100, -1));
-      cmp('boundary: raw wrappers, shared canonical payload =', { meta: 1, payload: shared }, { meta: 1, payload: shared }, 400_000);
-      cmp('boundary: raw wrappers, distinct canonical payloads ≠', { meta: 1, payload: shared }, { meta: 1, payload: other }, 400_000);
+      await cmp('boundary: raw wrappers, shared canonical payload =', { meta: 1, payload: shared }, { meta: 1, payload: shared }, 400_000);
+      await cmp('boundary: raw wrappers, distinct canonical payloads ≠', { meta: 1, payload: shared }, { meta: 1, payload: other }, 400_000);
     }
     return rows;
   },

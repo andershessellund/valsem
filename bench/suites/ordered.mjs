@@ -1,4 +1,4 @@
-import { time, row, assertEq } from '../lib.mjs';
+import { timeSettled, row, assertEq } from '../lib.mjs';
 import { OrderedMap } from '../../dist/ordered-map.js';
 import { OrderedSet } from '../../dist/ordered-set.js';
 import { produce } from '../../dist/produce.js';
@@ -26,12 +26,12 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
   columns: ['valsem', 'Immutable'],
   unit: 'ns',
   ratio: ['valsem', 'Immutable'],
-  rows() {
+  async rows() {
     const rows = [];
-    const cmp = (name, val, imm, it, check) => {
+    const cmp = async (name, val, imm, it, check) => {
       it = Math.max(20, Math.round(it));
       if (check) check(val(0), imm === null ? undefined : imm(0));
-      rows.push(row(name, { valsem: time(val, it), Immutable: imm === null ? null : time(imm, it) }));
+      rows.push(row(name, { valsem: await timeSettled(val, it), Immutable: imm === null ? null : await timeSettled(imm, it) }));
     };
     for (const N of [100, 10_000]) {
       const entries = Array.from({ length: N }, (_, i) => [`k${i}`, i]);
@@ -48,20 +48,20 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
       const perOp = 200_000 / Math.log2(N + 2), perEdit = perOp / 4, perWalk = Math.max(20, 100_000 / N);
       const mid = N >> 1;
       const t = `OrderedMap ${N}`;
-      cmp(`${t}: build from entries`, () => OrderedMap.from(entries).size, () => IOMap(entries).size, perWalk, assertEq);
-      cmp(`${t}: get`, (i) => vm.get(keys[i % N]), (i) => im.get(keys[i % N]), perOp, assertEq);
-      cmp(`${t}: set existing key → novel value`, (i) => vm.set(keys[i % N], -i).size, (i) => im.set(keys[i % N], -i).size, perEdit, assertEq);
-      cmp(`${t}: append a new key`, (i) => vm.set('new' + i, i).size, (i) => im.set('new' + i, i).size, perEdit, assertEq);
-      cmp(`${t}: delete a middle key`, (i) => vm.delete(keys[(mid + i) % N]).size, (i) => im.delete(keys[(mid + i) % N]).size, perEdit, assertEq);
-      cmp(`${t}: indexOf a middle key`, (i) => vm.indexOf(keys[(mid + i) % N]), (i) => im.keySeq().indexOf(keys[(mid + i) % N]), perOp, assertEq);
-      cmp(`${t}: insert at n/2`, (i) => vm.insertAt(mid, 'new' + i, i).size, null, perEdit);
-      cmp(`${t}: iterate entries`, () => { let s = 0; for (const [, v] of vm) s += v; return s; }, () => { let s = 0; for (const [, v] of im) s += v; return s; }, perWalk, assertEq);
-      cmp(`${t}: equals = (from vs set chain)`, () => deepEqual(vm, chain), () => iIs(im, ichain), perWalk * 4, (a, b) => { assertEq(a, true); assertEq(b, true); });
+      await cmp(`${t}: build from entries`, () => OrderedMap.from(entries).size, () => IOMap(entries).size, perWalk, assertEq);
+      await cmp(`${t}: get`, (i) => vm.get(keys[i % N]), (i) => im.get(keys[i % N]), perOp, assertEq);
+      await cmp(`${t}: set existing key → novel value`, (i) => vm.set(keys[i % N], -i).size, (i) => im.set(keys[i % N], -i).size, perEdit, assertEq);
+      await cmp(`${t}: append a new key`, (i) => vm.set('new' + i, i).size, (i) => im.set('new' + i, i).size, perEdit, assertEq);
+      await cmp(`${t}: delete a middle key`, (i) => vm.delete(keys[(mid + i) % N]).size, (i) => im.delete(keys[(mid + i) % N]).size, perEdit, assertEq);
+      await cmp(`${t}: indexOf a middle key`, (i) => vm.indexOf(keys[(mid + i) % N]), (i) => im.keySeq().indexOf(keys[(mid + i) % N]), perOp, assertEq);
+      await cmp(`${t}: insert at n/2`, (i) => vm.insertAt(mid, 'new' + i, i).size, null, perEdit);
+      await cmp(`${t}: iterate entries`, () => { let s = 0; for (const [, v] of vm) s += v; return s; }, () => { let s = 0; for (const [, v] of im) s += v; return s; }, perWalk, assertEq);
+      await cmp(`${t}: equals = (from vs set chain)`, () => deepEqual(vm, chain), () => iIs(im, ichain), perWalk * 4, (a, b) => { assertEq(a, true); assertEq(b, true); });
       for (const k of N === 100 ? [10] : [10, 100]) {
         const idx = Array.from({ length: k }, (_, j) => Math.floor((j * N) / k));
         const del = idx.filter((_, j) => j % 10 === 0).map((i) => keys[(i + 1) % N]);
         const it = Math.max(20, 4_000 / k);
-        cmp(
+        await cmp(
           `${t}: draft, ${k} sets + ${del.length} deletes`,
           (i) => produce(vm, (d) => { for (const j of idx) d.set(keys[j], -i); for (const dk of del) d.delete(dk); }).size,
           (i) => im.withMutations((d) => { for (const j of idx) d.set(keys[j], -i); for (const dk of del) d.delete(dk); }).size,
@@ -76,12 +76,12 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
       const perOp = 200_000 / Math.log2(N + 2), perEdit = perOp / 4, perWalk = Math.max(20, 100_000 / N);
       const mid = N >> 1;
       const t = `OrderedSet ${N}`;
-      cmp(`${t}: build from members`, () => OrderedSet.from(members).size, () => IOSet(members).size, perWalk, assertEq);
-      cmp(`${t}: has`, (i) => vs.has(members[i % N]), (i) => is.has(members[i % N]), perOp, assertEq);
-      cmp(`${t}: add a new member`, (i) => vs.add('new' + i).size, (i) => is.add('new' + i).size, perEdit, assertEq);
-      cmp(`${t}: delete a middle member`, (i) => vs.delete(members[(mid + i) % N]).size, (i) => is.delete(members[(mid + i) % N]).size, perEdit, assertEq);
-      cmp(`${t}: indexOf a middle member`, (i) => vs.indexOf(members[(mid + i) % N]), (i) => is.toIndexedSeq().indexOf(members[(mid + i) % N]), perOp, assertEq);
-      cmp(`${t}: iterate members`, () => { let n = 0; for (const m of vs) n += m.length; return n; }, () => { let n = 0; for (const m of is) n += m.length; return n; }, perWalk, assertEq);
+      await cmp(`${t}: build from members`, () => OrderedSet.from(members).size, () => IOSet(members).size, perWalk, assertEq);
+      await cmp(`${t}: has`, (i) => vs.has(members[i % N]), (i) => is.has(members[i % N]), perOp, assertEq);
+      await cmp(`${t}: add a new member`, (i) => vs.add('new' + i).size, (i) => is.add('new' + i).size, perEdit, assertEq);
+      await cmp(`${t}: delete a middle member`, (i) => vs.delete(members[(mid + i) % N]).size, (i) => is.delete(members[(mid + i) % N]).size, perEdit, assertEq);
+      await cmp(`${t}: indexOf a middle member`, (i) => vs.indexOf(members[(mid + i) % N]), (i) => is.toIndexedSeq().indexOf(members[(mid + i) % N]), perOp, assertEq);
+      await cmp(`${t}: iterate members`, () => { let n = 0; for (const m of vs) n += m.length; return n; }, () => { let n = 0; for (const m of is) n += m.length; return n; }, perWalk, assertEq);
     }
     return rows;
   },
