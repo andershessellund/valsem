@@ -26,6 +26,7 @@ const SUITES = [
   'list-draft',
   'ordered',
   'frozen-array',
+  'skip-freezing',
   'record-copy',
   'bundle-size',
 ];

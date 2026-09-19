@@ -13,7 +13,11 @@ if (runs.length === 0) throw new Error('no results: run `node bench/run.mjs` (an
 const fmtNs = (v) =>
   v === null || v === undefined ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(2)} ms` : v >= 1000 ? `${(v / 1000).toFixed(1)} µs` : `${v.toFixed(0)} ns`;
 const fmtBytes = (v) => (v === null || v === undefined ? '—' : v >= 1024 ? `${(v / 1024).toFixed(1)} KB` : `${v} B`);
-const fmtRatio = (num, den) => (num === null || den === null || num === undefined || den === undefined || den === 0 ? '—' : num >= den ? `${(num / den).toFixed(1)}×` : `1/${(den / num).toFixed(1)}×`);
+const fmtRatio = (num, den) => {
+  if (num === null || den === null || num === undefined || den === undefined || den === 0) return '—';
+  if (Math.abs(num / den - 1) < 0.05) return '1.0×'; // not "1/1.0×" for a hair under
+  return num >= den ? `${(num / den).toFixed(1)}×` : `1/${(den / num).toFixed(1)}×`;
+};
 
 const out = [];
 out.push('# Benchmarks');

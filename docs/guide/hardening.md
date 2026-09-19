@@ -120,7 +120,12 @@ own loops over canonical state (the frozen-array
 suite in the repository's `BENCHMARKS.md`). On JavaScriptCore (Safari, Bun)
 the freeze *call* is O(n) as well — ~1.7 ms for a 10,000-element array
 against 0.3 µs on V8 — so there `skipFreezing()` is the difference between
-microseconds and milliseconds per edit of a large array. Records are unaffected,
+microseconds and milliseconds per edit of a large array: about 3 ms against
+15 µs for one edit in a 10,000-record array (the `skipFreezing()` suite in
+`BENCHMARKS.md` runs valsem's own operations and a reader's loops with the
+switch on and off, on both engines). Freezing stays the default all the same:
+it is the enforcement that makes shared canonical state safe to hand around,
+and the cost is one engine's, avoidable in production with one call. Records are unaffected,
 and `ValueList` never pays it — its leaves are unfrozen inside a frozen
 wrapper. What you give up: a mutation of a canonical value goes undetected
 and corrupts every holder of that value, its cached hash, and the pool. The
