@@ -218,7 +218,7 @@ price is an object where a primitive was: reads go through `.value`, and
 `typeof` says `'object'`. Ids, names and short strings do not need it —
 hashing them costs less than the wrapper.
 
-`RawArray` is the large-response tool. Admitting a response costs ~1.8 µs
+`RawArray` is the large-response tool. Admitting a response costs ~1.5 µs
 per 10-field record, paid for every record whether or not anything looks
 at it, and a 100k-row response is admitted to show 100 rows. A `RawArray`
 holds the response as received and admits on demand: `slice(a, b)` returns

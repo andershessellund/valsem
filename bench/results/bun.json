@@ -8,9 +8,9 @@
     "cpu": "Apple M2 Pro",
     "platform": "darwin arm64"
   },
-  "date": "2026-09-09",
-  "commit": "f2cbb25",
-  "valsem": "0.0.2",
+  "date": "2026-09-19",
+  "commit": "4b17e70",
+  "valsem": "0.0.4",
   "libraries": {
     "immer": "11.1.18",
     "mutative": "1.3.0",
@@ -30,47 +30,49 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "big-array 10k, one edit, synchronous loop",
           "values": {
-            "valsem": 3032319.208,
-            "immer (autofreeze on)": 2266418.47,
-            "immer (autofreeze off)": 7668.8125,
-            "mutative": 8890.3335
+            "valsem": 3201838.9165,
+            "immer (autofreeze on)": 2373177.5,
+            "immer (autofreeze off)": 7866.354,
+            "mutative": 8888.208
           }
         },
         {
           "name": "big-array 10k, one edit, held + one per macrotask",
           "values": {
-            "valsem": 3225405.5204999996,
+            "valsem": 3192467.875,
             "immer (autofreeze on)": null,
-            "immer (autofreeze off)": 6062.125,
-            "mutative": 6787.541499999999
+            "immer (autofreeze off)": 8235.604,
+            "mutative": 7523.750499999999
           }
         },
         {
           "name": "wide-record 1000 keys, one edit",
           "values": {
-            "valsem": 35425.271,
-            "immer (autofreeze on)": 73416.0625,
-            "immer (autofreeze off)": 28142.104,
-            "mutative": 52126.0625
+            "valsem": 37839.104,
+            "immer (autofreeze on)": 72935.0415,
+            "immer (autofreeze off)": 28050.6455,
+            "mutative": 52559.4165
           }
         },
         {
           "name": "value-map 10k, one set, through the draft",
           "values": {
-            "valsem": 3313.4375,
-            "immer (autofreeze on)": 152796.25,
+            "valsem": 2031.3125,
+            "immer (autofreeze on)": 137860.97333333333,
             "immer (autofreeze off)": null,
-            "mutative": 22930.693333333333
+            "mutative": 22791.25
           }
         },
         {
           "name": "value-map 10k, one set, direct persistent op",
           "values": {
-            "valsem": 1064.0415,
+            "valsem": 973.8125,
             "immer (autofreeze on)": null,
             "immer (autofreeze off)": null,
             "mutative": null
@@ -79,16 +81,16 @@
         {
           "name": "value-list 10k, set + push, through the draft",
           "values": {
-            "valsem": 11099.25,
+            "valsem": 9484.8125,
             "immer (autofreeze on)": null,
-            "immer (autofreeze off)": 11628.1455,
-            "mutative": 10460.1665
+            "immer (autofreeze off)": 12185.1875,
+            "mutative": 8682.958
           }
         },
         {
           "name": "value-list 10k, set + push, direct persistent ops",
           "values": {
-            "valsem": 3725.4585,
+            "valsem": 4085.25,
             "immer (autofreeze on)": null,
             "immer (autofreeze off)": null,
             "mutative": null
@@ -97,19 +99,19 @@
         {
           "name": "small-churn 3-key record, one field",
           "values": {
-            "valsem": 781.459375,
-            "immer (autofreeze on)": 630.26646,
-            "immer (autofreeze off)": 511.7925,
-            "mutative": 583.005625
+            "valsem": 962.613955,
+            "immer (autofreeze on)": 690.98875,
+            "immer (autofreeze off)": 470.9725,
+            "mutative": 610.86208
           }
         },
         {
           "name": "recurrent: big-array cycling 10 configurations, held",
           "values": {
-            "valsem": 2182.5835,
-            "immer (autofreeze on)": 1876220.5566666666,
-            "immer (autofreeze off)": 5347.521,
-            "mutative": 9334.7295
+            "valsem": 2615.3545,
+            "immer (autofreeze on)": 2114935.4166666665,
+            "immer (autofreeze off)": 8911.2085,
+            "mutative": 10620.0625
           },
           "note": "valsem returns 10 pooled instances; equality afterwards is ==="
         }
@@ -124,113 +126,115 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "1000 × 10: JSON.parse",
           "values": {
-            "per response": 372442.1277777778
+            "per response": 356743.75
           }
         },
         {
           "name": "1000 × 10: structuredClone",
           "values": {
-            "per response": 453511.81666666665
+            "per response": 490516.6666666667
           }
         },
         {
           "name": "1000 × 10: immer auto-freeze walk",
           "values": {
-            "per response": 339132.63333333336
+            "per response": 356940.26666666666
           }
         },
         {
           "name": "1000 × 10: intern, all new content",
           "values": {
-            "per response": 907611.8166666667
+            "per response": 1022167.35
           }
         },
         {
           "name": "1000 × 10: intern, unchanged refetch (all pool hits)",
           "values": {
-            "per response": 615059.7166666667
+            "per response": 746038.2
           }
         },
         {
           "name": "1000 × 10: intern, refetch with 10% of records changed",
           "values": {
-            "per response": 877663.8833333333
+            "per response": 849560.4166666666
           }
         },
         {
           "name": "1000 × 10: ValueList.from, all new content",
           "values": {
-            "per response": 1194681.95
+            "per response": 1003505.55
           }
         },
         {
           "name": "1000 × 10: ValueList.from, canonical records (the list alone)",
           "values": {
-            "per response": 96137.5
+            "per response": 69537.5
           }
         },
         {
           "name": "1000 × 10: RawArray.from + slice(0, 100) — admit only the visible window",
           "values": {
-            "per response": 166170.83333333334
+            "per response": 145968.05
           }
         },
         {
           "name": "10000 × 10: JSON.parse",
           "values": {
-            "per response": 3633878.472222222
+            "per response": 3927966.4444444445
           }
         },
         {
           "name": "10000 × 10: structuredClone",
           "values": {
-            "per response": 4893770.833333333
+            "per response": 4597694.416666667
           }
         },
         {
           "name": "10000 × 10: immer auto-freeze walk",
           "values": {
-            "per response": 3633413.1666666665
+            "per response": 3209788.25
           }
         },
         {
           "name": "10000 × 10: intern, all new content",
           "values": {
-            "per response": 14382173.583333334
+            "per response": 10037204.916666666
           }
         },
         {
           "name": "10000 × 10: intern, unchanged refetch (all pool hits)",
           "values": {
-            "per response": 8023131.916666667
+            "per response": 6721378.416666667
           }
         },
         {
           "name": "10000 × 10: intern, refetch with 10% of records changed",
           "values": {
-            "per response": 14968947.916666666
+            "per response": 9467420.083333334
           }
         },
         {
           "name": "10000 × 10: ValueList.from, all new content",
           "values": {
-            "per response": 11728607.666666666
+            "per response": 9158645.833333334
           }
         },
         {
           "name": "10000 × 10: ValueList.from, canonical records (the list alone)",
           "values": {
-            "per response": 1255576.4166666667
+            "per response": 574555.5833333334
           }
         },
         {
           "name": "10000 × 10: RawArray.from + slice(0, 100) — admit only the visible window",
           "values": {
-            "per response": 132180.58333333334
+            "per response": 108625
           }
         }
       ]
@@ -248,166 +252,168 @@
         "valsem",
         "fast-deep-equal"
       ],
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "record 10 keys: raw =",
           "values": {
-            "valsem": 127.753125,
-            "fast-deep-equal": 104.163125
+            "valsem": 127.08104,
+            "fast-deep-equal": 106.123955
           }
         },
         {
           "name": "record 10 keys: raw ≠",
           "values": {
-            "valsem": 75.12354,
-            "fast-deep-equal": 54.78979
+            "valsem": 76.80896,
+            "fast-deep-equal": 56.279375
           }
         },
         {
           "name": "record 10 keys: canonical ≠",
           "values": {
-            "valsem": 19.549375,
-            "fast-deep-equal": 64.790835
+            "valsem": 18.514585,
+            "fast-deep-equal": 63.47021
           }
         },
         {
           "name": "record 100 keys: raw =",
           "values": {
-            "valsem": 1004.35835,
-            "fast-deep-equal": 966.875
+            "valsem": 1010.2375,
+            "fast-deep-equal": 948.05835
           }
         },
         {
           "name": "record 100 keys: raw ≠",
           "values": {
-            "valsem": 479.0104,
-            "fast-deep-equal": 598.3
+            "valsem": 485.2271,
+            "fast-deep-equal": 588.84795
           }
         },
         {
           "name": "record 100 keys: canonical ≠",
           "values": {
-            "valsem": 40.4771,
-            "fast-deep-equal": 626.16875
+            "valsem": 34.6229,
+            "fast-deep-equal": 617.13125
           }
         },
         {
           "name": "record 1000 keys: raw =",
           "values": {
-            "valsem": 39693.646,
-            "fast-deep-equal": 60768.8335
+            "valsem": 39401.3545,
+            "fast-deep-equal": 59307.4795
           }
         },
         {
           "name": "record 1000 keys: raw ≠",
           "values": {
-            "valsem": 8058.229,
-            "fast-deep-equal": 36448.4585
+            "valsem": 7651.3335,
+            "fast-deep-equal": 36323.042
           }
         },
         {
           "name": "record 1000 keys: canonical ≠",
           "values": {
-            "valsem": 13.4585,
-            "fast-deep-equal": 20478.0625
+            "valsem": 10.354,
+            "fast-deep-equal": 18951.25
           }
         },
         {
           "name": "number array 10: raw =",
           "values": {
-            "valsem": 70.01,
-            "fast-deep-equal": 53.3675
+            "valsem": 64.1921875,
+            "fast-deep-equal": 52.91427
           }
         },
         {
           "name": "number array 10: raw ≠",
           "values": {
-            "valsem": 38.30198,
-            "fast-deep-equal": 29.24677
+            "valsem": 35.90802,
+            "fast-deep-equal": 29.3515625
           }
         },
         {
           "name": "number array 10: canonical ≠",
           "values": {
-            "valsem": 12.614375,
-            "fast-deep-equal": 124.788125
+            "valsem": 13.2813525,
+            "fast-deep-equal": 122.60354
           }
         },
         {
           "name": "number array 100: raw =",
           "values": {
-            "valsem": 626.160425,
-            "fast-deep-equal": 387.8802
+            "valsem": 615.296875,
+            "fast-deep-equal": 391.76145
           }
         },
         {
           "name": "number array 100: raw ≠",
           "values": {
-            "valsem": 291.1948,
-            "fast-deep-equal": 196.947925
+            "valsem": 274.817725,
+            "fast-deep-equal": 197.054175
           }
         },
         {
           "name": "number array 100: canonical ≠",
           "values": {
-            "valsem": 17.240625,
-            "fast-deep-equal": 952.542725
+            "valsem": 14.0302,
+            "fast-deep-equal": 944.0375
           }
         },
         {
           "name": "number array 1000: raw =",
           "values": {
-            "valsem": 4376.79175,
-            "fast-deep-equal": 3675.63525
+            "valsem": 4317.25,
+            "fast-deep-equal": 3545.21875
           }
         },
         {
           "name": "number array 1000: raw ≠",
           "values": {
-            "valsem": 2171.28125,
-            "fast-deep-equal": 1796.3125
+            "valsem": 2158.875,
+            "fast-deep-equal": 1790.27075
           }
         },
         {
           "name": "number array 1000: canonical ≠",
           "values": {
-            "valsem": 12.92725,
-            "fast-deep-equal": 11471.698
+            "valsem": 14.19775,
+            "fast-deep-equal": 11406.5625
           }
         },
         {
           "name": "array of 100 records: raw =",
           "values": {
-            "valsem": 7294.117725,
-            "fast-deep-equal": 5408.50415
+            "valsem": 7316.30625,
+            "fast-deep-equal": 5553.4052
           }
         },
         {
           "name": "array of 100 records: raw ≠",
           "values": {
-            "valsem": 3711.702075,
-            "fast-deep-equal": 2447.54895
+            "valsem": 3719.9354,
+            "fast-deep-equal": 2496.967725
           }
         },
         {
           "name": "array of 100 records: canonical ≠",
           "values": {
-            "valsem": 13.03855,
-            "fast-deep-equal": 1011.96875
+            "valsem": 14.7125,
+            "fast-deep-equal": 1001.1729
           }
         },
         {
           "name": "boundary: raw wrappers, shared canonical payload =",
           "values": {
-            "valsem": 58.28521,
-            "fast-deep-equal": 42.5827075
+            "valsem": 58.1026025,
+            "fast-deep-equal": 40.0684375
           }
         },
         {
           "name": "boundary: raw wrappers, distinct canonical payloads ≠",
           "values": {
-            "valsem": 51.4435425,
-            "fast-deep-equal": 1057.99646
+            "valsem": 51,
+            "fast-deep-equal": 1035.6788525
           }
         }
       ]
@@ -425,446 +431,448 @@
         "valsem",
         "Immutable"
       ],
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "Map 100: build from entries",
           "values": {
-            "valsem": 66763.073,
-            "Immutable": 6541.5415
+            "valsem": 16329.83325,
+            "Immutable": 6347.42725
           }
         },
         {
           "name": "Map 100: get (hit)",
           "values": {
-            "valsem": 38.614170233635036,
-            "Immutable": 22.50665407802069
+            "valsem": 43.11958657641097,
+            "Immutable": 22.07530834954177
           }
         },
         {
           "name": "Map 100: has (miss)",
           "values": {
-            "valsem": 55.988613502990916,
-            "Immutable": 62.28029532162767
+            "valsem": 58.57390213551032,
+            "Immutable": 62.54483037021962
           }
         },
         {
           "name": "Map 100: set existing key → novel value",
           "values": {
-            "valsem": 1194.5592194594667,
-            "Immutable": 151.20595781024284
+            "valsem": 984.2483444040021,
+            "Immutable": 302.4721075862161
           }
         },
         {
           "name": "Map 100: set new key",
           "values": {
-            "valsem": 1678.685238255694,
-            "Immutable": 228.87453835144342
+            "valsem": 1115.6392785771716,
+            "Immutable": 430.78830056615544
           }
         },
         {
           "name": "Map 100: delete existing",
           "values": {
-            "valsem": 863.7808708184733,
-            "Immutable": 143.1477508916031
+            "valsem": 609.3115956776016,
+            "Immutable": 144.6012290610894
           }
         },
         {
           "name": "Map 100: iterate entries",
           "values": {
-            "valsem": 2138.34375,
-            "Immutable": 2091.875
+            "valsem": 2275.22925,
+            "Immutable": 2084.8335
           }
         },
         {
           "name": "Map 100: set one key, then hash",
           "values": {
-            "valsem": 1368.8955,
-            "Immutable": 22804.0625
+            "valsem": 1292.771,
+            "Immutable": 8070.625
           }
         },
         {
           "name": "Map 100: equals = (independent builds)",
           "values": {
-            "valsem": 10.877625,
-            "Immutable": 8873.6614375
+            "valsem": 7.8984375,
+            "Immutable": 4337.8958125
           }
         },
         {
           "name": "Map 100: equals ≠ (one entry differs), cold",
           "values": {
-            "valsem": 36.265625,
-            "Immutable": 653.015625
+            "valsem": 30.7318125,
+            "Immutable": 641.822875
           }
         },
         {
           "name": "Map 100: equals ≠, Immutable hashes warmed",
           "values": {
-            "valsem": 27.056969183394997,
-            "Immutable": 24.228136958240615
+            "valsem": 27.886575410104058,
+            "Immutable": 26.789378163147518
           }
         },
         {
           "name": "Map 10000: build from entries",
           "values": {
-            "valsem": 13651272.5,
-            "Immutable": 1066079.16
+            "valsem": 3055909.18,
+            "Immutable": 1128105
           }
         },
         {
           "name": "Map 10000: get (hit)",
           "values": {
-            "valsem": 68.40096470713299,
-            "Immutable": 70.89745003720634
+            "valsem": 64.80657356224089,
+            "Immutable": 70.73273227383864
           }
         },
         {
           "name": "Map 10000: has (miss)",
           "values": {
-            "valsem": 100.06317768682895,
-            "Immutable": 118.91493701498884
+            "valsem": 97.70566466461146,
+            "Immutable": 119.46472706495163
           }
         },
         {
           "name": "Map 10000: set existing key → novel value",
           "values": {
-            "valsem": 2441.9968706814075,
-            "Immutable": 239.50471723184862
+            "valsem": 1683.0042322206866,
+            "Immutable": 247.03179812905285
           }
         },
         {
           "name": "Map 10000: set new key",
           "values": {
-            "valsem": 1856.8679972361008,
-            "Immutable": 275.91155522483257
+            "valsem": 2421.0990419368554,
+            "Immutable": 301.2799643882215
           }
         },
         {
           "name": "Map 10000: delete existing",
           "values": {
-            "valsem": 1344.1168013181673,
-            "Immutable": 864.3884474327629
+            "valsem": 1298.4252617731477,
+            "Immutable": 241.49154220261508
           }
         },
         {
           "name": "Map 10000: iterate entries",
           "values": {
-            "valsem": 213627.5,
-            "Immutable": 265008.34
+            "valsem": 278582.5,
+            "Immutable": 335637.5
           }
         },
         {
           "name": "Map 10000: set one key, then hash",
           "values": {
-            "valsem": 2779.16,
-            "Immutable": 970894.16
+            "valsem": 2115.84,
+            "Immutable": 983340
           }
         },
         {
           "name": "Map 10000: equals = (independent builds)",
           "values": {
-            "valsem": 41.14375,
-            "Immutable": 830573.4375
+            "valsem": 31.25,
+            "Immutable": 828670.575
           }
         },
         {
           "name": "Map 10000: equals ≠ (one entry differs), cold",
           "values": {
-            "valsem": 48.7,
-            "Immutable": 152995.83125
+            "valsem": 356.775,
+            "Immutable": 151721.875
           }
         },
         {
           "name": "Map 10000: equals ≠, Immutable hashes warmed",
           "values": {
-            "valsem": 12.712720580418837,
-            "Immutable": 35.03569150632508
+            "valsem": 14.791179440841926,
+            "Immutable": 35.74133623897098
           }
         },
         {
           "name": "Set 100: build from members",
           "values": {
-            "valsem": 42257.90625,
-            "Immutable": 6439.698
+            "valsem": 15187.89575,
+            "Immutable": 6461.8125
           }
         },
         {
           "name": "Set 100: has (hit)",
           "values": {
-            "valsem": 37.6725239456731,
-            "Immutable": 32.424383050700435
+            "valsem": 38.05577148271341,
+            "Immutable": 33.489469241778735
           }
         },
         {
           "name": "Set 100: add new member",
           "values": {
-            "valsem": 775.163808087649,
-            "Immutable": 485.82136911533627
+            "valsem": 1138.8217961506768,
+            "Immutable": 204.67378503441304
           }
         },
         {
           "name": "Set 100: delete existing",
           "values": {
-            "valsem": 756.5983365639001,
-            "Immutable": 149.92624298978117
+            "valsem": 403.9666745623722,
+            "Immutable": 138.22975502183553
           }
         },
         {
           "name": "Set 100: iterate members",
           "values": {
-            "valsem": 1370.698,
-            "Immutable": 1442.677
+            "valsem": 1334.09375,
+            "Immutable": 1346.927
           }
         },
         {
           "name": "Set 100: add one member, then hash",
           "values": {
-            "valsem": 1146.854,
-            "Immutable": 3338.3545
+            "valsem": 1040.875,
+            "Immutable": 3254.3125
           }
         },
         {
           "name": "Set 100: equals = (independent builds)",
           "values": {
-            "valsem": 8.3203125,
-            "Immutable": 3722.7448125
+            "valsem": 7.5338125,
+            "Immutable": 3790.6640625
           }
         },
         {
           "name": "Set 100: equals ≠ (one member differs), cold",
           "values": {
-            "valsem": 15.9375,
-            "Immutable": 2898.11975
+            "valsem": 16.6693125,
+            "Immutable": 2929.4818125
           }
         },
         {
           "name": "Set 100: equals ≠, Immutable hashes warmed",
           "values": {
-            "valsem": 12.63980236270647,
-            "Immutable": 47.014615951771695
+            "valsem": 14.649590813402238,
+            "Immutable": 45.73253909208283
           }
         },
         {
           "name": "Set 10000: build from members",
           "values": {
-            "valsem": 10325250,
-            "Immutable": 1041494.16
+            "valsem": 3407586.68,
+            "Immutable": 1226622.5
           }
         },
         {
           "name": "Set 10000: has (hit)",
           "values": {
-            "valsem": 68.19251621133199,
-            "Immutable": 62.70983708940151
+            "valsem": 64.42481662591688,
+            "Immutable": 60.70335255660678
           }
         },
         {
           "name": "Set 10000: add new member",
           "values": {
-            "valsem": 1715.9395928563836,
-            "Immutable": 297.1604191027958
+            "valsem": 1579.0302434357393,
+            "Immutable": 292.91075794621025
           }
         },
         {
           "name": "Set 10000: delete existing",
           "values": {
-            "valsem": 1019.0402891463804,
-            "Immutable": 248.05220846178378
+            "valsem": 940.6581069947911,
+            "Immutable": 227.7185540023387
           }
         },
         {
           "name": "Set 10000: iterate members",
           "values": {
-            "valsem": 175531.66,
-            "Immutable": 236905
+            "valsem": 151647.5,
+            "Immutable": 235201.68
           }
         },
         {
           "name": "Set 10000: add one member, then hash",
           "values": {
-            "valsem": 2366.66,
-            "Immutable": 345256.66
+            "valsem": 2357.5,
+            "Immutable": 352935.82
           }
         },
         {
           "name": "Set 10000: equals = (independent builds)",
           "values": {
-            "valsem": 54.425,
-            "Immutable": 856346.35625
+            "valsem": 38.01875,
+            "Immutable": 873253.64375
           }
         },
         {
           "name": "Set 10000: equals ≠ (one member differs), cold",
           "values": {
-            "valsem": 54.94375,
-            "Immutable": 647090.625
+            "valsem": 47.91875,
+            "Immutable": 638128.38125
           }
         },
         {
           "name": "Set 10000: equals ≠, Immutable hashes warmed",
           "values": {
-            "valsem": 12.764490538960349,
-            "Immutable": 39.96192994578505
+            "valsem": 14.666325608589348,
+            "Immutable": 40.02172584245774
           }
         },
         {
           "name": "List 100: build from array",
           "values": {
-            "valsem": 5752.23975,
-            "Immutable": 2607.625
+            "valsem": 4064.66675,
+            "Immutable": 2852.198
           }
         },
         {
           "name": "List 100: get (mid index)",
           "values": {
-            "valsem": 10.98434314958581,
-            "Immutable": 12.076539412359336
+            "valsem": 11.342292178914462,
+            "Immutable": 12.857210058016754
           }
         },
         {
           "name": "List 100: set (mid) → novel value",
           "values": {
-            "valsem": 1561.3508829289287,
-            "Immutable": 83.85044755305414
+            "valsem": 1421.1149525757237,
+            "Immutable": 74.43843184616051
           }
         },
         {
           "name": "List 100: push",
           "values": {
-            "valsem": 694.9357945693115,
-            "Immutable": 95.21053175908534
+            "valsem": 629.3939300929803,
+            "Immutable": 81.47492335049259
           }
         },
         {
           "name": "List 100: pop",
           "values": {
-            "valsem": 409.7765537580778,
-            "Immutable": 66.86619781744906
+            "valsem": 337.4165829833089,
+            "Immutable": 173.37996470286015
           }
         },
         {
           "name": "List 100: iterate elements",
           "values": {
-            "valsem": 987.375,
-            "Immutable": 1272.83325
+            "valsem": 1144.073,
+            "Immutable": 1620.1355
           }
         },
         {
           "name": "List 100: push one, then hash",
           "values": {
-            "valsem": 702.708,
-            "Immutable": 6282.9165
+            "valsem": 851.271,
+            "Immutable": 6465.4585
           }
         },
         {
           "name": "List 100: equals = (from vs push chain)",
           "values": {
-            "valsem": 8.447875,
-            "Immutable": 3283.2421875
+            "valsem": 10.8046875,
+            "Immutable": 3612.1171875
           }
         },
         {
           "name": "List 100: equals ≠ (one element differs), cold",
           "values": {
-            "valsem": 16.625,
-            "Immutable": 1837.895875
+            "valsem": 22.09375,
+            "Immutable": 1766.8671875
           }
         },
         {
           "name": "List 100: equals ≠, Immutable hashes warmed",
           "values": {
-            "valsem": 12.992186587754095,
-            "Immutable": 37.03794609346069
+            "valsem": 16.057889978347973,
+            "Immutable": 474.98118041909515
           }
         },
         {
           "name": "List 10000: build from array",
           "values": {
-            "valsem": 1052330,
-            "Immutable": 328288.34
+            "valsem": 333121.66,
+            "Immutable": 308661.68
           }
         },
         {
           "name": "List 10000: get (mid index)",
           "values": {
-            "valsem": 11.042029871372382,
-            "Immutable": 12.806008823216754
+            "valsem": 11.631683852450303,
+            "Immutable": 13.69436988412884
           }
         },
         {
           "name": "List 10000: set (mid) → novel value",
           "values": {
-            "valsem": 2243.833269108111,
-            "Immutable": 115.11983762092059
+            "valsem": 2906.992465717019,
+            "Immutable": 161.35120123312427
           }
         },
         {
           "name": "List 10000: push",
           "values": {
-            "valsem": 521.6450050494312,
-            "Immutable": 100.67691612628893
+            "valsem": 547.347832730945,
+            "Immutable": 97.1417561390454
           }
         },
         {
           "name": "List 10000: pop",
           "values": {
-            "valsem": 83.53127325395981,
-            "Immutable": 80.73525698947593
+            "valsem": 152.19329355798874,
+            "Immutable": 64.59756697140428
           }
         },
         {
           "name": "List 10000: iterate elements",
           "values": {
-            "valsem": 92763.34,
-            "Immutable": 181827.5
+            "valsem": 83848.34,
+            "Immutable": 156063.34
           }
         },
         {
           "name": "List 10000: push one, then hash",
           "values": {
-            "valsem": 625,
-            "Immutable": 645635.84
+            "valsem": 950.82,
+            "Immutable": 629530.82
           }
         },
         {
           "name": "List 10000: equals = (from vs push chain)",
           "values": {
-            "valsem": 54.94375,
-            "Immutable": 337813.80625
+            "valsem": 18.75,
+            "Immutable": 309683.85
           }
         },
         {
           "name": "List 10000: equals ≠ (one element differs), cold",
           "values": {
-            "valsem": 72.65625,
-            "Immutable": 154540.3625
+            "valsem": 24.21875,
+            "Immutable": 159699.21875
           }
         },
         {
           "name": "List 10000: equals ≠, Immutable hashes warmed",
           "values": {
-            "valsem": 12.733762092059106,
-            "Immutable": 40.38160412458807
+            "valsem": 15.328512012331243,
+            "Immutable": 41.07728951844371
           }
         },
         {
           "name": "Map 10k with record values: build from raw records",
           "values": {
-            "valsem": 21273424.16,
-            "Immutable": 1612917.5
+            "valsem": 6750340.84,
+            "Immutable": 1461485
           }
         },
         {
           "name": "Map 10k with record values: build from canonical records",
           "values": {
-            "valsem": 20978165.84,
-            "Immutable": 1165014.18
+            "valsem": 5614465,
+            "Immutable": 1098154.16
           }
         },
         {
           "name": "Map 10k with record values: set one raw record",
           "values": {
-            "valsem": 7911.75084,
-            "Immutable": 357.30584
+            "valsem": 1815.81166,
+            "Immutable": 237.25
           }
         }
       ]
@@ -879,46 +887,48 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "get, canonical object key",
           "values": {
-            "HashMap": 25.55444333333333,
-            "native Map": 6.05153
+            "HashMap": 16.77472,
+            "native Map": 8.510973333333334
           }
         },
         {
           "name": "get, primitive key",
           "values": {
-            "HashMap": 14.50097,
-            "native Map": 7.355833333333333
+            "HashMap": 13.4975,
+            "native Map": 7.265556666666667
           }
         },
         {
           "name": "set, existing canonical key",
           "values": {
-            "HashMap": 21.22361,
-            "native Map": 18.567083333333333
+            "HashMap": 20.210416666666667,
+            "native Map": 11.177916666666667
           }
         },
         {
           "name": "get, raw 2-key object (interned first; a native Map misses)",
           "values": {
-            "HashMap": 171.54166666666666,
+            "HashMap": 182.00194333333334,
             "native Map": null
           }
         },
         {
           "name": "get, raw 50-record payload key",
           "values": {
-            "HashMap": 9441.3583,
+            "HashMap": 9789.59375,
             "native Map": null
           }
         },
         {
           "name": "set, a novel raw 2-key object per call (a pool entry each)",
           "values": {
-            "HashMap": 475.53958,
+            "HashMap": 364.53667,
             "native Map": null
           }
         }
@@ -933,83 +943,85 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "recompute, no memo",
           "values": {
-            "per call": 496.19271
+            "per call": 481.18042
           }
         },
         {
           "name": "hit, both arguments canonical",
           "values": {
-            "per call": 68.800415
+            "per call": 70.591875
           }
         },
         {
           "name": "hit, fresh filter literal + canonical list (the reselect case)",
           "values": {
-            "per call": 287.260835
+            "per call": 173.16375
           }
         },
         {
           "name": "hit, fresh filter literal + ValueList",
           "values": {
-            "per call": 158.611665
+            "per call": 157.597915
           }
         },
         {
           "name": "hit, both arguments raw (100 × 3-key records)",
           "values": {
-            "per call": 17632.90415
+            "per call": 19025.8208
           }
         },
         {
           "name": "hit, maxSize 8, working set of 8",
           "values": {
-            "per call": 56.74354
+            "per call": 58.71104
           }
         },
         {
           "name": "miss + evict, maxSize 8, working set of 9",
           "values": {
-            "per call": 4751.966665
+            "per call": 4305.83354
           }
         },
         {
           "name": "hit, one raw 3-key record argument",
           "values": {
-            "per call": 205.22146
+            "per call": 185.340625
           }
         },
         {
           "name": "hit, one canonical 3-key record argument",
           "values": {
-            "per call": 44.41979
+            "per call": 37.070415
           }
         },
         {
           "name": "hit, one raw 20-key record argument",
           "values": {
-            "per call": 766.343335
+            "per call": 738.905835
           }
         },
         {
           "name": "hit, one canonical 20-key record argument",
           "values": {
-            "per call": 39.629375
+            "per call": 38.526045
           }
         },
         {
           "name": "hit, one raw 200-key record argument",
           "values": {
-            "per call": 8704.746875
+            "per call": 8335.399165
           }
         },
         {
           "name": "hit, one canonical 200-key record argument",
           "values": {
-            "per call": 38.17354
+            "per call": 38.0775
           }
         }
       ]
@@ -1024,138 +1036,140 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "from, raw records (admission dominates)",
           "values": {
-            "ValueList": 46690091.6,
+            "ValueList": 27348541.6,
             "pointer scan": null
           }
         },
         {
           "name": "from, canonical records",
           "values": {
-            "ValueList": 20969741.6,
+            "ValueList": 6132275,
             "pointer scan": null
           }
         },
         {
           "name": "get, sequential",
           "values": {
-            "ValueList": 9.911666666666667,
+            "ValueList": 11.86264,
             "pointer scan": null
           }
         },
         {
           "name": "get, random",
           "values": {
-            "ValueList": 86.70402666666666,
+            "ValueList": 79.57291666666667,
             "pointer scan": null
           }
         },
         {
           "name": "iterate for…of",
           "values": {
-            "ValueList": 1992158.35,
+            "ValueList": 805445.8,
             "pointer scan": null
           }
         },
         {
           "name": "toArray (memoized)",
           "values": {
-            "ValueList": 114.6,
+            "ValueList": 158.35,
             "pointer scan": null
           }
         },
         {
           "name": "push",
           "values": {
-            "ValueList": 746.264,
+            "ValueList": 969.0833333333334,
             "pointer scan": null
           }
         },
         {
           "name": "pop",
           "values": {
-            "ValueList": 204.38866666666667,
+            "ValueList": 649.4723333333334,
             "pointer scan": null
           }
         },
         {
           "name": "set, middle",
           "values": {
-            "ValueList": 2665.8333333333335,
+            "ValueList": 3901.5,
             "pointer scan": null
           }
         },
         {
           "name": "insert at 0",
           "values": {
-            "ValueList": 5339.791666666667,
+            "ValueList": 6425.875,
             "pointer scan": null
           }
         },
         {
           "name": "insert, middle",
           "values": {
-            "ValueList": 6706.458333333333,
+            "ValueList": 6230.75,
             "pointer scan": null
           }
         },
         {
           "name": "remove at 0",
           "values": {
-            "ValueList": 5549.944666666666,
+            "ValueList": 5238.680666666667,
             "pointer scan": null
           }
         },
         {
           "name": "slice, middle half",
           "values": {
-            "ValueList": 8904.625,
+            "ValueList": 3711.2636666666667,
             "pointer scan": null
           }
         },
         {
           "name": "concat, two halves",
           "values": {
-            "ValueList": 5064.014,
+            "ValueList": 6221.639,
             "pointer scan": null
           }
         },
         {
           "name": "diff: 1 point edit (1 hunks)",
           "values": {
-            "ValueList": 4792,
-            "pointer scan": 2681839.55
+            "ValueList": 6130.479,
+            "pointer scan": 2219904.15
           }
         },
         {
           "name": "diff: 10 point edits (10 hunks)",
           "values": {
-            "ValueList": 21713.396,
-            "pointer scan": 2595231.25
+            "ValueList": 22851.7085,
+            "pointer scan": 2241977.1
           }
         },
         {
           "name": "diff: 100 point edits (100 hunks)",
           "values": {
-            "ValueList": 93656.0625,
-            "pointer scan": 2375608.35
+            "ValueList": 88123.729,
+            "pointer scan": 2218641.65
           }
         },
         {
           "name": "diff: insert + remove (2 hunks)",
           "values": {
-            "ValueList": 7636.771,
-            "pointer scan": 2591247.9
+            "ValueList": 8818.75,
+            "pointer scan": 2208793.75
           }
         },
         {
           "name": "diff: refetch, 3 changed, independently built (3 hunks)",
           "values": {
-            "ValueList": 5284.1875,
-            "pointer scan": 2447902.05
+            "ValueList": 4688.8125,
+            "pointer scan": 2222050
           }
         }
       ]
@@ -1169,77 +1183,328 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "1 set",
           "values": {
-            "per produce": 2970.833
+            "per produce": 3666.771
           }
         },
         {
           "name": "1 nested edit (get(i).v = x)",
           "values": {
-            "per produce": 3169.25
+            "per produce": 4318.083
           }
         },
         {
           "name": "100 sets, spread out",
           "values": {
-            "per produce": 402920.625
+            "per produce": 348571.875
           }
         },
         {
           "name": "100 nested edits, spread out",
           "values": {
-            "per produce": 396497.71
+            "per produce": 362593.545
           }
         },
         {
           "name": "push 100",
           "values": {
-            "per produce": 77538.75
+            "per produce": 82308.54
           }
         },
         {
           "name": "1 insert at n/2",
           "values": {
-            "per produce": 23848.5205
+            "per produce": 11661.854
           }
         },
         {
           "name": "10 inserts + 10 removes, spread out",
           "values": {
-            "per produce": 215114.25
+            "per produce": 216073.084
           }
         },
         {
           "name": "100 sets + 10 inserts + 10 removes",
           "values": {
-            "per produce": 826793.955
+            "per produce": 815078.125
           }
         },
         {
           "name": "splice 1,000 out of the middle",
           "values": {
-            "per produce": 24552.584
+            "per produce": 26242.832
           }
         },
         {
           "name": "pop 100 then push 100",
           "values": {
-            "per produce": 116352.29
+            "per produce": 109483.33
           }
         },
         {
           "name": "reference: direct set",
           "values": {
-            "per produce": 3738.6803333333332
+            "per produce": 4460.680666666667
           }
         },
         {
           "name": "reference: direct insert",
           "values": {
-            "per produce": 6808.569333333333
+            "per produce": 6974.333333333333
+          }
+        }
+      ]
+    },
+    {
+      "id": "ordered",
+      "title": "OrderedMap, OrderedSet — against Immutable.js",
+      "description": "\nInsertion-ordered collections with canonical instances. Immutable's `OrderedMap` keeps a map from key to list\nindex and leaves holes in the list on delete, compacting when holes outnumber entries — a representation that\ndepends on delete history, which hash consing cannot allow. valsem keeps, per key, one content-derived ANCHOR\n(the first element of the run the key sits in — or, for a key that starts its run, of the lowest enclosing run it\ndoes not start) in the key trie, and finds a key's position through it in O(log n); the price is anchor maintenance\non the runs an edit re-chunks. Primitive keys and values, so\nintern-on-entry is a no-op and the structures are what is timed; every row asserts both libraries agree.\n\n- **build**, **get**, **set existing** (novel value), **append** (a new key), **delete** (a middle key),\n  **indexOf** (Immutable: `keySeq().indexOf`, a scan), **insert at n/2** (valsem only — Immutable has no positional\n  insert), **iterate**.\n- **equals =**: two independently built equal maps — valsem's pointer compare; Immutable's `is()` walks.\n- **draft, k edits**: one `produce` with k sets on present keys and k/10 deletes, against `withMutations`.\n",
+      "columns": [
+        "valsem",
+        "Immutable"
+      ],
+      "unit": "ns",
+      "ratio": [
+        "valsem",
+        "Immutable"
+      ],
+      "commit": "4b17e70",
+      "date": "2026-09-19",
+      "rows": [
+        {
+          "name": "OrderedMap 100: build from entries",
+          "values": {
+            "valsem": 49928.584,
+            "Immutable": 21418.083
+          }
+        },
+        {
+          "name": "OrderedMap 100: get",
+          "values": {
+            "valsem": 64.06939347434444,
+            "Immutable": 64.0485754320411
+          }
+        },
+        {
+          "name": "OrderedMap 100: set existing key → novel value",
+          "values": {
+            "valsem": 3061.0377635441687,
+            "Immutable": 205.60888710968774
+          }
+        },
+        {
+          "name": "OrderedMap 100: append a new key",
+          "values": {
+            "valsem": 3866.837870296237,
+            "Immutable": 381.8666933546838
+          }
+        },
+        {
+          "name": "OrderedMap 100: delete a middle key",
+          "values": {
+            "valsem": 14804.093274619696,
+            "Immutable": 390.5068054443555
+          }
+        },
+        {
+          "name": "OrderedMap 100: indexOf a middle key",
+          "values": {
+            "valsem": 230.99326082604924,
+            "Immutable": 1767.509608327217
+          }
+        },
+        {
+          "name": "OrderedMap 100: insert at n/2",
+          "values": {
+            "valsem": 19875.478115825994,
+            "Immutable": null
+          }
+        },
+        {
+          "name": "OrderedMap 100: iterate entries",
+          "values": {
+            "valsem": 3926.834,
+            "Immutable": 3356.083
+          }
+        },
+        {
+          "name": "OrderedMap 100: equals = (from vs set chain)",
+          "values": {
+            "valsem": 12.5,
+            "Immutable": 4406.22925
+          }
+        },
+        {
+          "name": "OrderedMap 100: draft, 10 sets + 1 deletes",
+          "values": {
+            "valsem": 43114.895,
+            "Immutable": 1933.9575
+          }
+        },
+        {
+          "name": "OrderedMap 10000: build from entries",
+          "values": {
+            "valsem": 4716550,
+            "Immutable": 2477568.75
+          }
+        },
+        {
+          "name": "OrderedMap 10000: get",
+          "values": {
+            "valsem": 74.88977476579629,
+            "Immutable": 96.69071822470268
+          }
+        },
+        {
+          "name": "OrderedMap 10000: set existing key → novel value",
+          "values": {
+            "valsem": 6304.544246611746,
+            "Immutable": 226.63672601647622
+          }
+        },
+        {
+          "name": "OrderedMap 10000: append a new key",
+          "values": {
+            "valsem": 3647.4887058198246,
+            "Immutable": 450.9588094605368
+          }
+        },
+        {
+          "name": "OrderedMap 10000: delete a middle key",
+          "values": {
+            "valsem": 46080.39888386925,
+            "Immutable": 453.328461334042
+          }
+        },
+        {
+          "name": "OrderedMap 10000: indexOf a middle key",
+          "values": {
+            "valsem": 479.05175735831506,
+            "Immutable": 189472.13088831306
+          }
+        },
+        {
+          "name": "OrderedMap 10000: insert at n/2",
+          "values": {
+            "valsem": 183617.481796439,
+            "Immutable": null
+          }
+        },
+        {
+          "name": "OrderedMap 10000: iterate entries",
+          "values": {
+            "valsem": 342214.6,
+            "Immutable": 300677.05
+          }
+        },
+        {
+          "name": "OrderedMap 10000: equals = (from vs set chain)",
+          "values": {
+            "valsem": 38.025,
+            "Immutable": 455589.0625
+          }
+        },
+        {
+          "name": "OrderedMap 10000: draft, 10 sets + 1 deletes",
+          "values": {
+            "valsem": 85751.0425,
+            "Immutable": 2313.125
+          }
+        },
+        {
+          "name": "OrderedMap 10000: draft, 100 sets + 10 deletes",
+          "values": {
+            "valsem": 1563945.825,
+            "Immutable": 24812.5
+          }
+        },
+        {
+          "name": "OrderedSet 100: build from members",
+          "values": {
+            "valsem": 34458.583,
+            "Immutable": 17079.709
+          }
+        },
+        {
+          "name": "OrderedSet 100: has",
+          "values": {
+            "valsem": 46.310969506905984,
+            "Immutable": 52.98478681523987
+          }
+        },
+        {
+          "name": "OrderedSet 100: add a new member",
+          "values": {
+            "valsem": 2437.0663197224444,
+            "Immutable": 354.75046704029893
+          }
+        },
+        {
+          "name": "OrderedSet 100: delete a middle member",
+          "values": {
+            "valsem": 7380.43207899653,
+            "Immutable": 263.16613290632506
+          }
+        },
+        {
+          "name": "OrderedSet 100: indexOf a middle member",
+          "values": {
+            "valsem": 196.70934810168814,
+            "Immutable": 1772.68772936545
+          }
+        },
+        {
+          "name": "OrderedSet 100: iterate members",
+          "values": {
+            "valsem": 1096.459,
+            "Immutable": 1907.958
+          }
+        },
+        {
+          "name": "OrderedSet 10000: build from members",
+          "values": {
+            "valsem": 4294050,
+            "Immutable": 2436793.75
+          }
+        },
+        {
+          "name": "OrderedSet 10000: has",
+          "values": {
+            "valsem": 73.55265430868381,
+            "Immutable": 88.77317121785927
+          }
+        },
+        {
+          "name": "OrderedSet 10000: add a new member",
+          "values": {
+            "valsem": 3778.833377624236,
+            "Immutable": 522.4666489503056
+          }
+        },
+        {
+          "name": "OrderedSet 10000: delete a middle member",
+          "values": {
+            "valsem": 39703.62742492692,
+            "Immutable": 462.4522986978475
+          }
+        },
+        {
+          "name": "OrderedSet 10000: indexOf a middle member",
+          "values": {
+            "valsem": 508.1999202710783,
+            "Immutable": 210258.16111886254
+          }
+        },
+        {
+          "name": "OrderedSet 10000: iterate members",
+          "values": {
+            "valsem": 96352.1,
+            "Immutable": 216556.25
           }
         }
       ]
@@ -1258,148 +1523,245 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "the Object.freeze call itself (10k elements)",
           "values": {
             "ints unfrozen": null,
-            "ints frozen": 1846885.832,
+            "ints frozen": 2002842.164,
             "doubles unfrozen": null,
-            "doubles frozen": 1745547,
+            "doubles frozen": 1989349.836,
             "objects unfrozen": null,
-            "objects frozen": 1736510
+            "objects frozen": 1943747.5
           }
         },
         {
           "name": "indexed loop read",
           "values": {
-            "ints unfrozen": 6582.291666666667,
-            "ints frozen": 101796.361,
-            "doubles unfrozen": 15558.833333333334,
-            "doubles frozen": 108290.90266666666,
-            "objects unfrozen": 22634.069333333333,
-            "objects frozen": 114141.81966666666
+            "ints unfrozen": 6435.236,
+            "ints frozen": 104508.06966666666,
+            "doubles unfrozen": 15849.653,
+            "doubles frozen": 111945.94433333333,
+            "objects unfrozen": 23346.347333333335,
+            "objects frozen": 121970.26366666667
           }
         },
         {
           "name": "for…of",
           "values": {
-            "ints unfrozen": 8808.944333333333,
-            "ints frozen": 180178.80566666665,
-            "doubles unfrozen": 69717.93033333334,
-            "doubles frozen": 186482.028,
-            "objects unfrozen": 22398.611,
-            "objects frozen": 192382.56966666668
+            "ints unfrozen": 8969.111333333334,
+            "ints frozen": 187873.19466666668,
+            "doubles unfrozen": 74035.486,
+            "doubles frozen": 192379.72233333334,
+            "objects unfrozen": 22429.180666666667,
+            "objects frozen": 197301.94433333335
           }
         },
         {
           "name": "forEach",
           "values": {
-            "ints unfrozen": 22812.875,
-            "ints frozen": 189450.33333333334,
-            "doubles unfrozen": 50759.625,
-            "doubles frozen": 199260.514,
-            "objects unfrozen": 49804.764,
-            "objects frozen": 205425.861
+            "ints unfrozen": 43576.083333333336,
+            "ints frozen": 202844.26366666667,
+            "doubles unfrozen": 51929.55566666667,
+            "doubles frozen": 204516.08333333334,
+            "objects unfrozen": 51251.014,
+            "objects frozen": 210657.375
           }
         },
         {
           "name": "map",
           "values": {
-            "ints unfrozen": 15829.625,
-            "ints frozen": 190276.361,
-            "doubles unfrozen": 24280.916666666668,
-            "doubles frozen": 194853.84733333334,
-            "objects unfrozen": 30572.014,
-            "objects frozen": 221779.23633333333
+            "ints unfrozen": 41930.80533333333,
+            "ints frozen": 296351.361,
+            "doubles unfrozen": 39263.833333333336,
+            "doubles frozen": 275844.597,
+            "objects unfrozen": 49918.56933333333,
+            "objects frozen": 210178.93066666665
           }
         },
         {
           "name": "filter",
           "values": {
-            "ints unfrozen": 173010.764,
-            "ints frozen": 348267.111,
-            "doubles unfrozen": 173254.76366666667,
-            "doubles frozen": 358415.361,
-            "objects unfrozen": 181374.875,
-            "objects frozen": 356609.736
+            "ints unfrozen": 174186.514,
+            "ints frozen": 357828.264,
+            "doubles unfrozen": 171941.81933333335,
+            "doubles frozen": 365267.40266666666,
+            "objects unfrozen": 187808.389,
+            "objects frozen": 362126.597
           }
         },
         {
           "name": "reduce",
           "values": {
-            "ints unfrozen": 9174.444333333333,
-            "ints frozen": 189758.52766666666,
-            "doubles unfrozen": 24311.527666666665,
-            "doubles frozen": 197775.58333333334,
-            "objects unfrozen": 26875.430666666667,
-            "objects frozen": 210335.264
+            "ints unfrozen": 11618.055333333334,
+            "ints frozen": 185987.51366666667,
+            "doubles unfrozen": 23669.652666666665,
+            "doubles frozen": 198555.875,
+            "objects unfrozen": 26665.903,
+            "objects frozen": 202630.06933333335
           }
         },
         {
           "name": "indexOf (miss)",
           "values": {
-            "ints unfrozen": 5176.125,
-            "ints frozen": 99290.93033333334,
-            "doubles unfrozen": 11891.028,
-            "doubles frozen": 102588.81933333333,
-            "objects unfrozen": 12245.930333333334,
-            "objects frozen": 105480.889
+            "ints unfrozen": 5163.097333333333,
+            "ints frozen": 98495.23633333333,
+            "doubles unfrozen": 11786.597,
+            "doubles frozen": 101473.75,
+            "objects unfrozen": 12264.236333333334,
+            "objects frozen": 107146.15266666666
           }
         },
         {
           "name": "slice()",
           "values": {
-            "ints unfrozen": 6513.458333333333,
-            "ints frozen": 133046.56966666668,
-            "doubles unfrozen": 3643.5693333333334,
-            "doubles frozen": 135869.153,
-            "objects unfrozen": 3583.527666666667,
-            "objects frozen": 140643.95833333334
+            "ints unfrozen": 8087.708333333333,
+            "ints frozen": 133549.29166666666,
+            "doubles unfrozen": 5647.194666666666,
+            "doubles frozen": 137667,
+            "objects unfrozen": 4082.875,
+            "objects frozen": 146727.264
           }
         },
         {
           "name": "spread [...a]",
           "values": {
-            "ints unfrozen": 8671.680666666667,
-            "ints frozen": 134522.94466666668,
-            "doubles unfrozen": 8468.389,
-            "doubles frozen": 143427.43066666665,
-            "objects unfrozen": 9664.125,
-            "objects frozen": 142343.80533333332
+            "ints unfrozen": 7233.111,
+            "ints frozen": 143427.70833333334,
+            "doubles unfrozen": 7766.389,
+            "doubles frozen": 143190.347,
+            "objects unfrozen": 13618.541666666666,
+            "objects frozen": 143814.41666666666
           }
         },
         {
           "name": "concat",
           "values": {
-            "ints unfrozen": 3544.0693333333334,
-            "ints frozen": 141596.04166666666,
-            "doubles unfrozen": 3235.2916666666665,
-            "doubles frozen": 146243.33333333334,
-            "objects unfrozen": 3395.139,
-            "objects frozen": 150189.028
+            "ints unfrozen": 4863.861333333333,
+            "ints frozen": 152396.09733333334,
+            "doubles unfrozen": 2553.097333333333,
+            "doubles frozen": 158797.472,
+            "objects unfrozen": 5581.069333333333,
+            "objects frozen": 152992.125
           }
         },
         {
           "name": "JSON.stringify",
           "values": {
-            "ints unfrozen": 67792.334,
-            "ints frozen": 231529.167,
-            "doubles unfrozen": 166305.709,
-            "doubles frozen": 327960.625,
-            "objects unfrozen": 209117.708,
-            "objects frozen": 874129.75
+            "ints unfrozen": 64848.208,
+            "ints frozen": 232229.708,
+            "doubles unfrozen": 167595.917,
+            "doubles frozen": 341023.167,
+            "objects unfrozen": 214518.125,
+            "objects frozen": 880424.834
           }
         },
         {
           "name": "at(-1) ×1000",
           "values": {
-            "ints unfrozen": 2192.125,
-            "ints frozen": 11140.916,
-            "doubles unfrozen": 6098.375,
-            "doubles frozen": 13038.125,
-            "objects unfrozen": 4400.625,
-            "objects frozen": 12950.042
+            "ints unfrozen": 2224.708,
+            "ints frozen": 11010.667,
+            "doubles unfrozen": 5901.042,
+            "doubles frozen": 13020.667,
+            "objects unfrozen": 4425.5,
+            "objects frozen": 13110.583
+          }
+        }
+      ]
+    },
+    {
+      "id": "skip-freezing",
+      "title": "skipFreezing() — what the switch buys, by engine",
+      "description": "\nThe same operations in two processes, one of which called `skipFreezing()` first (it is a one-way switch per process,\nso each column is a child process of its own). Freezing is on by default and stays on: a stray mutation of canonical\nstate throws instead of corrupting every holder of the value. What it costs depends on the engine, which is why this\ntable matters more in one column of the header than in the other.\n\n- On **SpiderMonkey** (Firefox) the switch buys nothing: the freeze is cheap and a frozen array reads at full speed.\n- On **V8** (Node, Chrome) `Object.freeze` is a map transition, so valsem's own operations barely move (an edit in a\n  large plain array gains a little, since a frozen array is slower to copy). What the switch buys is in *your* code:\n  V8 has no fast path for frozen elements in several builtins, so loops over canonical arrays run 2–3× faster\n  unfrozen.\n- On **JavaScriptCore** (Safari, Bun) freezing an array is an O(n) walk, and `produce` freezes the new array of every\n  edit: one edit in a 10,000-element plain array is milliseconds with freezing on and microseconds without. An app\n  that keeps large plain arrays in state and runs on Safari should call `skipFreezing()` in production (freeze in\n  development and test, as with immer), or hold those sequences in a `ValueList`, whose leaves are small arrays\n  inside a frozen wrapper and which pays neither cost: the `ValueList` rows do not move on either engine.\n",
+      "columns": [
+        "freezing on",
+        "skipFreezing()"
+      ],
+      "unit": "ns",
+      "ratio": [
+        "skipFreezing()",
+        "freezing on"
+      ],
+      "commit": "4b17e70",
+      "date": "2026-09-19",
+      "rows": [
+        {
+          "name": "produce: one edit in a 10,000-record plain array",
+          "values": {
+            "freezing on": 2776361.25,
+            "skipFreezing()": 18920.666
+          }
+        },
+        {
+          "name": "produce: the same edit, in a ValueList",
+          "values": {
+            "freezing on": 4001.361,
+            "skipFreezing()": 4429.75
+          }
+        },
+        {
+          "name": "produce: one field of a 3-key record",
+          "values": {
+            "freezing on": 843.68291,
+            "skipFreezing()": 821.31375
+          }
+        },
+        {
+          "name": "intern: a new 10,000-number array",
+          "values": {
+            "freezing on": 424126.4,
+            "skipFreezing()": 275337.5
+          }
+        },
+        {
+          "name": "intern: 1,000 new 10-field records",
+          "values": {
+            "freezing on": 748592.7083333334,
+            "skipFreezing()": 705146.875
+          }
+        },
+        {
+          "name": "your code: indexed loop over a canonical 10,000-record array",
+          "values": {
+            "freezing on": 113045.38866666667,
+            "skipFreezing()": 19174.555333333334
+          }
+        },
+        {
+          "name": "your code: for…of",
+          "values": {
+            "freezing on": 183105.33333333334,
+            "skipFreezing()": 48972.166666666664
+          }
+        },
+        {
+          "name": "your code: arr.filter(…)",
+          "values": {
+            "freezing on": 197136.875,
+            "skipFreezing()": 23319.375
+          }
+        },
+        {
+          "name": "your code: arr.map(…)",
+          "values": {
+            "freezing on": 192125.52125,
+            "skipFreezing()": 18369.0625
+          }
+        },
+        {
+          "name": "your code: JSON.stringify(state)",
+          "values": {
+            "freezing on": 1649877.7833333334,
+            "skipFreezing()": 422213.88333333336
+          }
+        },
+        {
+          "name": "your code: for…of over a ValueList of the same records",
+          "values": {
+            "freezing on": 80261.355,
+            "skipFreezing()": 83174.6875
           }
         }
       ]
@@ -1415,37 +1777,39 @@
       ],
       "unit": "ns",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": [
         {
           "name": "copy a 3-key record",
           "values": {
-            "spread, ≤4 shapes": 18.26875,
-            "spread, megamorphic": 16.42915,
-            "Object.assign, megamorphic": 20.65205
+            "spread, ≤4 shapes": 18.27915,
+            "spread, megamorphic": 18.19375,
+            "Object.assign, megamorphic": 21.96665
           }
         },
         {
           "name": "copy a 20-key record",
           "values": {
-            "spread, ≤4 shapes": 23.3271,
-            "spread, megamorphic": 23.04585,
-            "Object.assign, megamorphic": 27.90205
+            "spread, ≤4 shapes": 31.65,
+            "spread, megamorphic": 30.23955,
+            "Object.assign, megamorphic": 34.2271
           }
         },
         {
           "name": "copy a 100-key record",
           "values": {
-            "spread, ≤4 shapes": 83.61875,
-            "spread, megamorphic": 96.81045,
-            "Object.assign, megamorphic": 108.32085
+            "spread, ≤4 shapes": 124.47085,
+            "spread, megamorphic": 131.2125,
+            "Object.assign, megamorphic": 120.09585
           }
         },
         {
           "name": "copy a 1000-key record",
           "values": {
-            "spread, ≤4 shapes": 26997.319333333333,
-            "spread, megamorphic": 27544.083333333332,
-            "Object.assign, megamorphic": 28223.111
+            "spread, ≤4 shapes": 30094.722333333335,
+            "spread, megamorphic": 31152.236,
+            "Object.assign, megamorphic": 30017.583333333332
           }
         }
       ]
@@ -1460,6 +1824,8 @@
       ],
       "unit": "bytes",
       "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
       "rows": []
     }
   ]

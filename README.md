@@ -88,8 +88,8 @@ derived.get(state);                    // a native Map lookup plus one probe —
 What is *not* fast is building: every value is hashed and canonicalised when
 it is created, so constructing and updating cost more than a plain copy. An
 edit to a large plain array costs two to nine times what immer charges with
-its auto-freeze off (and far less than immer's default, which re-freezes the
-array), admitting a large API response costs four to five times parsing it, and a lookup with a raw
+its auto-freeze off on V8 (and far less than immer's default, which re-freezes the
+array; Safari's engine is [its own section](#freezing-and-safari)), admitting a large API response costs three to five times parsing it, and a lookup with a raw
 (uncanonicalised) key walks it. That is the trade: a win for state that is
 compared, memoized, keyed, or kept in history more often than it is built,
 and a loss for state built once and thrown away.
@@ -105,19 +105,19 @@ shared state into an exception. What it costs depends on the engine.
 - On **V8** (Chrome, Node, Deno) the freeze itself is nearly free. The cost is
   in *your* code that reads canonical **plain arrays**: V8 has no fast path
   for frozen elements in several builtins, so `for…of`, `filter` and
-  `JSON.stringify` over a frozen array run 2–3× slower.
+  `JSON.stringify` over a frozen array run 2–3.5× slower.
 - On **JavaScriptCore** (Safari, Bun) freezing an array is an O(n) walk, and
   `produce` freezes the new array of every edit: one edit in a
   10,000-element plain array takes about 3 ms with freezing on and about
-  15 µs without, and reads run 4–10× slower frozen.
+  20 µs without, and reads run 4–10× slower frozen.
 
 If large plain arrays sit on a hot path and you ship to Safari, do what immer
 users do: keep freezing in development and test, and call `skipFreezing()`
 once at startup in production. Or hold large sequences in a `ValueList`,
-which pays neither cost on either engine (its leaves are small arrays inside
+which pays neither cost on any engine (its leaves are small arrays inside
 a frozen wrapper). Records, and arrays of ordinary size, are not worth the
 thought. The `skipFreezing()` suite in [BENCHMARKS.md](BENCHMARKS.md) has
-both engines side by side; the
+the three engines side by side; the
 [hardening guide](https://andershessellund.github.io/valsem/guide/hardening)
 says what the switch gives up.
 
@@ -235,7 +235,8 @@ insertion-ordered `OrderedMap`/`OrderedSet`, the mutable `HashMap`/`HashSet`,
 
 ## Benchmarks
 
-`pnpm bench` runs every suite on Node and on Bun and renders
+`pnpm bench` runs every suite on Node and on Bun, the engine-level ones in
+the SpiderMonkey shell as well, and renders
 [BENCHMARKS.md](BENCHMARKS.md), with a description of exactly what each row
 measures: `produce` against immer and mutative, the collections against
 Immutable.js, `deepEqual` against fast-deep-equal, the cost of admitting an
