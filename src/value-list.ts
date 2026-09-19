@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, indexArg } from './shared.js';
+import { same, sameSlots, IteratorBase, indexArg, extentArg, elementIndex, insertionIndex } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -422,15 +422,19 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /**
-   * The element at `index`, or `undefined` out of range. A size-table walk
-   * (O(log n)); the leaf of the last read is cached, so sequential reads
-   * stay in one leaf.
+   * The element at `index`, which must name one: an integer in
+   * `[0, length)`, or a `RangeError`. So the result is a `T`, and an
+   * `undefined` that comes back is an element (check `i < list.length` to
+   * probe). A size-table walk (O(log n)); the leaf of the last read is
+   * cached, so sequential reads stay in one leaf.
    */
-  get(index: number): T | undefined {
+  get(index: number): T {
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
     // `!(… < …)` rather than `>=`: NaN fails every comparison, and must not pass.
-    if (!Number.isInteger(index) || index < 0 || !(index < trunk + this.#tail.length)) return undefined;
+    if (!Number.isInteger(index) || index < 0 || !(index < trunk + this.#tail.length)) {
+      elementIndex(index, trunk + this.#tail.length, 'ValueList.get'); // throws, saying which it was
+    }
     if (index >= trunk) return this.#tail[index - trunk] as T;
     const last = this.#last;
     if (index >= last.start && index < last.end) return last.leaf!.kids[index - last.start] as T;
@@ -485,21 +489,17 @@ export class ValueList<T> implements Iterable<T> {
   /**
    * Replace `deleteCount` elements at `start` with `items` (interned on
    * entry) — the general edit; O(log n) expected. `insert`, `remove` and
-   * `slice` are all this. The bounds are `Array.prototype.splice`'s: `start`
-   * counts from the end when negative, both clamp to the list, and an
-   * omitted (or `undefined`) `deleteCount` removes through the end. Both
-   * must be integers (or ±Infinity): anything else throws a `RangeError`
-   * where `Array` would coerce it to some index.
+   * `slice` are all this. `start` is where the edit lands, so it must be a
+   * place in the list: an integer in `[0, length]`, not counted from the end,
+   * or a `RangeError`. `deleteCount` is how much, and means "up to": an
+   * integer ≥ 0 clamped to what is there, with an omitted (or `undefined`)
+   * count, or `Infinity`, removing through the end.
    */
   splice(start: number, deleteCount?: number, items: readonly T[] = []): ValueList<T> {
     const n = this.length;
-    start = indexArg(start, 'ValueList.splice', 'start');
-    if (start < 0) start = Math.max(0, n + start);
-    if (start > n) start = n;
+    start = insertionIndex(start, n, 'ValueList.splice', 'start');
     const end =
-      deleteCount === undefined
-        ? n
-        : Math.min(n, start + Math.max(0, indexArg(deleteCount, 'ValueList.splice', 'deleteCount')));
+      deleteCount === undefined ? n : Math.min(n, start + extentArg(deleteCount, 'ValueList.splice', 'deleteCount'));
     const root = this.#full();
     if (root === null) return ValueList.from(items);
     const s = pathTo(root, start);
@@ -523,9 +523,7 @@ export class ValueList<T> implements Iterable<T> {
    */
   set(index: number, value: T): ValueList<T> {
     const n = this.length;
-    if (!Number.isInteger(index) || index < 0 || index >= n) {
-      throw new RangeError(`ValueList.set: index ${index} out of range [0, ${n})`);
-    }
+    elementIndex(index, n, 'ValueList.set');
     const v = intern(value);
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
@@ -577,9 +575,7 @@ export class ValueList<T> implements Iterable<T> {
     const idx: number[] = [];
     const vals: unknown[] = [];
     for (const [i, v] of sorted) {
-      if (!Number.isInteger(i) || i < 0 || i >= n) {
-        throw new RangeError(`ValueList.setMany: index ${i} out of range [0, ${n})`);
-      }
+      elementIndex(i, n, 'ValueList.setMany');
       if (idx.length !== 0 && idx[idx.length - 1] === i) vals[vals.length - 1] = v; // last write wins
       else {
         idx.push(i);
@@ -605,18 +601,19 @@ export class ValueList<T> implements Iterable<T> {
     return newRoot === root ? this : ValueList.#fromFull<T>(newRoot);
   }
 
-  /** Insert `value` (interned on entry) before `index` — an integer, with `splice`'s bounds; O(log n) expected. */
+  /** Insert `value` (interned on entry) before `index`, an integer in `[0, length]` (else a `RangeError`); O(log n) expected. */
   insert(index: number, value: T): ValueList<T> {
-    return this.splice(indexArg(index, 'ValueList.insert', 'index'), 0, [value]);
+    return this.splice(insertionIndex(index, this.length, 'ValueList.insert'), 0, [value]);
   }
-  /** Remove the element at `index` — an integer, with `splice`'s bounds; O(log n) expected. */
+  /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`); O(log n) expected. */
   remove(index: number): ValueList<T> {
-    return this.splice(indexArg(index, 'ValueList.remove', 'index'), 1);
+    return this.splice(elementIndex(index, this.length, 'ValueList.remove'), 1);
   }
   /**
-   * Elements `[start, end)` — `Array.prototype.slice` bounds (negative counts
-   * from the end, out of range clamps), for integer arguments; a non-integer
-   * throws a `RangeError`. O(log n) expected.
+   * Elements `[start, end)`, the part of that range that exists:
+   * `Array.prototype.slice` bounds whole (negative counts from the end, out
+   * of range clamps, so `slice(0, 10)` of seven is the seven), for integer
+   * arguments; a non-integer throws a `RangeError`. O(log n) expected.
    */
   slice(start = 0, end = this.length): ValueList<T> {
     const n = this.length;

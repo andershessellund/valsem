@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same } from './shared.js';
+import { same, elementIndex, insertionIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -133,26 +133,27 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     return this.#indexOf(k);
   }
 
-  /** The key at `index`, or `undefined` out of range. */
-  keyAt(index: number): K | undefined {
-    return this.#keys.get(index);
+  /** The key at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */
+  keyAt(index: number): K {
+    return this.#keys.get(elementIndex(index, this.#keys.length, 'OrderedMap.keyAt'));
   }
-  /** The value at `index`, or `undefined` out of range. */
-  valueAt(index: number): V | undefined {
-    return this.#vals.get(index);
+  /** The value at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */
+  valueAt(index: number): V {
+    return this.#vals.get(elementIndex(index, this.#keys.length, 'OrderedMap.valueAt'));
   }
-  /** The `[key, value]` entry at `index`, or `undefined` out of range. */
-  at(index: number): [K, V] | undefined {
-    if (!Number.isInteger(index) || index < 0 || index >= this.#keys.length) return undefined;
-    return [this.#keys.get(index) as K, this.#vals.get(index) as V];
+  /** The `[key, value]` entry at `index`, which must name one: an integer in `[0, size)`, or a `RangeError` (not counted from the end: that is {@link last}). */
+  at(index: number): [K, V] {
+    elementIndex(index, this.#keys.length, 'OrderedMap.at');
+    return [this.#keys.get(index), this.#vals.get(index)];
   }
   /** The first entry, or `undefined` when empty. */
   first(): [K, V] | undefined {
-    return this.at(0);
+    return this.#keys.length === 0 ? undefined : this.at(0);
   }
   /** The last entry, or `undefined` when empty. */
   last(): [K, V] | undefined {
-    return this.at(this.#keys.length - 1);
+    const n = this.#keys.length;
+    return n === 0 ? undefined : this.at(n - 1);
   }
 
   /**
@@ -198,9 +199,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
    */
   insertAt(index: number, key: K, value: V): OrderedMap<K, V> {
     const n = this.#keys.length;
-    if (!Number.isInteger(index) || index < 0 || index > n) {
-      throw new RangeError(`OrderedMap.insertAt: index ${index} out of range [0, ${n}]`);
-    }
+    insertionIndex(index, n, 'OrderedMap.insertAt');
     const k = intern(key);
     const v = intern(value);
     const h = internHash(k);

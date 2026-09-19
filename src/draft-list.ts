@@ -35,7 +35,7 @@ import {
 } from './draft-core.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { indexArg } from './shared.js';
+import { extentArg, elementIndex, insertionIndex } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -98,9 +98,19 @@ export class DraftList<T> implements Iterable<T> {
     return e !== undefined ? e.v : s.work.get(index);
   }
 
-  get(index: number): Draft<T> | undefined {
+  /**
+   * The element at `index` (drafted, if it can be), which must name one: an
+   * integer in `[0, length)`, or a `RangeError`.
+   *
+   * The return type is `Draft<T>`, spelled so that TypeScript can still see
+   * the class as covariant: `T & undefined` is `never` unless the list holds
+   * `undefined` elements, where `Draft<T>` includes it already. A bare
+   * conditional type here is opaque to the variance check, and
+   * `ValueList<number>` stopped being a `ValueList<unknown>`.
+   */
+  get(index: number): Draft<T> | (T & undefined) {
     const s = this.#state;
-    if (!Number.isInteger(index) || index < 0 || index >= s.work.length + s.tail.length) return undefined;
+    elementIndex(index, s.work.length + s.tail.length, 'DraftList.get');
     const e = this.#entry(s, index);
     const value = e !== undefined ? e.v : s.work.get(index);
     if (
@@ -121,9 +131,7 @@ export class DraftList<T> implements Iterable<T> {
   set(index: number, value: T): this {
     const s = this.#state;
     const len = s.work.length + s.tail.length;
-    if (!Number.isInteger(index) || index < 0 || index >= len) {
-      throw new RangeError(`DraftList.set: index ${index} out of range [0, ${len})`);
-    }
+    elementIndex(index, len, 'DraftList.set');
     const current = this.#read(s, index);
     if (same(current, value)) return this;
     assertAssignable(value, s);
@@ -162,14 +170,12 @@ export class DraftList<T> implements Iterable<T> {
   splice(start: number, deleteCount?: number, ...values: T[]): T[] {
     const s = this.#state;
     for (const v of values) assertAssignable(v, s);
+    // As ValueList.splice: the start is a place in the list, the count means
+    // "up to". Checked before anything moves.
+    const len = s.work.length + s.tail.length;
+    const at = insertionIndex(start, len, 'DraftList.splice', 'start');
+    const rc = deleteCount === undefined ? len - at : Math.min(extentArg(deleteCount, 'DraftList.splice', 'deleteCount'), len - at);
     flushTail(s);
-    const len = s.work.length;
-    let at = indexArg(start, 'DraftList.splice', 'start');
-    at = at < 0 ? Math.max(len + at, 0) : Math.min(at, len);
-    const rc =
-      deleteCount === undefined
-        ? len - at
-        : Math.min(Math.max(indexArg(deleteCount, 'DraftList.splice', 'deleteCount'), 0), len - at);
     markChanged(s);
     const removed: unknown[] = [];
     for (let i = at; i < at + rc; i++) removed.push(this.#read(s, i));
@@ -225,7 +231,13 @@ export function createListDraft<T>(
     finalize: finalizeList,
     snapshot: snapshotList,
     applyPatch: applyListPatch,
-    childAt: (state, segment) => (state as ListState).draft.get(segment as number),
+    // A path segment comes from a patch, which may come from anywhere: one
+    // that names no element is a bad path (the walker's error), not a read.
+    childAt: (state, segment) => {
+      const s = state as ListState;
+      const ok = Number.isInteger(segment) && (segment as number) >= 0 && (segment as number) < s.work.length + s.tail.length;
+      return ok ? s.draft.get(segment as number) : undefined;
+    },
     replaceChild: (state, segment, value) => void (state as ListState).draft.set(segment as number, value),
   });
   state.draft = new DraftList(INTERNAL, state);
@@ -234,7 +246,22 @@ export function createListDraft<T>(
 
 function applyListPatch(state: ListState, p: Patch): void {
   if (p.kind === 'list.set') state.draft.set(p.index, p.value);
-  else if (p.kind === 'list.splice') state.draft.splice(p.index, p.remove, ...(p.insert as unknown[]));
+  else if (p.kind === 'list.splice') {
+    // A patch is an exact recorded edit, never "up to": a count that does not
+    // fit means it was made against another list, and clamping it would apply
+    // it "successfully" to the wrong base.
+    const len = state.draft.length;
+    if (
+      !Number.isInteger(p.index) || p.index < 0 || p.index > len ||
+      !Number.isInteger(p.remove) || p.remove < 0 || p.index + p.remove > len ||
+      !Array.isArray(p.insert)
+    ) {
+      throw new Error(
+        `valsem: a 'list.splice' patch (index ${String(p.index)}, remove ${String(p.remove)}) does not fit the list it is applied to (length ${len})`,
+      );
+    }
+    state.draft.splice(p.index, p.remove, ...(p.insert as unknown[]));
+  }
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a list draft`);
 }
 

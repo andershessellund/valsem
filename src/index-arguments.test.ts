@@ -6,16 +6,22 @@
 // index walked the tree to a position between elements and built a list of
 // `undefined`s, which was then interned as a canonical value (external
 // review, finding 6). The fix coerced as Array does, ToIntegerOrInfinity.
-// Second (D45): coercion is the half of Array's rules not worth inheriting.
-// A NaN index is an upstream computation gone wrong, and "index 0" is an
-// edit nobody chose. So an index argument is CHECKED: an integer or
-// ±Infinity, or a RangeError.
+// Second (D45): positional arguments are CHECKED, by what they name.
 //
-// The oracle is therefore split. For whole arguments it is the plain Array,
-// all of it: negative counts from the end, out of range clamps. For anything
-// else it is a RangeError, at every operation that cuts or edits at a
-// position, thrown before anything is touched. Reads (`get`, `at`) answer
-// `undefined` for what is not an index, as they always did.
+//   - an ELEMENT (`get`, `at`, `keyAt`, `valueAt`, `set`, `remove`): an
+//     integer in [0, length), or a RangeError. No element, no answer;
+//   - an INSERTION POINT (`insert`, `insertAt`, `splice`'s start): an integer
+//     in [0, length], not counted from the end, or a RangeError. An edit
+//     lands in canonical state, so the place must exist, and -1 (an
+//     `indexOf` miss) must not mean "the last one";
+//   - a RANGE (`slice`'s bounds, `splice`'s count): the oracle is still the
+//     plain Array, clamping and all, since a range has an answer wherever it
+//     points: the part of it that exists;
+//   - a PATCH is exact: an index or count that does not fit is a patch made
+//     against another value, and is refused.
+//
+// A non-integer (NaN, 1.5, '2') is a RangeError in all of them, thrown before
+// anything is touched.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
@@ -25,7 +31,7 @@ import { OrderedSet } from './ordered-set.js';
 import { OrderedMap } from './ordered-map.js';
 import { applyPatches, produce, produceWithPatches } from './produce.js';
 import { intern } from './intern.js';
-import { indexArg } from './shared.js';
+import { indexArg, extentArg, elementIndex, insertionIndex } from './shared.js';
 
 // Whole arguments: integers on both sides of every bound, -0, the infinities.
 const WHOLE = [-0, 0, 3, -3, 1e9, -1e9, Infinity, -Infinity] as const;
@@ -72,7 +78,32 @@ describe('indexArg accepts a position and nothing else', () => {
   });
 });
 
-describe('ValueList: whole index arguments behave as Array’s do', () => {
+describe('the three kinds of position', () => {
+  it('an extent is an integer ≥ 0, or Infinity for "the rest"', () => {
+    for (const ok of [0, 3, 1e9, Infinity]) expect(extentArg(ok, 'op', 'count')).toBe(ok);
+    expect(Object.is(extentArg(-0, 'op', 'count'), 0)).toBe(true);
+    for (const bad of [-1, -Infinity, NaN, 1.5]) expect(() => extentArg(bad, 'op', 'count')).toThrow(RangeError);
+    expect(() => extentArg(-1, 'op', 'count')).toThrow('op: count must not be negative, got -1');
+  });
+
+  it('an element index is an integer in [0, length)', () => {
+    expect(elementIndex(0, 3, 'op')).toBe(0);
+    expect(elementIndex(2, 3, 'op')).toBe(2);
+    expect(Object.is(elementIndex(-0, 3, 'op'), 0)).toBe(true);
+    for (const bad of [3, -1, 99, Infinity, -Infinity, 0.5, NaN]) expect(() => elementIndex(bad, 3, 'op')).toThrow(RangeError);
+    expect(() => elementIndex(0, 0, 'op')).toThrow('op: index 0 out of range [0, 0)');
+    expect(() => elementIndex(NaN, 3, 'op')).toThrow('op: index must be an integer, got NaN');
+  });
+
+  it('an insertion index is an integer in [0, length]', () => {
+    expect(insertionIndex(3, 3, 'op')).toBe(3);
+    expect(insertionIndex(0, 0, 'op')).toBe(0);
+    for (const bad of [4, -1, Infinity, -Infinity, 0.5, NaN]) expect(() => insertionIndex(bad, 3, 'op')).toThrow(RangeError);
+    expect(() => insertionIndex(-1, 3, 'op', 'start')).toThrow('op: start -1 out of range [0, 3]');
+  });
+});
+
+describe('ValueList: a range is Array’s, for whole arguments', () => {
   it('slice', () => {
     fc.assert(
       fc.property(size, whole, whole, (n, a, b) => {
@@ -86,9 +117,38 @@ describe('ValueList: whole index arguments behave as Array’s do', () => {
     );
   });
 
-  it('splice, with and without a deleteCount', () => {
+  it('no slice can build a list holding a hole', () => {
     fc.assert(
-      fc.property(size, whole, whole, fc.array(fc.integer(), { maxLength: 3 }), (n, start, del, items) => {
+      fc.property(size, whole, whole, (n, a, b) => {
+        const out = ValueList.from(range(n)).slice(a, b);
+        expect([...out].every((v) => typeof v === 'number')).toBe(true);
+        expect(out.length).toBe([...out].length);
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('a non-integer bound throws', () => {
+    fc.assert(
+      fc.property(size, junk, (n, bad) => {
+        const list = ValueList.from(range(n)) as unknown as Record<string, Loose>;
+        expect(() => list.slice!(bad)).toThrow(RangeError);
+        expect(() => list.slice!(0, bad)).toThrow(RangeError);
+      }),
+      { numRuns: 300 },
+    );
+  });
+});
+
+describe('ValueList: an edit names a place that exists', () => {
+  // A start in [0, n], and how much to remove: a count (clamped: "up to"),
+  // Infinity, or nothing at all.
+  const count = fc.oneof(fc.constantFrom(0, 1, 3, 1e9, Infinity), fc.integer({ min: 0, max: 400 }));
+
+  it('splice: a start in [0, length] and a count that means "up to" are Array’s splice', () => {
+    fc.assert(
+      fc.property(size, fc.nat(), count, fc.array(fc.integer(), { maxLength: 3 }), (n, at, del, items) => {
+        const start = at % (n + 1);
         const list = ValueList.from(range(n));
         const withCount = range(n);
         withCount.splice(start, del, ...items);
@@ -99,48 +159,54 @@ describe('ValueList: whole index arguments behave as Array’s do', () => {
         // The items are one array here, so an `undefined` count is how a caller
         // removes through the end AND inserts: it means "omitted", not 0.
         expect([...list.splice(start, undefined, items)]).toEqual([...toEnd, ...items]);
+        expect(list.splice(start, del, items)).toBe(ValueList.from(withCount)); // and it is the canonical of that content
       }),
       { numRuns: 600 },
     );
   });
 
-  it('insert and remove are splices, with its bounds', () => {
-    const list = ValueList.from(range(5));
-    expect([...list.remove(1)]).toEqual([0, 2, 3, 4]);
-    expect([...list.remove(-1)]).toEqual([0, 1, 2, 3]);
-    expect([...list.insert(1, 9)]).toEqual([0, 9, 1, 2, 3, 4]);
-    expect([...list.insert(Infinity, 9)]).toEqual([0, 1, 2, 3, 4, 9]);
-    expect(list.remove(99)).toBe(list);
-  });
-
-  it('no operation can build a list holding a hole', () => {
+  it('splice: a start that is no place in the list throws, as does a negative count', () => {
     fc.assert(
-      fc.property(size, whole, whole, (n, a, b) => {
+      fc.property(size, fc.integer({ min: 1, max: 400 }), (n, k) => {
         const list = ValueList.from(range(n));
-        for (const out of [list.slice(a, b), list.splice(a, b), list.splice(a)]) {
-          expect([...out].every((v) => typeof v === 'number')).toBe(true);
-          expect(out.length).toBe([...out].length);
+        for (const start of [n + k, -k, Infinity, -Infinity]) {
+          expect(() => list.splice(start)).toThrow(RangeError);
+          expect(() => list.splice(start, 1)).toThrow(RangeError);
+          expect(() => list.splice(start, 0, [9])).toThrow(RangeError);
         }
+        expect(() => list.splice(0, -k)).toThrow(RangeError);
       }),
-      { numRuns: 400 },
+      { numRuns: 200 },
     );
   });
-});
 
-describe('ValueList: anything else throws, at every operation that takes a position', () => {
-  it('slice, splice, insert and remove', () => {
+  it('insert takes [0, length]; remove takes an element', () => {
+    const list = ValueList.from(range(5));
+    expect([...list.insert(0, 9)]).toEqual([9, 0, 1, 2, 3, 4]);
+    expect([...list.insert(5, 9)]).toEqual([0, 1, 2, 3, 4, 9]);
+    expect([...list.remove(0)]).toEqual([1, 2, 3, 4]);
+    expect([...list.remove(4)]).toEqual([0, 1, 2, 3]);
+    for (const bad of [6, 99, -1, Infinity]) expect(() => list.insert(bad, 9)).toThrow(RangeError);
+    for (const bad of [5, 99, -1, Infinity]) expect(() => list.remove(bad)).toThrow(RangeError);
+    // The bug this is for: an indexOf miss is -1, which used to count from
+    // the end and delete the last element.
+    expect(() => list.remove(list.toArray().indexOf(42))).toThrow('ValueList.remove: index -1 out of range [0, 5)');
+    expect(() => list.splice(list.toArray().indexOf(42), 1)).toThrow('ValueList.splice: start -1 out of range [0, 5]');
+  });
+
+  it('anything that is not an integer throws, at every edit', () => {
     fc.assert(
       fc.property(size, junk, (n, bad) => {
         const list = ValueList.from(range(n)) as unknown as Record<string, Loose>;
         for (const call of [
-          () => list.slice!(bad),
-          () => list.slice!(0, bad),
           () => list.splice!(bad),
           () => list.splice!(bad, 1),
           () => list.splice!(0, bad),
           () => list.splice!(0, bad, [9]),
           () => list.insert!(bad, 9),
           () => list.remove!(bad),
+          () => list.set!(bad, 9),
+          () => list.setMany!([[bad, 9]]),
         ]) {
           expect(call).toThrow(RangeError);
         }
@@ -155,23 +221,33 @@ describe('ValueList: anything else throws, at every operation that takes a posit
     expect(() => list.insert!()).toThrow(/ValueList\.insert: index must be an integer, got undefined/);
     expect(() => list.remove!()).toThrow(/ValueList\.remove: index must be an integer, got undefined/);
   });
+});
 
-  it('get answers undefined for anything that is not an index; set and setMany throw', () => {
+describe('ValueList: a read names an element', () => {
+  it('get answers for [0, length) and throws for anything else; so do set and setMany', () => {
     for (const n of [5, 300]) {
       const list = ValueList.from(range(n));
       for (const i of [NaN, 0.5, 1.5, -1, -0.5, Infinity, -Infinity, n, n + 0.5]) {
-        expect(list.get(i)).toBeUndefined();
+        expect(() => list.get(i)).toThrow(RangeError);
         expect(() => list.set(i, 9)).toThrow(RangeError);
         expect(() => list.setMany([[i, 9]])).toThrow(RangeError);
       }
       expect(list.get(-0)).toBe(0);
+      expect(list.get(n - 1)).toBe(n - 1);
       expect(list.set(-0, 9).get(0)).toBe(9);
     }
+    expect(() => ValueList.empty().get(0)).toThrow('ValueList.get: index 0 out of range [0, 0)');
+  });
+
+  it('so the midpoint of an odd list is a loud mistake, not a quiet undefined', () => {
+    const list = ValueList.from(range(5));
+    expect(() => list.get(list.length / 2)).toThrow('ValueList.get: index must be an integer, got 2.5');
+    expect(list.get(list.length >> 1)).toBe(2);
   });
 });
 
 describe('the other index-taking entry points', () => {
-  it('RawArray.slice and get', () => {
+  it('RawArray: slice is a range (Array’s, and the window past the last row is the rows there are); get names an element', () => {
     fc.assert(
       fc.property(whole, whole, (a, b) => {
         const arr = range(12);
@@ -184,28 +260,58 @@ describe('the other index-taking entry points', () => {
     for (const bad of JUNK) {
       expect(() => raw.slice!(bad)).toThrow(RangeError);
       expect(() => raw.slice!(0, bad)).toThrow(RangeError);
+      expect(() => raw.get!(bad)).toThrow(RangeError);
     }
     expect(raw.slice!()).toEqual([1, 2, 3]); // both optional: the whole content
-    expect(RawArray.from([1, 2, 3]).get(0.5)).toBeUndefined();
-    expect(RawArray.from([1, 2, 3]).get(NaN)).toBeUndefined();
+    expect(raw.slice!(0, 100)).toEqual([1, 2, 3]);
+    expect(raw.get!(2)).toBe(3);
+    for (const i of [3, -1, Infinity]) expect(() => raw.get!(i)).toThrow(RangeError);
   });
 
-  it('OrderedSet.at and OrderedMap.at', () => {
+  it('OrderedSet and OrderedMap: at, keyAt and valueAt name an entry; first and last have no index to get wrong', () => {
     const s = OrderedSet.from([1, 2, 3]);
     const m = OrderedMap.from([['a', 1], ['b', 2]]);
-    for (const i of [NaN, 0.5, -1, Infinity, 3.5]) {
-      expect(s.at(i)).toBeUndefined();
-      expect(m.at(i)).toBeUndefined();
+    for (const i of [NaN, 0.5, -1, Infinity, 3.5, 3]) {
+      expect(() => s.at(i)).toThrow(RangeError);
+      expect(() => m.at(i)).toThrow(RangeError);
+      expect(() => m.keyAt(i)).toThrow(RangeError);
+      expect(() => m.valueAt(i)).toThrow(RangeError);
     }
     expect(s.at(1)).toBe(2);
     expect(m.at(1)).toEqual(['b', 2]);
+    expect(OrderedSet.empty().first()).toBeUndefined();
+    expect(OrderedSet.empty().last()).toBeUndefined();
+    expect(OrderedMap.empty().first()).toBeUndefined();
+    expect(OrderedMap.empty().last()).toBeUndefined();
     expect(() => s.insertAt(0.5, 9)).toThrow(RangeError);
+    expect(() => s.insertAt(4, 9)).toThrow(RangeError);
     expect(() => m.insertAt(NaN, 'z', 9)).toThrow(RangeError);
+    expect(() => m.insertAt(-1, 'z', 9)).toThrow(RangeError);
   });
 
-  it('DraftList.splice, whole arguments', () => {
+  it('the ordered drafts: the same, mid-recipe', () => {
+    produce({ s: OrderedSet.from([1, 2]), m: OrderedMap.from([['a', { v: 1 }]]) }, (d) => {
+      d.s.add(3);
+      expect(d.s.at(2)).toBe(3);
+      expect(d.m.keyAt(0)).toBe('a');
+      d.m.at(0)[1].v = 2; // an entry that exists is never undefined
+      for (const i of [NaN, 0.5, -1, 3]) expect(() => d.s.at(i)).toThrow(RangeError);
+      for (const i of [NaN, 0.5, -1, 1]) {
+        expect(() => d.m.at(i)).toThrow(RangeError);
+        expect(() => d.m.keyAt(i)).toThrow(RangeError);
+      }
+      d.s.clear();
+      d.m.clear();
+      expect(d.s.first()).toBeUndefined();
+      expect(d.s.last()).toBeUndefined();
+      expect(d.m.first()).toBeUndefined();
+      expect(d.m.last()).toBeUndefined();
+    });
+  });
+
+  it('DraftList.splice: a start in [0, length] and a count that means "up to" are Array’s splice', () => {
     fc.assert(
-      fc.property(whole, whole, (start, del) => {
+      fc.property(fc.integer({ min: 0, max: 8 }), fc.oneof(fc.constantFrom(0, 1, 1e9, Infinity), fc.nat(12)), (start, del) => {
         const expected = range(8);
         const removed = expected.splice(start, del, 99);
         let got: unknown[] = [];
@@ -217,11 +323,13 @@ describe('the other index-taking entry points', () => {
     );
   });
 
-  it('DraftList.splice, anything else: a RangeError, and the draft is untouched', () => {
+  it('DraftList: anything else is a RangeError, and the draft is untouched', () => {
     const base = ValueList.from(range(8));
-    for (const bad of [...JUNK, undefined]) {
+    for (const bad of [...JUNK, undefined, 9, -1, Infinity, -Infinity]) {
       let threw: unknown;
       const next = produce(base, (d) => {
+        d.push(8); // so there is a tail to leave alone
+        d.pop();
         try {
           (d.splice as Loose)(bad, 1, 99);
         } catch (e) {
@@ -231,9 +339,17 @@ describe('the other index-taking entry points', () => {
       expect(threw).toBeInstanceOf(RangeError);
       expect(next).toBe(base);
     }
-    for (const bad of JUNK) {
+    for (const bad of [...JUNK, -1]) {
       expect(() => produce(base, (d) => void (d.splice as Loose)(0, bad, 99))).toThrow(RangeError);
     }
+    produce(base, (d) => {
+      d.push(8);
+      expect(d.get(8)).toBe(8); // the tail counts
+      for (const i of [9, -1, 1.5, NaN]) {
+        expect(() => d.get(i)).toThrow(RangeError);
+        expect(() => d.set(i, 0)).toThrow(RangeError);
+      }
+    });
   });
 });
 
@@ -353,5 +469,52 @@ describe('a plain-array draft’s mutators', () => {
       expect(d.indexOf(3, NaN)).toBe(3);
       expect(d.includes(0, 0.5)).toBe(true);
     });
+  });
+});
+
+// A patch is an exact recorded edit, never "up to". One whose index or count
+// does not fit was made against another value: a negative index used to wrap
+// on a ValueList, an overshooting count clamped on both kinds, and the stale
+// patch applied "successfully" to the wrong base.
+describe('applyPatches: sequence patches must fit the value they are applied to', () => {
+  const values = { list: intern({ l: ValueList.from(range(3)) }), array: intern({ l: range(3) }) };
+
+  for (const [kind, base] of Object.entries(values)) {
+    it(`${kind}: a list.splice fits, or is refused`, () => {
+      const at = (index: number, remove: number): unknown =>
+        applyPatches(base, [{ kind: 'list.splice', path: ['l'], index, remove, insert: [9] }]);
+      expect([...(at(3, 0) as { l: Iterable<number> }).l]).toEqual([0, 1, 2, 9]);
+      expect([...(at(1, 2) as { l: Iterable<number> }).l]).toEqual([0, 9]);
+      for (const [index, remove] of [[4, 0], [0, 4], [2, 2], [-1, 1], [0, -1], [NaN, 0], [0, 1.5], [0, 1e9]] as const) {
+        expect(() => at(index, remove)).toThrow(/does not fit|malformed/);
+      }
+    });
+
+    it(`${kind}: a list.set names an element, or is refused`, () => {
+      const at = (index: number): unknown => applyPatches(base, [{ kind: 'list.set', path: ['l'], index, value: 9 }]);
+      expect([...(at(2) as { l: Iterable<number> }).l]).toEqual([0, 1, 9]);
+      for (const index of [3, 99, -1, 0.5, NaN]) expect(() => at(index)).toThrow();
+    });
+
+    it(`${kind}: a patch made against another base does not apply`, () => {
+      const longer = intern({ l: kind === 'list' ? ValueList.from(range(10)) : range(10) });
+      const [, patches] = produceWithPatches(longer, (d) => void (d.l as { splice: Loose }).splice(6, 3));
+      expect(() => applyPatches(base, patches)).toThrow(/does not fit/);
+    });
+  }
+
+  it('sequence ops are for sequences, record ops for records', () => {
+    const rec = intern({ a: 1 });
+    expect(() => applyPatches(rec, [{ kind: 'list.set', path: [], index: 0, value: 2 }])).toThrow(/cannot apply a 'list.set' patch/);
+    expect(() => applyPatches(rec, [{ kind: 'list.splice', path: [], index: 0, remove: 0, insert: [7] }])).toThrow(/cannot apply a 'list.splice' patch/);
+    expect(() => applyPatches(values.array, [{ kind: 'record.delete', path: ['l'], key: '0' }])).toThrow(/cannot apply a 'record.delete' patch/);
+  });
+
+  it('a path segment that names no element is a bad path, on a list as on an array', () => {
+    const deep = intern({ l: ValueList.of({ v: 1 }) });
+    for (const seg of [1, -1, 0.5, NaN, '0']) {
+      expect(() => applyPatches(deep, [{ kind: 'record.set', path: ['l', seg], key: 'v', value: 2 }])).toThrow();
+    }
+    expect(applyPatches(deep, [{ kind: 'record.set', path: ['l', 0], key: 'v', value: 2 }])).toBe(intern({ l: ValueList.of({ v: 2 }) }));
   });
 });

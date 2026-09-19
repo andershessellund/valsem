@@ -72,13 +72,14 @@ describe('ValueList', () => {
     expect(() => a.set(-1, 9)).toThrow(RangeError);
   });
 
-  it('get() reads by index; out of range is undefined', () => {
+  it('get() reads by index; an index that names no element throws', () => {
     const a = ValueList.of(10, 20, 30);
     expect(a.get(0)).toBe(10);
     expect(a.get(2)).toBe(30);
-    expect(a.get(3)).toBeUndefined();
-    expect(a.get(-1)).toBeUndefined();
-    expect(a.get(1.5)).toBeUndefined();
+    for (const i of [3, -1, 1.5, NaN]) expect(() => a.get(i)).toThrow(RangeError);
+    // ...so an undefined that comes back IS an element.
+    expect(ValueList.of(undefined).get(0)).toBeUndefined();
+    expect(() => ValueList.of(undefined).get(1)).toThrow(RangeError);
     expect([...a]).toEqual([10, 20, 30]);
   });
 
@@ -206,7 +207,7 @@ describe('ValueList — size sweep through several tree levels', () => {
     const list = ValueList.from(items);
     for (let i = 0; i < N; i++) expect(list.get(i)).toBe(items[i]);
     expect([...list]).toEqual(items);
-    expect(list.get(N)).toBeUndefined();
+    expect(() => list.get(N)).toThrow(RangeError);
   });
 
   it('set() deep in the tree detours and returns', () => {
@@ -259,8 +260,8 @@ describe('ValueList — canonical form (content-chunked tree)', () => {
       expect(a.toArray()).toEqual(items);
       expect([...a]).toEqual(items);
       for (let i = 0; i < n; i += Math.max(1, n >> 4)) expect(a.get(i)).toBe(intern(items[i]));
-      expect(a.get(-1)).toBeUndefined();
-      expect(a.get(n)).toBeUndefined();
+      expect(() => a.get(-1)).toThrow(RangeError);
+      expect(() => a.get(n)).toThrow(RangeError);
     }
   });
 

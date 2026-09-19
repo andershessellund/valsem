@@ -24,7 +24,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern } from './intern.js';
 import { hashNumber } from './hasher.js';
-import { indexArg } from './shared.js';
+import { indexArg, elementIndex } from './shared.js';
 
 let nextId = 0;
 const NOT_YET = Symbol('valsem.raw-array.not-yet');
@@ -72,16 +72,16 @@ export class RawArray<T> {
     return v;
   }
 
-  /** The canonical element at `index`, admitted on first read; `undefined` out of range. */
-  get(index: number): T | undefined {
-    if (!Number.isInteger(index) || index < 0 || index >= this.#canon.length) return undefined;
-    return this.#admit(index);
+  /** The canonical element at `index`, admitted on first read. The index must name an element: an integer in `[0, length)`, or a `RangeError`. */
+  get(index: number): T {
+    return this.#admit(elementIndex(index, this.#canon.length, 'RawArray.get'));
   }
 
   /**
    * The canonical array of elements `[start, end)` — `Array.prototype.slice`
-   * bounds (negative indices count from the end, out of range clamps; both
-   * optional), for integer arguments; a non-integer throws a `RangeError`.
+   * bounds whole (negative indices count from the end, out of range clamps,
+   * so the window past the last row is the rows there are; both optional),
+   * for integer arguments; a non-integer throws a `RangeError`.
    * Each element is admitted once; the array itself is interned, so equal
    * slices are the same object.
    */

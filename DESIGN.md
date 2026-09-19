@@ -423,11 +423,17 @@ and does not pretend to be (D29).
   Set(s)` for a mutable copy (D30).
 - **Persistent updates.** Mutators return the canonical successor; an
   unchanged write returns `this`.
-- **Checked index arguments.** An argument naming a position is an integer
-  or ±Infinity, or a `RangeError`: `Array`'s clamping is kept whole
-  (negative counts from the end, out of range clamps), its coercion is not
-  (`NaN`, `1.5` and `'2'` throw where `Array` would pick some index). Reads
-  (`get`, `at`) answer `undefined` for what is not an index (D45).
+- **Checked positions.** A positional argument is checked by what it names,
+  and fails with a `RangeError` before anything is touched. An *element*
+  (`get`, `at`, `keyAt`, `valueAt`, `set`, `remove`) is an integer in
+  `[0, length)`, so those reads return `T`, never `undefined` for "not
+  there". An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
+  an integer in `[0, length]`, not counted from the end. A *range*
+  (`slice`'s bounds, `splice`'s count) keeps `Array`'s clamping whole: it
+  has an answer wherever it points, the part that exists. `Array`'s
+  coercion is nowhere: `NaN`, `1.5` and `'2'` throw. `first()`/`last()`
+  answer `undefined` when empty; keyed lookups are queries and a miss is an
+  answer (D45).
 - **Explicit-stack iterators** extending the global `Iterator` where it
   exists, so the ES2025 helpers work (D6).
 - **Drafting** through `[toDraft]` (§7), with a mutable twin per class.
@@ -849,9 +855,13 @@ history that costs its distinct states (D40). Numbers: BENCHMARKS.md.
   prototype's constructor. Arrays are read with a plain `arr[i]` in every
   walk, so a hole is `undefined` and canonical arrays are dense; index
   properties on a built-in prototype are outside the threat model (D44).
-- **Patches are validated.** Paths follow own keys, in-range integer
-  indices and a kind's `childAt` only; keys and indices are type-checked;
-  values are interned on application.
+- **Patches are validated, and exact.** Paths follow own keys, in-range
+  integer indices and a kind's `childAt` only; keys and indices are
+  type-checked; an op applies only to its own kind of container (a
+  `list.set` aimed at a record used to write the key `"0"`); a sequence
+  op's index and count must fit the value, since a patch that does not fit
+  was made against another base and clamping would apply it to the wrong
+  one (D45); values are interned on application.
 - **Depth cap.** `intern`, `deepHash`, `produce`'s adopt and `current`'s
   snapshot walk are capped by `configureLimits({ maxDepth })`, default 512,
   reconfigurable at any time, with a teaching error; cyclic input hits the

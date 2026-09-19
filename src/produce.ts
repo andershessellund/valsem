@@ -1422,19 +1422,31 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
         else _defineRecordField(target as Rec, p.key, p.value);
         break;
       case 'record.delete':
+        if (Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (typeof p.key !== 'string' && typeof p.key !== 'symbol') throw badPatch(p.kind, 'a string or symbol key');
         delete (target as Rec)[p.key];
         break;
-      case 'list.set':
+      // The sequence ops are for sequences, and they are EXACT: a patch is a
+      // recorded edit, never "up to", so an index or a count that does not
+      // fit the array means the patch was made against another value, and
+      // clamping it would apply it "successfully" to the wrong base. (On a
+      // record, `list.set` used to write the key "0".)
+      case 'list.set': {
+        if (!Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (!Number.isInteger(p.index) || p.index < 0) throw badPatch(p.kind, 'an integer index');
-        (target as unknown[])[p.index] = p.value;
+        if (p.index >= target.length) throw misfit(p.kind, `index ${p.index}`, target.length);
+        target[p.index] = p.value;
         break;
-      case 'list.splice':
+      }
+      case 'list.splice': {
+        if (!Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (!Number.isInteger(p.index) || p.index < 0 || !Number.isInteger(p.remove) || p.remove < 0 || !Array.isArray(p.insert)) {
           throw badPatch(p.kind, 'integer index and remove counts and an insert array');
         }
-        (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
+        if (p.index + p.remove > target.length) throw misfit(p.kind, `index ${p.index}, remove ${p.remove}`, target.length);
+        target.splice(p.index, p.remove, ...(p.insert as unknown[]));
         break;
+      }
       default:
         throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
     }
@@ -1459,6 +1471,10 @@ export function _snapshotCore(state: DraftState): unknown {
   const out: Rec = {};
   for (const key of _recordKeys(src)) _defineRecordField(out, key, snapshotOf(src[key]));
   return out;
+}
+
+function misfit(kind: string, what: string, length: number): Error {
+  return new Error(`valsem: a '${kind}' patch (${what}) does not fit the array it is applied to (length ${length})`);
 }
 
 function badPatch(kind: string, expected: string): Error {

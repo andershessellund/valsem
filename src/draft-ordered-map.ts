@@ -120,23 +120,24 @@ export class DraftOrderedMap<K, V> {
     return this.#state.work.indexOf(intern(key));
   }
 
-  keyAt(index: number): K | undefined {
-    return this.#state.work.keyAt(index) as K | undefined;
+  /** The key at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */
+  keyAt(index: number): K {
+    return this.#state.work.keyAt(index) as K;
   }
 
-  at(index: number): [K, Draft<V>] | undefined {
-    const s = this.#state;
-    if (index < 0 || index >= s.work.size) return undefined;
-    const k = s.work.keyAt(index);
-    return [k as K, this.get(k as K) as Draft<V>];
+  /** The `[key, value]` entry at `index` (the value drafted, if it can be), which must name one: an integer in `[0, size)`, or a `RangeError`. */
+  at(index: number): [K, Draft<V>] {
+    const k = this.#state.work.keyAt(index) as K; // checks the index
+    return [k, this.get(k) as Draft<V>];
   }
 
   first(): [K, Draft<V>] | undefined {
-    return this.at(0);
+    return this.#state.work.size === 0 ? undefined : this.at(0);
   }
 
   last(): [K, Draft<V>] | undefined {
-    return this.at(this.#state.work.size - 1);
+    const n = this.#state.work.size;
+    return n === 0 ? undefined : this.at(n - 1);
   }
 
   /** Set `key` → `value`: a present key keeps its position, a new key is appended. */
