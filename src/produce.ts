@@ -278,7 +278,10 @@ const objectTraps: ProxyHandler<object> = {
     };
   },
   defineProperty() {
-    throw new TypeError('valsem: defineProperty is not supported on drafts');
+    throw unsupportedOnDraft('defineProperty');
+  },
+  preventExtensions() {
+    throw unsupportedOnDraft('preventExtensions');
   },
   getPrototypeOf(target) {
     return Object.getPrototypeOf((target as unknown as ObjectState).base);
@@ -287,6 +290,21 @@ const objectTraps: ProxyHandler<object> = {
     throw new TypeError('valsem: cannot set the prototype of a draft');
   },
 };
+
+/**
+ * A draft is edited by assignment and its own methods. `defineProperty`
+ * (`__defineGetter__`, a descriptor with a getter) has no value semantics to
+ * record, and `preventExtensions`/`seal`/`freeze` would apply to valsem's
+ * internal state behind the proxy, not to the data: the result is frozen
+ * anyway.
+ */
+function unsupportedOnDraft(operation: 'defineProperty' | 'preventExtensions'): TypeError {
+  return new TypeError(
+    operation === 'defineProperty'
+      ? 'valsem: defineProperty is not supported on drafts — assign the value instead (draft.key = value)'
+      : 'valsem: preventExtensions, seal and freeze are not supported on drafts — what produce returns is frozen already',
+  );
+}
 
 /**
  * The protocol symbols are reserved keys: a record carrying `[hashCode]` or
@@ -556,6 +574,10 @@ const arrayTraps: ProxyHandler<object> = {
         ]!;
         return (...args: unknown[]) => {
           checkIndexArgs(prop, args);
+          // `fill` is the one of these that takes a value: checked here, at the
+          // line that passed it, as `push` and an index write do. (Finalize
+          // would catch it too, with nothing pointing at this call.)
+          if (prop === 'fill') assertAssignable(args[0], state);
           const copy = materializeArr(state);
           markChanged(state);
           state.ops = null; // intent lost — net diff at finalize
@@ -671,6 +693,17 @@ const arrayTraps: ProxyHandler<object> = {
         prop as never
       ],
     };
+  },
+  // Without these two the operation falls through to the proxy's TARGET,
+  // which is the one-slot array holding the draft's state:
+  // `Object.defineProperty(d.arr, '0', …)` overwrote the state (the write was
+  // lost, and the next read failed inside valsem), and `Object.freeze(d.arr)`
+  // made the target non-extensible and tripped the engine's proxy invariants.
+  defineProperty() {
+    throw unsupportedOnDraft('defineProperty');
+  },
+  preventExtensions() {
+    throw unsupportedOnDraft('preventExtensions');
   },
   getPrototypeOf() {
     return Array.prototype;

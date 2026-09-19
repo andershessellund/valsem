@@ -209,3 +209,74 @@ describe('plain-JS behaviour at the edges', () => {
     });
   });
 });
+
+// Without a trap, a proxy operation falls through to the proxy's TARGET, which
+// for a draft is valsem's internal state, not the data. On an array draft
+// `Object.defineProperty(d.arr, '0', …)` overwrote the state slot: the write
+// was lost, and the next read failed inside valsem. `Object.freeze(draft)`, on
+// either kind, made the target non-extensible and tripped the engine's proxy
+// invariants ("'ownKeys' on proxy: trap result did not include 'kind'").
+describe('the operations a draft does not support say so', () => {
+  const base = intern({ o: { a: 1 }, arr: [1, 2] });
+  type Loose = Record<string, (...args: unknown[]) => unknown>;
+
+  it('defineProperty, on a record draft and an array draft alike', () => {
+    for (const pick of [(d: typeof base) => d.o, (d: typeof base) => d.arr] as ((d: unknown) => object)[]) {
+      expect(() => produce(base, (d) => void Object.defineProperty(pick(d), '0', { value: 9, writable: true, enumerable: true, configurable: true }))).toThrow(
+        'valsem: defineProperty is not supported on drafts',
+      );
+      expect(() => produce(base, (d) => void Object.defineProperty(pick(d), 'x', { get: () => 1 }))).toThrow(/defineProperty is not supported/);
+      expect(() => produce(base, (d) => void (pick(d) as unknown as Loose).__defineSetter__!('0', () => {}))).toThrow(/defineProperty is not supported/);
+    }
+  });
+
+  it('preventExtensions, seal and freeze', () => {
+    for (const pick of [(d: typeof base) => d.o, (d: typeof base) => d.arr] as ((d: unknown) => object)[]) {
+      for (const op of [Object.preventExtensions, Object.seal, Object.freeze]) {
+        expect(() => produce(base, (d) => void op(pick(d)))).toThrow('valsem: preventExtensions, seal and freeze are not supported on drafts');
+      }
+    }
+  });
+
+  it('and leave the draft usable: nothing reached the internal state', () => {
+    const next = produce(base, (d) => {
+      expect(() => Object.defineProperty(d.arr, '0', { value: 9 })).toThrow(TypeError);
+      expect(() => Object.freeze(d.arr)).toThrow(TypeError);
+      expect(() => Object.freeze(d.o)).toThrow(TypeError);
+      expect(d.arr[0]).toBe(1);
+      expect(Object.keys(d.o)).toEqual(['a']);
+      d.arr.push(3);
+      d.o.a = 2;
+    });
+    expect(next).toBe(intern({ o: { a: 2 }, arr: [1, 2, 3] }));
+  });
+});
+
+describe('fill checks its value where it is passed', () => {
+  it('a draft of another recipe fails at the fill call, as at a push or an index write', () => {
+    produce(intern({ x: { y: 1 } }), (outer) => {
+      produce(intern({ arr: [0, 0] }), (d) => {
+        expect(() => d.arr.fill(outer.x as never)).toThrow('valsem: cannot assign a draft from a different produce() call.');
+        expect(() => d.arr.push(outer.x as never)).toThrow('valsem: cannot assign a draft from a different produce() call.');
+        expect(() => void (d.arr[0] = outer.x as never)).toThrow('valsem: cannot assign a draft from a different produce() call.');
+      });
+    });
+  });
+
+  it('the caught call leaves the draft untouched, and an honest fill still works', () => {
+    const base = intern({ arr: [0, 0] });
+    produce(intern({ x: { y: 1 } }), (outer) => {
+      const same = produce(base, (d) => {
+        try {
+          d.arr.fill(outer.x as never);
+        } catch {
+          /* the recipe carries on */
+        }
+      });
+      expect(same).toBe(base);
+    });
+    expect(produce(base, (d) => void d.arr.fill(7)).arr).toEqual([7, 7]);
+    // sort and copyWithin take no value: a comparator is a function, and is not data.
+    expect(produce(intern({ arr: [2, 1] }), (d) => void d.arr.sort((a, b) => a - b)).arr).toEqual([1, 2]);
+  });
+});
