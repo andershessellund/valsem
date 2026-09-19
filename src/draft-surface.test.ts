@@ -11,7 +11,7 @@
 // its snapshot, and gives back values: only `get` hands out a draft.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { applyPatches, produce, produceWithPatches } from './produce.js';
+import { applyPatches, castDraft, produce, produceWithPatches } from './produce.js';
 import { current } from './current.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
@@ -110,9 +110,7 @@ describe('what does not edit answers about the value the draft would be right no
       expect(d.l.slice()).toBe(current(d.l));
       expect(d.l.concat(ValueList.of({ n: 5 })).length).toBe(5);
       expect(d.l.length).toBe(4); // and the draft is as it was
-      // A value goes straight back into a slot. (The cast: `Draft<T>` types the slot as its draft class, and
-      // TypeScript cannot give a property a wider type for writing than for reading.)
-      d.top = d.l.slice(0, 2) as never;
+      d.top = castDraft(d.l.slice(0, 2)); // a value goes straight back into a slot
     });
     expect(next.top).toBe(ValueList.of({ n: 10 }, { n: 2 }));
     expect(produce(base, (d) => void d.l.slice(1))).toBe(base); // looking is not editing
@@ -143,7 +141,7 @@ describe('what does not edit answers about the value the draft would be right no
       expect(d.s.isSubsetOf([1, 2, 3])).toBe(true);
       expect(d.s.isSupersetOf([2])).toBe(true);
       expect(d.s.isDisjointFrom([1])).toBe(true); // 1 was deleted a moment ago
-      d.all = d.s.union([1]) as never;
+      d.all = castDraft(d.s.union([1]));
     });
     expect(next.all).toBe(ValueSet.from([1, 2, 3]));
   });
