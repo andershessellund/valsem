@@ -29,8 +29,9 @@ need a runtime with a native `Temporal` and skip themselves without one.
 ## Pull requests
 
 Every change reaches `main` through a pull request; direct pushes are blocked
-for everyone. PRs are squash-merged, so **the PR title becomes the commit on
-`main`**, and the PR description becomes its body.
+for everyone. PRs are squash-merged, and **the PR title becomes the whole
+commit on `main`**. The description stays on the pull request, which the
+number in the commit title links to; it is not part of the commit.
 
 The title must be a [Conventional Commit](https://www.conventionalcommits.org):
 
@@ -41,9 +42,34 @@ The title must be a [Conventional Commit](https://www.conventionalcommits.org):
 | `feat!: …` / `fix!: …` | a breaking change | major |
 | `docs:` `test:` `refactor:` `perf:` `ci:` `build:` `chore:` | no change a user can observe | none |
 
-A breaking change also carries a `BREAKING CHANGE: …` paragraph in the
-description, saying what breaks and what to do instead. Write the title as the
-changelog line you would want to read: it is one.
+release-please builds the changelog from that title. When one title is not
+enough, add an **override block** to the description. release-please then
+reads only what is between the markers, in place of the title:
+
+```
+BEGIN_COMMIT_OVERRIDE
+fix: the first changelog entry
+
+fix: a second entry, for a PR that fixed two things
+END_COMMIT_OVERRIDE
+```
+
+The block is also where a footer goes, below a header line and a blank line,
+since the description itself is not a commit message and a footer written
+there is never seen:
+
+- a breaking change that needs explaining: `BREAKING CHANGE: what breaks, and
+  what to do instead`. (A `!` in the title is enough to mark one; the footer
+  adds the explanation to the changelog.)
+- forcing a version: `Release-As: 1.0.0`.
+
+Whatever release-please cannot parse, it drops without an error: no changelog
+entry, no effect on the version. The `release notes can be generated` check
+runs the same parser over the title and the block, and fails on a footer left
+outside one. The same block, added to an already merged PR, corrects its
+release notes after the fact.
+
+Write the title as the changelog line you would want to read: it is one.
 
 What a PR should contain:
 
