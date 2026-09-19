@@ -20,16 +20,8 @@ pnpm install
 pnpm build       # tsc
 pnpm typecheck   # the tests' types too
 pnpm test        # vitest
-pnpm test:polluted   # the same suite with Array.prototype polluted; see below
 pnpm lint
 ```
-
-`test:polluted` defines every small index on `Array.prototype` and runs the
-suite again. An array hole is not `undefined`: it reads the prototype chain,
-and so do `slice`, spread, `map` and `for…of`. Any walk over an array that
-may be raw goes through `ownAt`/`ownElements` in `src/shared.ts`, and an
-internal array is filled before it is read. A failure in this run and not in
-the ordinary one is a hole read.
 
 CI runs exactly these on Node 22 and on the latest Node. The Temporal suites
 need a runtime with a native `Temporal` and skip themselves without one.

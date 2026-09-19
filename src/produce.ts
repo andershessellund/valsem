@@ -38,7 +38,6 @@
 // applyPatches is implemented ON TOP of produce.
 // ---------------------------------------------------------------------------
 
-import { ownAt, ownElements, hasHoles } from './shared.js';
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
 import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
@@ -379,21 +378,12 @@ function arrLen(state: ArrayState): number {
   return state.copy !== null ? state.copy.length : state.base.length + state.vTail.length;
 }
 
-/**
- * The draft's element at `i`, from its OWN content. Every array read here is
- * of a dense array, in range: the working copy is kept dense (growth fills
- * its gap), a base is canonical or was materialized from its own elements at
- * creation, and an index past the end answers `undefined` without touching
- * an array — a plain out-of-range read is a hole read, and a hole reads
- * through to Array.prototype.
- */
 function arrRead(state: ArrayState, i: number): unknown {
-  if (state.copy !== null) return i < state.copy.length ? state.copy[i] : undefined;
+  if (state.copy !== null) return state.copy[i];
   if (i < state.base.length) {
     return state.vEdits.has(i) ? state.vEdits.get(i) : state.base[i];
   }
-  const j = i - state.base.length;
-  return j < state.vTail.length ? state.vTail[j] : undefined;
+  return state.vTail[i - state.base.length];
 }
 
 /** Is `value` one of the base array's object elements? (Lazily built.) */
@@ -401,7 +391,7 @@ function isBaseMember(state: ArrayState, value: unknown): boolean {
   let members = state.baseMembers;
   if (members === null) {
     members = state.baseMembers = new Set();
-    for (const el of ownElements(state.base)) {
+    for (const el of state.base) {
       if (el !== null && typeof el === 'object') members.add(el);
     }
   }
@@ -577,14 +567,10 @@ const arrayTraps: ProxyHandler<object> = {
     const state = (target as [ArrayState])[0]!;
     assertUnrevoked(state);
     if (prop === 'length') {
-      const copy = materializeArr(state);
+      materializeArr(state);
       markChanged(state);
       state.ops = null;
-      const from = copy.length;
-      copy.length = value as number;
-      // Growing `length` makes holes; as a value they are `undefined`, and the
-      // copy must say so itself, or finalize would read them off the prototype.
-      if (copy.length > from) copy.fill(undefined, from);
+      state.copy!.length = value as number;
       return true;
     }
     const index = arrayIndex(prop);
@@ -597,12 +583,10 @@ const arrayTraps: ProxyHandler<object> = {
     assertAssignable(value, state);
     markChanged(state);
     if (index >= len) {
-      // Sparse growth: net diff. The gap is filled, not left as holes.
+      // Sparse growth: net diff.
       const copy = materializeArr(state);
       state.ops = null;
-      const from = copy.length;
       copy[index] = value;
-      copy.fill(undefined, from, index);
       return true;
     }
     state.ops?.push({ t: 'set', i: index, value, old: current });
@@ -668,11 +652,6 @@ function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
     revoke: null as unknown as () => void,
     finalize: finalizeArray,
   });
-  // A canonical base is dense. A RAW base may be sparse, and then every read
-  // of `base[i]`, and the `slice()` that materializes it, would see the
-  // prototype chain at its holes. Such a base starts materialized, from its
-  // own elements; the scan is O(n), and so is finalizing any raw base.
-  if (_accOf(base) === undefined && hasHoles(base)) state.copy = ownElements(base);
   const target = [state] as [ArrayState] & { [INSPECT]?: () => unknown };
   target[INSPECT] = inspectDraft;
   const { proxy, revoke } = Proxy.revocable(target as unknown as object, arrayTraps);
@@ -1035,9 +1014,8 @@ function finalizeArray(
     // apart: every slot holding a draft gets its path. One finalized by the
     // ops above emits a `replace` — redundant in an alias slot, the only
     // record of the change in its home slot.
-    const slot = ownAt(copy, i); // dense by construction; own-only regardless
-    const childPath = emitting && opsMode && stateOf(slot) !== undefined ? [...path!, i] : null;
-    resolved[i] = resolve(slot, childPath, recorder);
+    const childPath = emitting && opsMode && stateOf(copy[i]) !== undefined ? [...path!, i] : null;
+    resolved[i] = resolve(copy[i], childPath, recorder);
   }
   state.result = intern(resolved);
   if (emitting && opsMode && state.result === base) {
@@ -1046,7 +1024,7 @@ function finalizeArray(
   if (emitting && !opsMode) {
     // Array.from (not .map): the base may be frozen — see copyArr.
     emitSeqDiff(
-      ownElements(state.base).map((v) => intern(v)),
+      Array.from(state.base, (v) => intern(v)),
       resolved,
       path!,
       recorder,
@@ -1356,8 +1334,7 @@ function internPatch(p: Patch): Patch {
   if (!hasValue && !hasInsert) return p;
   const out = { ...loose };
   if (hasValue) out.value = intern(loose.value);
-  // Own elements first: `map` visits an inherited index like any other native walk.
-  if (hasInsert) out.insert = ownElements(loose.insert as unknown[]).map((v) => intern(v));
+  if (hasInsert) out.insert = (loose.insert as unknown[]).map((v) => intern(v));
   return out as unknown as Patch;
 }
 
@@ -1413,7 +1390,7 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
         if (!Number.isInteger(p.index) || p.index < 0 || !Number.isInteger(p.remove) || p.remove < 0 || !Array.isArray(p.insert)) {
           throw badPatch(p.kind, 'integer index and remove counts and an insert array');
         }
-        (target as unknown[]).splice(p.index, p.remove, ...ownElements(p.insert as unknown[]));
+        (target as unknown[]).splice(p.index, p.remove, ...(p.insert as unknown[]));
         break;
       default:
         throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);

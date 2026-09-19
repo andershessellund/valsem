@@ -53,8 +53,6 @@
  * }
  * ```
  */
-import { ownAt } from './shared.js';
-
 export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 
 /**
@@ -313,7 +311,7 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(ownAt(a, i), ownAt(b, i))) return false;
+      if (!deepEqual(a[i], b[i])) return false;
     }
     return true;
   }

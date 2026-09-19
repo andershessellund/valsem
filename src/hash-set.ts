@@ -6,7 +6,6 @@
 // ---------------------------------------------------------------------------
 
 import { intern } from './intern.js';
-import { ownIterable } from './shared.js';
 
 /**
  * Mutable set with value membership: `{ x: 1, y: 2 }` and `{ y: 2, x: 1 }`
@@ -25,7 +24,7 @@ export class HashSet<T> {
   /** A set holding `values`. */
   static from<T>(values: Iterable<T>): HashSet<T> {
     const s = new HashSet<T>();
-    for (const v of ownIterable(values)) s.add(v);
+    for (const v of values) s.add(v);
     return s;
   }
 

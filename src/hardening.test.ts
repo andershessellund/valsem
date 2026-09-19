@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Hardening: prototype pollution through every entry point an untrusted
-// input can reach, forged canonicality, holes under a polluted
-// Array.prototype, and constructor shadowing.
+// input can reach, forged canonicality, what a sparse array means, and
+// constructor shadowing.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, afterEach } from 'vitest';
 import { intern, isCanonical, fastEquals } from './intern.js';
@@ -94,13 +94,54 @@ describe('holes and a polluted Array.prototype', () => {
     expect(Object.hasOwn(c, 'b')).toBe(false);
     expect(c).toBe(intern({ a: 1, c: 3 }));
   });
-  it('a holey input array canonicalises with undefined, not the prototype value', () => {
-    (Array.prototype as unknown as Record<number, unknown>)[0] = 'LEAK';
-    const c = intern([, 2] as unknown[]);
-    expect(c[0]).toBeUndefined();
-    expect(Object.hasOwn(c, 0)).toBe(true);
-    expect(c).toBe(intern([undefined, 2]));
-    expect(ValueList.from([, 2] as unknown[]).get(0)).toBeUndefined();
+});
+
+describe('a sparse array is the dense array with undefined in its holes', () => {
+  // One meaning, everywhere: every walk reads `arr[i]`, so equality, hashing
+  // and interning cannot disagree about what an array contains. (An earlier
+  // design had intern, RawArray and ValueList.from check own slots while
+  // deepEqual and deepHash did not; they could then only agree while no
+  // built-in prototype carried an index property. That case is outside the
+  // threat model — see D44 — and the checks are gone.)
+  const sparse = (): unknown[] => {
+    const a: unknown[] = [1];
+    a.length = 4;
+    a[3] = 4;
+    return a; // [1, <hole>, <hole>, 4]
+  };
+  const DENSE = [1, undefined, undefined, 4];
+
+  it('intern, deepEqual and deepHash agree', () => {
+    const c = intern(sparse());
+    expect(c).toBe(intern(DENSE));
+    expect(deepEqual(sparse(), c)).toBe(true);
+    expect(deepEqual(sparse(), DENSE)).toBe(true);
+    expect(deepEqual(sparse(), sparse())).toBe(true);
+    expect(deepHash(sparse())).toBe(deepHash(c));
+    expect(deepHash(sparse())).toBe(deepHash(DENSE));
+    expect(deepEqual({ a: [sparse()] }, { a: [DENSE] })).toBe(true);
+  });
+
+  it('a canonical array is dense: every index is an own property', () => {
+    const results: (readonly unknown[])[] = [
+      intern(sparse()),
+      produce(sparse(), () => {}),
+      produce(sparse(), (d) => void d.push(5)),
+      produce(intern([1] as unknown[]), (d) => void (d.length = 4)),
+      produce(intern([1] as unknown[]), (d) => void (d[3] = 4)),
+      produce(intern({ x: null as unknown }), (d) => void (d.x = sparse())).x as unknown[],
+    ];
+    for (const r of results) {
+      expect(Object.isFrozen(r)).toBe(true);
+      for (let i = 0; i < r.length; i++) expect(Object.hasOwn(r, i)).toBe(true);
+    }
+    expect(results[3]).toBe(intern([1, undefined, undefined, undefined]));
+    expect(results[4]).toBe(intern(DENSE));
+  });
+
+  it('through the collections too', () => {
+    expect([...ValueList.from(sparse())]).toEqual(DENSE);
+    expect(ValueList.from(sparse())).toBe(ValueList.from(DENSE));
   });
 });
 

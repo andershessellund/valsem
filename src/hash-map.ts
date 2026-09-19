@@ -15,7 +15,6 @@
 // ---------------------------------------------------------------------------
 
 import { intern } from './intern.js';
-import { ownIterable, ownPair } from './shared.js';
 
 /**
  * Mutable map with value-keyed entries: `{ table: 'users', id: 1 }` and
@@ -34,10 +33,7 @@ export class HashMap<K, V> {
   /** A map holding `entries`. */
   static from<K, V>(entries: Iterable<readonly [K, V]>): HashMap<K, V> {
     const m = new HashMap<K, V>();
-    for (const entry of ownIterable(entries)) {
-      const [k, v] = ownPair(entry);
-      m.set(k, v);
-    }
+    for (const [k, v] of entries) m.set(k, v);
     return m;
   }
 
