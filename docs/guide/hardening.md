@@ -80,7 +80,7 @@ idle time catches up. The measurements behind this choice — frame-loop,
 pool-churn and collection benchmarks on V8 and JavaScriptCore — are in the
 repository's `BENCHMARKS.md`.
 
-## How large a state: memory, and the hash table behind every value
+## Large states: memory and pauses
 
 What a large state costs and saves, measured, so that you can tell where
 your application sits. Two things decide it, and neither is the size of the

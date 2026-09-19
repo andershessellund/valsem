@@ -103,7 +103,7 @@ costs an occasional pause (tens of milliseconds at 100,000 distinct live
 records on V8, most of a second at a million); values that recur do not pay
 it, and neither do `ValueList`, `ValueMap` and the other collections, nor
 your own value types with a pool of their own. The
-[hardening guide](https://andershessellund.github.io/valsem/guide/hardening#how-large-a-state-memory-and-the-hash-table-behind-every-value)
+[hardening guide](https://andershessellund.github.io/valsem/guide/hardening#large-states-memory-and-pauses)
 has the measurements.
 
 ### Freezing, and Safari
