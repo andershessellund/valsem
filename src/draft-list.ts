@@ -196,11 +196,6 @@ export class DraftList<T> implements Iterable<T> {
     return removed as T[];
   }
 
-  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
-  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
-    return inspectDraft('DraftList', this, () => this.length, () => [...this], depth, options, inspect);
-  }
-
   *[Symbol.iterator](): IterableIterator<T> {
     const s = this.#state;
     if (s.overlay.size === 0) {
@@ -228,6 +223,11 @@ export class DraftList<T> implements Iterable<T> {
    */
   toJSON(): T[] {
     return (snapshotOf(this) as ValueList<T>).toJSON();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectDraft('DraftList', this, () => this.length, () => [...this], depth, options, inspect);
   }
 }
 

@@ -112,11 +112,6 @@ export class DraftSet<T> {
     return this.values();
   }
 
-  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
-  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
-    return inspectDraft('DraftSet', this, () => this.size, () => new Set(this), depth, options, inspect);
-  }
-
   forEach(fn: (value: T, value2: T, set: DraftSet<T>) => void, thisArg?: unknown): void {
     for (const v of this.values()) fn.call(thisArg, v, v, this);
   }
@@ -130,6 +125,11 @@ export class DraftSet<T> {
    */
   toJSON(): T[] {
     return (snapshotOf(this) as ValueSet<T>).toJSON();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectDraft('DraftSet', this, () => this.size, () => new Set(this), depth, options, inspect);
   }
 }
 
