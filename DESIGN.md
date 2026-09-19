@@ -294,8 +294,7 @@ nodes; `ValueSet`, `ValueMap`, `OrderedSet` and `OrderedMap` each have
 their own configuration); `ValueList`'s node pool and its list pool; one
 each for `OrderedMap`, `OrderedSet`, `InternedString` and `ValueDate`; and
 any number created by `createInternPool`. (`ValueMap` and `ValueSet`
-wrappers need no pool: they canonicalise through a `WeakMap` keyed by root,
-§6.3.) A pool
+wrappers need no pool: each root node holds its wrapper, §6.3.) A pool
 is a `Map` from a 30-bit key (`hash & 0x3fffffff`, so it is always a Smi)
 to a bucket: one `Slot`, or an array of slots when two keys collide. The
 index is in fact 64 such Maps, a shard chosen from the hash and created on
@@ -489,7 +488,9 @@ per-instance ordinal, sound because members are identities within a
 process). Why: D31.
 
 **The wrappers.** A `ValueMap` is `{ #root, #hash = root.h }`, canonicalised
-through a `WeakMap<root, wrapper>`: ephemeron semantics, no scan. `size` is
+through a field on the root node (`root.w`): root and wrapper hold each
+other, so they are collected together, which is the lifetime a
+`WeakMap<root, wrapper>` gave them, without the table (D50). `size` is
 `root.n`. `get`/`has` walk at most seven nodes; `set`/`delete` path-copy at
 most seven. The map's `[hashCode]` is the root hash.
 

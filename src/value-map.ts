@@ -6,8 +6,8 @@
 //
 //   * deep equality of two ValueMaps is `#root === #root` — O(1), lineage-free
 //     (two maps built independently, in any order, converge);
-//   * the wrapper itself canonicalizes through a WeakMap keyed by root
-//     (ephemeron semantics — no scan, no sweep needed);
+//   * the wrapper itself canonicalizes through a field on its root node:
+//     root and wrapper hold each other and die together (D50);
 //   * updates path-copy O(log n) nodes and share the rest with every other
 //     map holding equal subtrees — memory sits at the distinct-subtree floor;
 //   * iteration order is structure-determined, hence content-determined: two
@@ -39,7 +39,6 @@ import {
 } from './hamt.js';
 
 const CFG = createTrieConfig(2);
-
 
 /**
  * Persistent (immutable) map with structural identity.

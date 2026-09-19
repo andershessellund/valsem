@@ -447,7 +447,7 @@ public exactly where the platform can enforce immutability
 
 Every trie node is interned in a node pool; equal content is the same root
 object; the collection's hash is the root's consed hash; the wrapper is
-canonicalised through a `WeakMap<root, wrapper>`.
+canonicalised through its root (D50).
 
 **Why.** CHAMP canonical form (non-root arity ≥ 2, deletes inline single-
 entry subtrees upward, collision nodes keep a canonical member order) makes
@@ -464,6 +464,25 @@ adaptive flat small-map form. A ≤32-entry collection is already one root
 node unless hashes share a 5-bit prefix. **Cost.** A per-node pool
 transaction on every edit (D2); iteration order is content-determined and
 arbitrary by design. DESIGN.md §6.3.
+
+### D50. A `ValueMap`/`ValueSet` wrapper hangs off its root node
+
+`root.w` holds the canonical wrapper of the collection whose root that node
+is; it was a `WeakMap<root, wrapper>`.
+
+**Why.** Root and wrapper hold each other, so they are collected together:
+exactly the lifetime the ephemeron gave them, without a `WeakMap.get` per
+result, a `WeakMap.set` per novel root, and the entries the collector walks
+on every major GC. It is also one less table of the kind D49 is about: it
+grew with every distinct live map. Measured in bursts on pinned hash seeds
+(medians of four paired runs): `ValueMap.set` at 10k entries −19%, a new key
+−23%, at 100 entries −35%, `ValueSet.add` −14% on V8; −6% to −7% on
+JavaScriptCore. Trie nodes are never frozen (`register`, not `intern`), so
+the write is legal; pools are per trie configuration, so a node never holds
+another class's wrapper. A node that were both a root and another trie's
+child would only keep a wrapper alive longer, and canonical CHAMP form rules
+it out. **Cost.** One field per trie node, about 1.5% of a large map's heap.
+From an external performance review, 2026-09-19. DESIGN.md §6.3.
 
 ### D32. Keys, values, and members intern on entry
 

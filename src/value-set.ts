@@ -34,7 +34,6 @@ import {
 
 const CFG = createTrieConfig(1);
 
-
 /**
  * The `ReadonlySet` contract minus the set algebra, whose lib signatures
  * return a native `Set` — ValueSet's return ValueSets. (`forEach` is
