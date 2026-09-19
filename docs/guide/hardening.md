@@ -82,60 +82,72 @@ repository's `BENCHMARKS.md`.
 
 ## How large a state: memory, and the hash table behind every value
 
-valsem is built for application state. What follows is what it costs when
-the state gets large, measured, so that you can tell where your application
-sits.
+What a large state costs and saves, measured, so that you can tell where
+your application sits. Two things decide it, and neither is the size of the
+state as such: how many **distinct** plain records and arrays are alive, and
+how fast **novel** ones are made.
 
-**Memory.** A canonical object has a pool slot (a `WeakRef`), a registry
-cell, and an entry in one `WeakMap` that holds its hash. On V8 that is about
-280 bytes on top of the object itself: an entity of ten fields with a nested
-record and a small array is about 1.1 KB canonical, against 0.5 KB as plain
-objects.
+**Memory.** Equal values are one instance, so what a state weighs follows
+its distinct content. A canonical object costs about 280 bytes on V8 on top
+of the object itself (a pool slot, a registry cell, an entry in the table
+below). A million rows of five fields with a nested record and a small
+array, held at once:
 
-**A pause that follows the live size.** An engine rebuilds a hash table in
-one go, inside the `set` that found it full, and the entries of collected
-objects count towards full until then. The `WeakMap` of hashes is such a
-table, with an entry per canonical **plain record and array**. So an application that keeps
-creating *novel* values pays a pause now and then, inside an `intern` or a
-`produce`: its length follows the number of canonical records and arrays **alive**, and
-its frequency follows how fast new ones are made. Growing is not required; a
-steady state with churn pays it too. Measured on V8, with the live set held
-constant and the collector's own pauses excluded:
+| distinct contents among the million | plain objects | interned |
+| --- | --- | --- |
+| 10,000 | 290 MB | 13 MB |
+| 100,000 | 311 MB | 54 MB |
+| 1,000,000 (nothing repeats) | 313 MB | 448 MB |
 
-| live canonical records and arrays | one pause | once per |
+Data that repeats gets far smaller; data in which nothing repeats gets 1.4
+times larger.
+
+**A pause, for novel records under a large live set.** One `WeakMap` holds
+the hash of every canonical plain record and array. An engine rebuilds a
+hash table in one go, inside the `set` that found it full, and the entries
+of collected objects count towards full until then. So making *novel*
+records and arrays costs a pause now and then, inside an `intern` or a
+`produce`. Its length follows the number of distinct records and arrays
+alive; its frequency follows the rate of novel ones. Measured on V8 with the
+live set held constant, the collector's own pauses excluded:
+
+| distinct live records and arrays | one pause | once per |
 | --- | --- | --- |
 | 100,000 | 30–55 ms | ~65,000 novel ones |
-| 1,000,000 | 700–750 ms | ~500,000 |
+| 1,000,000 | 700–750 ms | ~500,000 novel ones |
 
-Every engine does this, V8 most expensively. A bare `WeakMap` under the same
-churn, one `set`: 25 ms at 100,000 live keys and 120–380 ms at a million on
-V8; 6 and 23 ms on JavaScriptCore; 13 and 28 ms on SpiderMonkey.
+Every engine does this, V8 most expensively: a bare `WeakMap` under the same
+churn, one `set`, takes 25 ms at 100,000 live keys and 120–380 ms at a
+million on V8, 6 and 23 ms on JavaScriptCore, 13 and 28 ms on SpiderMonkey.
 
-What that means:
+What does **not** pay it:
 
-- **Up to tens of thousands of live records and arrays**, which is where
-  application state lives, the pause is below a frame and rare.
-- **Around a hundred thousand**, it is a dropped frame or two on V8, once per
-  tens of thousands of new values: a bulk load shows it, interaction does not.
-- **Millions, under steady traffic** (a long-lived server holding its data as
-  values) means pauses of most of a second every few seconds to minutes on
-  V8. valsem is not the tool for that today.
+- **Values that recur.** A refetch, a cache fill, a row seen before: a pool
+  hit makes nothing novel. A server that mostly reads, or whose writes
+  mostly repeat known content, rarely reaches the threshold.
+- **The collections.** The nodes and wrappers of `ValueList`, `ValueMap`,
+  `ValueSet`, `OrderedMap` and `OrderedSet` carry their hash themselves and
+  live in pools of their own. A `ValueMap` of a million numbers, with novel
+  entries set under it, has no operation over 18 ms that is not the
+  collector's. (Plain records *inside* a collection are records like any
+  other.)
+- **Your own value types** pooled with
+  [`createInternPool`](/guide/extending#interned-value-types-with-createinternpool),
+  for the same reason: the hash is on the instance.
 
-What counts is plain records and arrays. The collections are not in that
-table: their nodes and wrappers carry their hash themselves and live in
-pools of their own, and so does any class you give a pool with
-[`createInternPool`](/guide/extending#interned-value-types-with-createinternpool).
-A `ValueMap` of a million numbers, with novel entries set under it, has no
-operation over 18 ms that is not the collector's, where a million small
-records pause 680 ms; the memory figure above applies to both. So at scale,
-what is bulk belongs in a collection of primitives or of pooled value
-classes, and a large payload you only show a window of belongs in a
+So, in practice: up to tens of thousands of distinct live records the pause
+is below a frame and rare. Around a hundred thousand it is a dropped frame
+or two on V8 per tens of thousands of novel records: a bulk load of new
+content shows it, interaction does not. With millions of distinct records
+**and** a steady stream of novel ones, it is most of a second, regularly,
+on V8; there, keep what is bulk in collections of primitives or in pooled
+value classes, and a payload you only show a window of in a
 [`RawArray`](/guide/collections#things-you-are-unlikely-to-need-—-but-if-you-do),
-which admits what is looked at and nothing else. Two designs that would remove the pause were
-built and measured, and both cost more than they saved where valsem is
-actually used (the repository's `DECISIONS.md`, D49). The pool's own index
-does not have this problem: it is sharded, and neither stalls nor has a
-ceiling.
+which admits what is looked at and nothing else. Two designs that would
+remove the pause were built and measured, and both cost more than they
+saved in the common case (the repository's `DECISIONS.md`, D49). The pool's
+own index does not have this problem: it is sharded, and neither stalls nor
+has a ceiling.
 
 ## The two switches you own: `skipChecks()` and `skipFreezing()`
 

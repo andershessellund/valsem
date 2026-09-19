@@ -284,9 +284,12 @@ members of any `createInternPool`, carry their hash on the instance: a
 `ValueMap` of 1M numbers under novel sets has no operation over 18 ms
 outside a collection.
 
-**Decided:** keep D11, and say so in the guide: valsem is for application
-state, the pause is below a frame up to tens of thousands of live canonical
-objects, and a server holding millions is outside what it is for.
+**Decided:** keep D11, and say in the guide what it costs and for whom:
+the pause needs many *distinct* live records *and* a stream of *novel* ones.
+Values that recur make nothing novel, and data that repeats is also where
+interning saves most (1M rows of 10k distinct
+contents: 13 MB against 290 MB plain; all distinct: 448 against 313 MB).
+Below tens of thousands of distinct live records it is under a frame.
 
 **Rejected: the meta on the object**, built and measured (a private
 non-enumerable symbol holding `{ h, a, n, o }`, `o` the owner, so that a

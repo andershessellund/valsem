@@ -93,11 +93,18 @@ array; Safari's engine is [its own section](#freezing-and-safari)), admitting a 
 (uncanonicalised) key walks it. That is the trade: a win for state that is
 compared, memoized, keyed, or kept in history more often than it is built,
 and a loss for state built once and thrown away.
-[BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first. It is built
-for application state: tens of thousands of live values, not a server's
-millions, and the
+[BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first.
+
+At scale, what matters is how many *distinct* plain records and arrays are
+alive and how fast *novel* ones are made. Equal values are one instance: a
+million rows with 10,000 distinct contents take 13 MB interned against
+290 MB as plain objects. Making novel records under a very large live set
+costs an occasional pause (tens of milliseconds at 100,000 distinct live
+records on V8, most of a second at a million); values that recur do not pay
+it, and neither do `ValueList`, `ValueMap` and the other collections, nor
+your own value types with a pool of their own. The
 [hardening guide](https://andershessellund.github.io/valsem/guide/hardening#how-large-a-state-memory-and-the-hash-table-behind-every-value)
-says what happens as a state grows.
+has the measurements.
 
 ### Freezing, and Safari
 
