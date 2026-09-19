@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // RawArray — a raw response you take canonical slices from.
 //
-// Admitting a large response costs ~1.5 µs per 10-field record, paid for
+// Admitting a large response costs ~1.6 µs per 10-field record, paid for
 // every record whether or not anything ever looks at it. A RawArray holds
 // the raw array as received and admits an element the first time it is
 // sliced or read: `slice(a, b)` returns the canonical array of that range,

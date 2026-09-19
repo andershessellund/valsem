@@ -9,7 +9,7 @@
     "platform": "darwin arm64"
   },
   "date": "2026-09-19",
-  "commit": "4b17e70",
+  "commit": "34445d2",
   "valsem": "0.0.4",
   "libraries": {
     "immer": "11.1.18",
@@ -32,150 +32,150 @@
       ],
       "unit": "ns",
       "ratio": null,
-      "commit": "4b17e70",
+      "commit": "34445d2",
       "date": "2026-09-19",
       "rows": [
         {
           "name": "the Object.freeze call itself (10k elements)",
           "values": {
             "ints unfrozen": null,
-            "ints frozen": 7256.064,
+            "ints frozen": 5278.72,
             "doubles unfrozen": null,
-            "doubles frozen": 18896.896,
+            "doubles frozen": 17183.744,
             "objects unfrozen": null,
-            "objects frozen": 5975.04
+            "objects frozen": 5331.968
           }
         },
         {
           "name": "indexed loop read",
           "values": {
-            "ints unfrozen": 6479.957333333334,
-            "ints frozen": 6395.306666666666,
-            "doubles unfrozen": 9217.962666666666,
-            "doubles frozen": 8923.989333333333,
-            "objects unfrozen": 18727.68,
-            "objects frozen": 18560.682666666668
+            "ints unfrozen": 6402.304,
+            "ints frozen": 6507.349333333334,
+            "doubles unfrozen": 9427.370666666666,
+            "doubles frozen": 9258.24,
+            "objects unfrozen": 18989.312,
+            "objects frozen": 18663.338666666667
           }
         },
         {
           "name": "for…of",
           "values": {
-            "ints unfrozen": 31005.952,
-            "ints frozen": 31851.264,
-            "doubles unfrozen": 32794.368,
-            "doubles frozen": 31938.645333333334,
-            "objects unfrozen": 46754.73066666667,
-            "objects frozen": 45393.92
+            "ints unfrozen": 29935.616,
+            "ints frozen": 31764.992,
+            "doubles unfrozen": 32318.293333333335,
+            "doubles frozen": 31483.648,
+            "objects unfrozen": 45246.976,
+            "objects frozen": 44687.95733333333
           }
         },
         {
           "name": "forEach",
           "values": {
-            "ints unfrozen": 38944,
-            "ints frozen": 39129.344,
-            "doubles unfrozen": 55032.064,
-            "doubles frozen": 54369.024,
-            "objects unfrozen": 72020.05333333333,
-            "objects frozen": 72886.272
+            "ints unfrozen": 45212.672,
+            "ints frozen": 44912.725333333336,
+            "doubles unfrozen": 141052.07466666665,
+            "doubles frozen": 133711.70133333333,
+            "objects unfrozen": 147623.59466666667,
+            "objects frozen": 146154.32533333334
           }
         },
         {
           "name": "map",
           "values": {
-            "ints unfrozen": 28101.632,
-            "ints frozen": 24678.997333333333,
-            "doubles unfrozen": 27874.986666666668,
-            "doubles frozen": 28812.373333333333,
-            "objects unfrozen": 39585.706666666665,
-            "objects frozen": 36195.92533333333
+            "ints unfrozen": 26429.952,
+            "ints frozen": 24847.786666666667,
+            "doubles unfrozen": 27557.717333333334,
+            "doubles frozen": 27664.298666666666,
+            "objects unfrozen": 37328.725333333336,
+            "objects frozen": 34513.32266666667
           }
         },
         {
           "name": "filter",
           "values": {
-            "ints unfrozen": 46082.901333333335,
-            "ints frozen": 50751.31733333333,
-            "doubles unfrozen": 57018.96533333333,
-            "doubles frozen": 55912.02133333333,
-            "objects unfrozen": 82467.66933333334,
-            "objects frozen": 81315.328
+            "ints unfrozen": 44874.41066666667,
+            "ints frozen": 46712.064,
+            "doubles unfrozen": 56453.03466666667,
+            "doubles frozen": 55579.05066666667,
+            "objects unfrozen": 80517.376,
+            "objects frozen": 78201.00266666667
           }
         },
         {
           "name": "reduce",
           "values": {
-            "ints unfrozen": 35592.704,
-            "ints frozen": 35251.02933333333,
-            "doubles unfrozen": 55500.62933333333,
-            "doubles frozen": 56030.293333333335,
-            "objects unfrozen": 65473.365333333335,
-            "objects frozen": 64114.005333333334
+            "ints unfrozen": 34918.656,
+            "ints frozen": 34461.952,
+            "doubles unfrozen": 54425.25866666667,
+            "doubles frozen": 54455.72266666667,
+            "objects unfrozen": 64113.74933333333,
+            "objects frozen": 63557.03466666667
           }
         },
         {
           "name": "indexOf (miss)",
           "values": {
-            "ints unfrozen": 4185.770666666666,
-            "ints frozen": 4146.688,
-            "doubles unfrozen": 4185.770666666666,
-            "doubles frozen": 4357.376,
-            "objects unfrozen": 4142.336,
-            "objects frozen": 4141.312
+            "ints unfrozen": 4161.28,
+            "ints frozen": 4159.658666666666,
+            "doubles unfrozen": 4112.298666666667,
+            "doubles frozen": 4118.272,
+            "objects unfrozen": 4100.949333333333,
+            "objects frozen": 4123.989333333333
           }
         },
         {
           "name": "slice()",
           "values": {
-            "ints unfrozen": 1434.0266666666666,
-            "ints frozen": 1448.0213333333334,
-            "doubles unfrozen": 1525.4186666666667,
-            "doubles frozen": 1514.4106666666667,
-            "objects unfrozen": 1484.3733333333332,
-            "objects frozen": 1496.6613333333332
+            "ints unfrozen": 1700.6933333333334,
+            "ints frozen": 1727.5733333333333,
+            "doubles unfrozen": 1682.3466666666666,
+            "doubles frozen": 1723.3066666666666,
+            "objects unfrozen": 1671.3386666666668,
+            "objects frozen": 1671.68
           }
         },
         {
           "name": "spread [...a]",
           "values": {
-            "ints unfrozen": 47837.013333333336,
-            "ints frozen": 48468.05333333334,
-            "doubles unfrozen": 47890.77333333333,
-            "doubles frozen": 48490.752,
-            "objects unfrozen": 48240.04266666667,
-            "objects frozen": 47113.728
+            "ints unfrozen": 46220.117333333335,
+            "ints frozen": 45661.26933333333,
+            "doubles unfrozen": 45904.64,
+            "doubles frozen": 45444.01066666667,
+            "objects unfrozen": 45653.58933333333,
+            "objects frozen": 45265.74933333333
           }
         },
         {
           "name": "concat",
           "values": {
-            "ints unfrozen": 1347.328,
-            "ints frozen": 1445.632,
-            "doubles unfrozen": 1444.352,
-            "doubles frozen": 1455.36,
-            "objects unfrozen": 1366.016,
-            "objects frozen": 1521.3226666666667
+            "ints unfrozen": 1360.64,
+            "ints frozen": 1385.6426666666666,
+            "doubles unfrozen": 1323.3493333333333,
+            "doubles frozen": 1321.0453333333332,
+            "objects unfrozen": 1357.9946666666667,
+            "objects frozen": 1325.312
           }
         },
         {
           "name": "JSON.stringify",
           "values": {
-            "ints unfrozen": 80621.824,
-            "ints frozen": 80231.168,
-            "doubles unfrozen": 282972.16,
-            "doubles frozen": 285342.208,
-            "objects unfrozen": 450483.968,
-            "objects frozen": 451390.208
+            "ints unfrozen": 80279.04,
+            "ints frozen": 79226.88,
+            "doubles unfrozen": 282382.08,
+            "doubles frozen": 282825.984,
+            "objects unfrozen": 464603.136,
+            "objects frozen": 466734.08
           }
         },
         {
           "name": "at(-1) ×1000",
           "values": {
-            "ints unfrozen": 1195.264,
-            "ints frozen": 1183.744,
-            "doubles unfrozen": 901.888,
-            "doubles frozen": 914.944,
-            "objects unfrozen": 2383.616,
-            "objects frozen": 2437.888
+            "ints unfrozen": 1188.096,
+            "ints frozen": 1324.032,
+            "doubles unfrozen": 940.032,
+            "doubles frozen": 893.952,
+            "objects unfrozen": 2459.904,
+            "objects frozen": 2567.936
           }
         }
       ]
@@ -193,84 +193,84 @@
         "skipFreezing()",
         "freezing on"
       ],
-      "commit": "4b17e70",
+      "commit": "34445d2",
       "date": "2026-09-19",
       "rows": [
         {
           "name": "produce: one edit in a 10,000-record plain array",
           "values": {
-            "freezing on": 30033.92,
-            "skipFreezing()": 29650.773333333334
+            "freezing on": 30082.048,
+            "skipFreezing()": 30371.328
           }
         },
         {
           "name": "produce: the same edit, in a ValueList",
           "values": {
-            "freezing on": 5741.312,
-            "skipFreezing()": 6969.941333333333
+            "freezing on": 7842.986666666667,
+            "skipFreezing()": 5733.973333333333
           }
         },
         {
           "name": "produce: one field of a 3-key record",
           "values": {
-            "freezing on": 1021.80096,
-            "skipFreezing()": 1029.57056
+            "freezing on": 1073.37984,
+            "skipFreezing()": 1083.17952
           }
         },
         {
           "name": "intern: a new 10,000-number array",
           "values": {
-            "freezing on": 427997.86666666664,
-            "skipFreezing()": 424550.4
+            "freezing on": 416947.2,
+            "skipFreezing()": 416320
           }
         },
         {
           "name": "intern: 1,000 new 10-field records",
           "values": {
-            "freezing on": 1807626.6666666667,
-            "skipFreezing()": 1544215.4666666666
+            "freezing on": 1869083.7333333334,
+            "skipFreezing()": 1657777.0666666667
           }
         },
         {
           "name": "your code: indexed loop over a canonical 10,000-record array",
           "values": {
-            "freezing on": 46524.58666666667,
-            "skipFreezing()": 47369.89866666667
+            "freezing on": 46879.232,
+            "skipFreezing()": 47002.624
           }
         },
         {
           "name": "your code: for…of",
           "values": {
-            "freezing on": 48208.725333333336,
-            "skipFreezing()": 48009.216
+            "freezing on": 48599.89333333333,
+            "skipFreezing()": 48310.10133333333
           }
         },
         {
           "name": "your code: arr.filter(…)",
           "values": {
-            "freezing on": 44883.84,
-            "skipFreezing()": 44024.96
+            "freezing on": 44872.64,
+            "skipFreezing()": 44130.56
           }
         },
         {
           "name": "your code: arr.map(…)",
           "values": {
-            "freezing on": 42610.24,
-            "skipFreezing()": 42856.64
+            "freezing on": 42932.48,
+            "skipFreezing()": 43024.96
           }
         },
         {
           "name": "your code: JSON.stringify(state)",
           "values": {
-            "freezing on": 887965.8666666667,
-            "skipFreezing()": 890171.7333333333
+            "freezing on": 885000.5333333333,
+            "skipFreezing()": 898363.7333333333
           }
         },
         {
           "name": "your code: for…of over a ValueList of the same records",
           "values": {
-            "freezing on": 82381.12,
-            "skipFreezing()": 81536.32
+            "freezing on": 82350.08,
+            "skipFreezing()": 82536.32
           }
         }
       ]
