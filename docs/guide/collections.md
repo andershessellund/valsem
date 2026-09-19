@@ -53,9 +53,12 @@ names, and what fails throws a `RangeError` before anything is touched:
 - **An insertion point** (`insert`, `insertAt`, `splice`'s `start`) is an
   integer in `[0, length]`, never counted from the end, so the `-1` of an
   `indexOf` miss cannot quietly mean "the last one".
-- **A range** (`slice`, and `splice`'s count) takes `Array`'s bounds whole:
-  negative counts from the end, and out of range clamps, because a range has
-  an answer wherever it points: the part of it that exists.
+- **A range** has an answer wherever it points, the part of it that exists.
+  `slice` takes `Array`'s bounds whole: a negative bound counts from the end,
+  and out of range clamps. `splice`'s count means "up to": an integer ≥ 0, or
+  `Infinity` for "the rest", clamped to what is there. A *negative* count is
+  a `RangeError` (`Array` reads it as 0): how much to remove has no negative
+  meaning, and a count that came out negative is a computation gone wrong.
 - **A non-integer** (`NaN`, `1.5`, `'2'`) throws everywhere. `Array` would
   make it index 0 or 1; here that edit would land in a canonical value.
 

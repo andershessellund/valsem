@@ -463,9 +463,11 @@ touched:
   in `[0, length)`. The reads return `T`, not `T | undefined`;
 - **an insertion point** (`insert`, `insertAt`, and `splice`'s `start`): an
   integer in `[0, length]`, not counted from the end;
-- **a range** (`slice`'s bounds, `splice`'s count): any integer or ±Infinity,
-  with `Array`'s clamping whole: `slice(-3)`, `slice(0, 10)` of seven, a
-  count of `Infinity` for "the rest";
+- **a range**: `slice`'s bounds are any integer or ±Infinity, with `Array`'s
+  clamping whole (`slice(-3)`, `slice(0, 10)` of seven); `splice`'s count is
+  an integer ≥ 0 or `Infinity` ("the rest"), clamped to what is there, and a
+  negative count throws where `Array` reads it as 0: it has no meaning as an
+  amount, only as a computation gone wrong;
 - **a patch** is exact: a `list.set` index or a `list.splice` index and
   count that do not fit the value are refused, on a `ValueList` and on a
   plain array alike.
@@ -522,8 +524,10 @@ On a plain array in a recipe, the mutators valsem intercepts (`splice`,
 `fill`, `copyWithin`) check that their index arguments are integers and keep
 `Array`'s bounds otherwise: the array is an `Array`, its reads are
 `Array.prototype`'s own, and outside a recipe valsem is not there to
-intercept anything. One call reads differently there: `splice(i, undefined,
-x)` throws, because `Array` coerces that count to 0 and the `ValueList` twin
+intercept anything. A required position that is missing throws like any
+other non-integer (`splice()`, `copyWithin(undefined, 1)`, where `Array`
+reads `undefined` as 0); an optional one left `undefined` means its default,
+as to `Array`, with one exception: `splice(i, undefined, x)` throws, because `Array` coerces that count to 0 and the `ValueList` twin
 reads it as "through the end", and one of the two deletes data. The check
 runs before the draft is marked or copied, so a recipe that catches the
 error carries on with an untouched draft. **Rejected:** `TypeError` for
@@ -811,9 +815,14 @@ all three, and editing `draft.a` never affects `draft.b` even when `base.a
 === base.b`. Set members have no location, so draft sets are `add`/`delete`
 only. Every draft is revoked when its `produce` ends. Foreign grafts stay
 raw inside the recipe by default (the recipe's own material needs no
-proxy), except frozen ones: an assigned canonical is drafted copy-on-write
-on read, so mutating through it never throws on the frozen object
-(mutative's #18 family); `draft(value)` opts material in explicitly (D42). **Decided, unbuilt:** schema-compiled accessor drafts for
+proxy), except a frozen one assigned into a slot: `d.k = c` is drafted
+copy-on-write on read, so mutating through `d.k` edits a copy instead of
+throwing on the frozen object (mutative's #18 family). That reaches one
+level: a canonical nested inside the recipe's own raw literal (`d.k = {
+inner: c }`) is read off that raw object, not off a draft, and a write
+through it throws the engine's `TypeError` on the frozen `c`; proxying the
+recipe's own material to catch it would undo the raw-material rule.
+`draft(value)` opts material in explicitly (D42). **Decided, unbuilt:** schema-compiled accessor drafts for
 closed-schema records (real `get`/`set` accessors per known field, a fixed
 hidden-class shape, cached by schema content, proxy-free) with automatic
 fallback to the proxy path; invisible by rule 4 of D29. DESIGN.md §7.2.

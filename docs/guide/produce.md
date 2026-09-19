@@ -135,10 +135,13 @@ a recipe is an `Array`, and its reads and its bounds are the native ones;
 the mutators valsem records as intent (`splice`, `fill`, `copyWithin`) add
 one check, that their index arguments are integers, where `Array` would
 coerce a `NaN` to index 0. The check runs before anything is touched, so
-nothing is half-done when it throws. One call reads differently from
-`Array`: `d.items.splice(i, undefined, x)` throws, since `Array` takes that
-count as 0 and `DraftList` as "through the end"; pass the count, or leave it
-out.
+nothing is half-done when it throws. So every call `Array` would have
+coerced throws here, a required position that is missing included:
+`splice()`, `splice(undefined)` and `copyWithin(undefined, 1)` are `RangeError`s
+where `Array` reads the `undefined` as 0. An *optional* argument left
+`undefined` means its default, as it does to `Array`, with one exception:
+`d.items.splice(i, undefined, x)` throws, since `Array` takes that count as 0
+and `DraftList` as "through the end"; pass the count, or leave it out.
 
 Patches are exact for the same reason: `applyPatches` refuses a `list.set`
 or `list.splice` whose index or count does not fit the value, because a

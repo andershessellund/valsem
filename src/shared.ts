@@ -36,11 +36,13 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
  *   `splice`'s start): an integer in `[0, length]`. An edit lands in canonical
  *   state, so the place it names must exist: no counting from the end, where
  *   an `indexOf` miss (-1) would name the last element;
- * - a RANGE ({@link indexArg} for `slice`'s bounds, {@link extentArg} for
- *   `splice`'s count): any integer or ±Infinity, clamped as `Array` clamps
- *   it. A range has an answer wherever it points, the part of it that exists,
- *   and correct programs overshoot on purpose: the top ten of seven, the
- *   short last page, "the rest".
+ * - a RANGE. `slice`'s bounds ({@link indexArg}) are any integer or
+ *   ±Infinity, clamped as `Array` clamps them; `splice`'s count
+ *   ({@link extentArg}) is an amount, an integer ≥ 0 or Infinity, clamped to
+ *   what is there, and a negative one throws where `Array` reads it as 0. A
+ *   range has an answer wherever it points, the part of it that exists, and
+ *   correct programs overshoot on purpose: the top ten of seven, the short
+ *   last page, "the rest".
  *
  * What none of them does is `Array`'s ToIntegerOrInfinity, where `NaN`
  * becomes index 0 and `1.7` becomes 1: a non-integer is an upstream
