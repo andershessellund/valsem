@@ -372,19 +372,6 @@ function lookupOrStore(
 }
 
 // ---------------------------------------------------------------------------
-// Back-compat — deprecated factory wrapper
-// ---------------------------------------------------------------------------
-
-/**
- * @deprecated Use the global {@link intern} function instead. Returned
- * object delegates to the global pool; per-instance pools are no longer
- * supported (a single weak pool serves all callers).
- */
-export function createInterner(): { intern: typeof intern } {
-  return { intern };
-}
-
-// ---------------------------------------------------------------------------
 // Shallow reference equality — SameValueZero on (canonical) children
 // ---------------------------------------------------------------------------
 

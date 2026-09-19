@@ -280,8 +280,7 @@ and tail, computed once per novel node.
   and the constructor as the type, **unfrozen**. Anything less throws,
   naming what is missing; nothing passes through.
 
-`intern` is depth-capped (§9). `createInterner()` is a deprecated wrapper
-returning `{ intern }`.
+`intern` is depth-capped (§9).
 
 ### 4.2 The pool
 
