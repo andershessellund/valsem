@@ -556,8 +556,12 @@ against each node's kids finds the index in O(log n) (`_indexOf`). Every
 anchor a tree implies is contributed by the node whose kid it names, so
 after an operation the anchors that may have changed are exactly the
 contributions of the nodes it consed: `_record(fn)` collects those (pool
-hits included), and `_anchorUpdates(consed, next)` turns them into a
-key → anchor map, later nodes overriding superseded ones.
+hits included), and `_anchorUpdates(consed, next, prev, at)` turns them
+into a key → anchor map, later nodes overriding superseded ones, and then
+drops every entry the previous list already implies: the contributions of
+the nodes on `prev`'s path to the edit and on its right spine, its tail and
+its root. Those are in the trie already, and an edit re-chunks only around
+its cut and at the list's end, so they are most of the candidates (D23).
 
 ### 6.5 `OrderedMap` / `OrderedSet`
 
@@ -575,8 +579,9 @@ Operations: `get`, `has`, `indexOf`, `at`, `keyAt`, `valueAt`, `first`,
 `delete`, `insertAt`, all O(log n) expected. A structural edit runs the
 list operation under `_record`, sets or removes the trie entry (a new key
 anchors to the tail), then applies the anchor updates the consed nodes imply
-(`applyAnchorUpdates`: keys the trie no longer holds are skipped, and so
-are unchanged anchors, at one lookup each). Iteration is in order. `OrderedSet` has no set algebra (a union has
+(`applyAnchorUpdates`: one batched descent, `trieSetLast`, that rebuilds
+each touched trie node once; keys the trie no longer holds are skipped, and
+so are unchanged anchors). Iteration is in order. `OrderedSet` has no set algebra (a union has
 no single natural order); `ValueSet.from(orderedSet)` for that. Why: D23.
 
 ### 6.6 `HashMap`, `HashSet`, `memoize`
