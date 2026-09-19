@@ -41,6 +41,7 @@
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
 import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
+import { toInteger } from './shared.js';
 import {
   toDraft,
   DRAFT_STATE,
@@ -458,12 +459,22 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
     splice(state, args) {
       const copy = materializeArr(state);
       const len = copy.length;
-      let start = Math.trunc((args[0] as number) ?? 0);
+      // Array.prototype.splice's argument rules, exactly. An index goes
+      // through ToIntegerOrInfinity (NaN, and so `undefined`, is 0), and the
+      // delete count follows how many arguments were PASSED, not their
+      // values: none removes nothing, a start alone removes through the end,
+      // an explicit `undefined` count is 0. This used to truncate: a NaN
+      // stayed NaN here while the native splice below coerced it to 0, so
+      // the recorded op disagreed with the edit, and the NaN reached the
+      // patches, which `applyPatches` rejects as malformed.
+      let start = toInteger(args[0] as number);
       start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
       const rc =
-        args.length < 2
-          ? len - start
-          : Math.min(Math.max(Math.trunc(args[1] as number), 0), len - start);
+        args.length === 0
+          ? 0
+          : args.length === 1
+            ? len - start
+            : Math.min(Math.max(toInteger(args[1] as number), 0), len - start);
       const items = args.slice(2);
       if (items.length !== rc && start + rc < len) state.opaqued = true; // survivors relocated
       const removed = copy.splice(start, rc, ...items);
