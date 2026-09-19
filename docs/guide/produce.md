@@ -105,6 +105,17 @@ Recipes must be **synchronous** — an `async` recipe returns a Promise, which
 is not a value, and is rejected with a teaching error. Await your data first,
 then produce.
 
+**Index arguments are checked.** A plain array in a recipe is an `Array`, and
+its reads are the native ones. Its mutators are recorded as intent for the
+patches, so they hold their index arguments to the rule the collections
+follow: `d.items.splice(start, count)`, `fill` and `copyWithin` (and
+`DraftList.splice`) take integers, clamped as `Array` clamps them, and throw
+a `RangeError` for `NaN`, a fraction or a string where `Array` would coerce
+it to some index. The check runs before anything is touched, so nothing is
+half-done when it throws. One call reads differently from `Array`:
+`d.items.splice(i, undefined, x)` throws, since `Array` takes that count as 0
+and `DraftList` as "through the end"; pass the count, or leave it out.
+
 ## Looking at a draft: `current()` and `original()`
 
 immer's two inspectors, with valsem's guarantee attached. `original(draft)`

@@ -42,6 +42,24 @@ m1.get('sp');                    // 5
 [...m1];                         // ValueMap *is* a ReadonlyMap — iterate it directly
 ```
 
+**Index arguments are checked, not coerced.** `slice`, `splice`, `insert` and
+`remove` take `Array`'s bounds: a negative index counts from the end, and an
+index out of range clamps, so `list.slice(-3)` and `list.slice(0, 1000)` do
+what they do on an array. What they do not take over is `Array`'s coercion,
+where `NaN` quietly becomes index 0 and `1.7` becomes 1. A `NaN` index is a
+computation that went wrong upstream, and the edit it would make lands in a
+canonical value, so an index argument that is not an integer (or ±Infinity)
+throws a `RangeError` naming the operation and the argument. Reads stay
+forgiving: `get(i)` and `at(i)` answer `undefined` for anything that is not
+an index.
+
+```ts
+const list = ValueList.of('a', 'b', 'c');
+list.slice(-2).toArray();        // ['b', 'c']: integers clamp, as Array's do
+list.remove(NaN);                // RangeError: ValueList.remove: index must be an integer, got NaN
+list.get(NaN);                   // undefined
+```
+
 ### Interop and encapsulation
 
 `ValueMap` **is** a `ReadonlyMap` — pass it anywhere one is accepted.

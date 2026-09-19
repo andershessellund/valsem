@@ -35,7 +35,7 @@ import {
 } from './draft-core.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { toInteger } from './shared.js';
+import { indexArg } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -164,10 +164,12 @@ export class DraftList<T> implements Iterable<T> {
     for (const v of values) assertAssignable(v, s);
     flushTail(s);
     const len = s.work.length;
-    let at = toInteger(start);
+    let at = indexArg(start, 'DraftList.splice', 'start');
     at = at < 0 ? Math.max(len + at, 0) : Math.min(at, len);
     const rc =
-      deleteCount === undefined ? len - at : Math.min(Math.max(toInteger(deleteCount), 0), len - at);
+      deleteCount === undefined
+        ? len - at
+        : Math.min(Math.max(indexArg(deleteCount, 'DraftList.splice', 'deleteCount'), 0), len - at);
     markChanged(s);
     const removed: unknown[] = [];
     for (let i = at; i < at + rc; i++) removed.push(this.#read(s, i));

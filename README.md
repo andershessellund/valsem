@@ -109,6 +109,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
 | Iterating a `Map` draft | yields drafts | yields the **values**: `for (const [k, v] of d.m) v.x = 1` throws on the frozen value. Edit through the slot, `d.m.get(k).x = 1`; `get` is what hands out a draft. Iteration stays a read, so walking a large map drafts nothing |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draft(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
+| Index arguments (`d.items.splice(start, count)`) | coerced as `Array` does: `NaN` is index 0 | checked: integers clamp as `Array`'s do, anything else throws a `RangeError` |
 | Async recipes | silently wrong | rejected with an error |
 
 ```ts

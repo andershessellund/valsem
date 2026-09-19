@@ -452,6 +452,53 @@ holding or dropping the returned reference. Properties are O(1); methods
 may cost, so the O(n) step is a method. Native `Map`/`Set` are non-values;
 `new Map(m)` is the explicit mutable-copy escape. DESIGN.md §6.4.
 
+### D45. Index arguments are checked, not coerced
+
+An argument that names a position (`start`, `end`, `deleteCount`, `index`,
+`target`) must be an integer or ±Infinity, or the operation throws a
+`RangeError` before touching anything. That covers `ValueList.slice`/
+`splice`/`insert`/`remove`, `DraftList.splice`, `RawArray.slice`, and the
+mutators valsem intercepts on a plain-array draft (`splice`, `fill`,
+`copyWithin`). Integers keep all of `Array`'s clamping: a negative start
+counts from the end, out of range clamps, `slice(0, Infinity)` is the whole
+list. Reads (`get`, `at`, `keyAt`, `valueAt`) answer `undefined` for what is
+not an index.
+
+**Why.** This reverses half of an earlier choice. After a fractional index
+built a list of `undefined`s that was then interned, the index arguments were
+made to follow `Array` exactly, `ToIntegerOrInfinity` included, with the
+plain `Array` as the test oracle "for every argument JavaScript callers can
+produce". That was right about clamping and wrong about coercion. Clamping
+is the feature: `slice(-3)` and `splice(-2, 1)` say what they mean. Coercion
+is not: a `NaN` index is an upstream computation that went wrong, `Array`
+turns it into "index 0", and here the edit nobody chose lands in a value
+that is then canonical and shared. It is the silent wrong answer the library
+exists to refuse, and the write paths already refused it: `set`, `setMany`,
+`insertAt` and `d.arr[NaN] = x` always threw. One rule now, and the line it
+draws is the one `get`/`set` already drew: a query that finds nothing has a
+natural answer, `undefined`; a cut or an edit that cannot be placed has
+none. A `RangeError` throughout, non-numbers included, as `set` and
+`insertAt` already threw for `'1'`.
+
+`undefined` means "omitted" for an optional argument, with one exception. On
+a plain-array draft, `splice(i, undefined, x)` throws, because the two honest
+readings are opposite: `Array` coerces the count to 0 and removes nothing,
+the `ValueList` twin reads it as "through the end" (its items are one array
+argument, so that is how a caller removes to the end *and* inserts). Picking
+either silently is wrong for somebody, and one of them deletes data; a count
+that is passed must be a count. The check runs before the draft is marked or
+copied, so a recipe that catches the error carries on with an untouched
+draft. A plain array's reads (`at`, `slice`, `indexOf`) stay the native ones,
+coercion included: the array is an `Array`, and outside a recipe valsem is
+not there to intercept anything. **Rejected:** rejecting negative or
+out-of-range integers too. It would catch `splice(arr.indexOf(x), 1)` on a
+miss (a `-1` that removes the last element), and break `slice(-3)`; an
+integer carries intent, and guessing which intent is not a check. **Rejected:**
+`TypeError` for non-numbers and `RangeError` for non-integers, as Temporal
+splits them: two error types for one mistake, and the existing write paths
+already answered `RangeError` for both. **Cost.** Breaking for a caller who
+relied on the coercion. DESIGN.md §6.2, §7.2.
+
 ### D23. Ordered collections find a key's position through content-derived anchors
 
 `OrderedMap` and `OrderedSet` are insertion-ordered twins of `ValueMap` and

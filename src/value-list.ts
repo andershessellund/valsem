@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, toInteger } from './shared.js';
+import { same, sameSlots, IteratorBase, indexArg } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -486,15 +486,20 @@ export class ValueList<T> implements Iterable<T> {
    * Replace `deleteCount` elements at `start` with `items` (interned on
    * entry) — the general edit; O(log n) expected. `insert`, `remove` and
    * `slice` are all this. The bounds are `Array.prototype.splice`'s: `start`
-   * counts from the end when negative, both are truncated to integers, and an
-   * omitted `deleteCount` removes through the end.
+   * counts from the end when negative, both clamp to the list, and an
+   * omitted (or `undefined`) `deleteCount` removes through the end. Both
+   * must be integers (or ±Infinity): anything else throws a `RangeError`
+   * where `Array` would coerce it to some index.
    */
   splice(start: number, deleteCount?: number, items: readonly T[] = []): ValueList<T> {
     const n = this.length;
-    start = toInteger(start);
+    start = indexArg(start, 'ValueList.splice', 'start');
     if (start < 0) start = Math.max(0, n + start);
     if (start > n) start = n;
-    const end = deleteCount === undefined ? n : Math.min(n, start + Math.max(0, toInteger(deleteCount)));
+    const end =
+      deleteCount === undefined
+        ? n
+        : Math.min(n, start + Math.max(0, indexArg(deleteCount, 'ValueList.splice', 'deleteCount')));
     const root = this.#full();
     if (root === null) return ValueList.from(items);
     const s = pathTo(root, start);
@@ -600,19 +605,23 @@ export class ValueList<T> implements Iterable<T> {
     return newRoot === root ? this : ValueList.#fromFull<T>(newRoot);
   }
 
-  /** Insert `value` (interned on entry) before `index`; O(log n) expected. */
+  /** Insert `value` (interned on entry) before `index` — an integer, with `splice`'s bounds; O(log n) expected. */
   insert(index: number, value: T): ValueList<T> {
-    return this.splice(index, 0, [value]);
+    return this.splice(indexArg(index, 'ValueList.insert', 'index'), 0, [value]);
   }
-  /** Remove the element at `index`; O(log n) expected. */
+  /** Remove the element at `index` — an integer, with `splice`'s bounds; O(log n) expected. */
   remove(index: number): ValueList<T> {
-    return this.splice(index, 1);
+    return this.splice(indexArg(index, 'ValueList.remove', 'index'), 1);
   }
-  /** Elements `[start, end)` — `Array.prototype.slice` bounds; O(log n) expected. */
+  /**
+   * Elements `[start, end)` — `Array.prototype.slice` bounds (negative counts
+   * from the end, out of range clamps), for integer arguments; a non-integer
+   * throws a `RangeError`. O(log n) expected.
+   */
   slice(start = 0, end = this.length): ValueList<T> {
     const n = this.length;
-    start = toInteger(start);
-    end = toInteger(end);
+    start = indexArg(start, 'ValueList.slice', 'start');
+    end = indexArg(end, 'ValueList.slice', 'end');
     if (start < 0) start = Math.max(0, n + start);
     if (end < 0) end = Math.max(0, n + end);
     end = Math.min(end, n);

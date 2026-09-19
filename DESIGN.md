@@ -423,6 +423,11 @@ and does not pretend to be (D29).
   Set(s)` for a mutable copy (D30).
 - **Persistent updates.** Mutators return the canonical successor; an
   unchanged write returns `this`.
+- **Checked index arguments.** An argument naming a position is an integer
+  or ±Infinity, or a `RangeError`: `Array`'s clamping is kept whole
+  (negative counts from the end, out of range clamps), its coercion is not
+  (`NaN`, `1.5` and `'2'` throw where `Array` would pick some index). Reads
+  (`get`, `at`) answer `undefined` for what is not an index (D45).
 - **Explicit-stack iterators** extending the global `Iterator` where it
   exists, so the ES2025 helpers work (D6).
 - **Drafting** through `[toDraft]` (§7), with a mutable twin per class.
@@ -663,7 +668,10 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   as `SeqOp`s
   (`set` and `splice`) while intent is capturable; `ops` becomes null once
   it is not. `opaqued` marks that base elements may sit at foreign indices,
-  after which any draftable read is drafted.
+  after which any draftable read is drafted. The intercepted mutators check
+  their index arguments before the draft is marked or copied (`splice`,
+  `fill`, `copyWithin`: an integer or ±Infinity, else a `RangeError`, D45);
+  the reads are `Array.prototype`'s own.
 - **`DraftMap`**: an overlay of edits (canonical key → draft or raw value)
   and an `assigned` map over the base; finalize sets the resolved edits
   into the base map. **`DraftSet`**: `added`, `removed`, `cleared`;
