@@ -35,6 +35,9 @@ rather than index diffs (a `DraftList.splice` is one patch, not n). Apply them
 with `applyPatches`; because everything is canonical,
 `applyPatches(base, patches) === produce(base, recipe)` — patch streams and
 direct production converge on the same instance.
+The patches are frozen like everything else `produce` returns: the two lists,
+each patch, its `path`. To build up a history, collect them into a list of
+your own (`history.push(...patches)`).
 
 ```ts
 const [next2, patches, inverse] = produceWithPatches(state, (d) => {

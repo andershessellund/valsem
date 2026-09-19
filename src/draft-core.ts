@@ -87,8 +87,8 @@ export interface PatchKinds {
   'oset.insert': { kind: 'oset.insert'; path: PatchPath; index: number; value: unknown };
 }
 
-/** A semantic patch — one of {@link PatchKinds}. */
-export type Patch = PatchKinds[keyof PatchKinds];
+/** A semantic patch — one of {@link PatchKinds}. Read-only: the patches `produceWithPatches` returns are frozen. */
+export type Patch = Readonly<PatchKinds[keyof PatchKinds]>;
 
 /** Where a finalize records this container's patches (forward) and their inverses. */
 export interface PatchRecorder {

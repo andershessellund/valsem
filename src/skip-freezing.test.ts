@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { skipFreezing } from './checks.js';
 import { intern, isCanonical, fastEquals } from './intern.js';
-import { produce } from './produce.js';
+import { applyPatches, produce, produceWithPatches } from './produce.js';
 import { deepEqual } from './deep-equal.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
@@ -79,6 +79,15 @@ describe('after skipFreezing()', () => {
     });
     expect(el.n).toBe(1);
     expect(arrNext.arr[0]!.n).toBe(3);
+  });
+
+  it('patches follow the switch: unfrozen, and they still apply', () => {
+    const base = intern({ l: [1, 2] });
+    const [result, patches, inverse] = produceWithPatches(base, (d) => void d.l.push(3));
+    expect(Object.isFrozen(patches)).toBe(false);
+    expect(Object.isFrozen(patches[0])).toBe(false);
+    expect(applyPatches(base, patches)).toBe(result);
+    expect(applyPatches(result, inverse)).toBe(base);
   });
 
   it('the price: a mutation of a canonical value is no longer caught', () => {
