@@ -296,6 +296,32 @@ describe('produce — recipe conventions', () => {
 });
 
 describe('produceWithPatches — semantic patches, both directions', () => {
+  it('the patches are frozen, envelope and all, and still apply', () => {
+    const base = intern({ a: { b: 1 }, l: [1, 2, 3], list: ValueList.of(1), m: ValueMap.from<string, unknown>([['k', 1]]) });
+    const [result, patches, inverse] = produceWithPatches(base, (d) => {
+      d.a.b = 2;
+      d.l.splice(1, 1, 8, 9);
+      d.list.push(2);
+      d.m.set('j', { deep: [1] });
+    });
+    for (const list of [patches, inverse]) {
+      expect(Object.isFrozen(list)).toBe(true);
+      expect(list.length).toBeGreaterThan(0);
+      for (const p of list) {
+        expect(Object.isFrozen(p)).toBe(true);
+        for (const v of Object.values(p)) if (v !== null && typeof v === 'object') expect(Object.isFrozen(v)).toBe(true);
+      }
+    }
+    expect(() => (patches as unknown[]).push({})).toThrow(TypeError);
+    expect(() => (patches[0]!.path as unknown[]).push('x')).toThrow(TypeError);
+    expect(applyPatches(base, patches)).toBe(result);
+    expect(applyPatches(result, inverse)).toBe(base);
+    // An empty recipe's lists are frozen too: one rule, no "unless nothing happened".
+    const [, none] = produceWithPatches(base, () => {});
+    expect(none).toEqual([]);
+    expect(Object.isFrozen(none)).toBe(true);
+  });
+
   function roundtrip<T>(base: T, recipe: (d: never) => unknown): void {
     const canonicalBase = intern(base as unknown);
     const [result, patches, inverse] = produceWithPatches(

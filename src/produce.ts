@@ -41,6 +41,7 @@
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
 import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
+import { _freeze } from './checks.js';
 import { indexArg } from './shared.js';
 import {
   toDraft,
@@ -1330,15 +1331,32 @@ export function draft<T>(value: T): Draft<T> {
 /**
  * Like {@link produce}, additionally returning the semantic patches that turn
  * `base` into the result and the inverse patches that turn the result back
- * into `base` — all patch values canonical.
+ * into `base` — all patch values canonical, and the patches frozen: the two
+ * lists, each patch, and the arrays inside one (`path`, `insert`). A patch
+ * is a record of what happened, handed to whoever keeps the history; like
+ * everything else `produce` returns, it cannot be changed after the fact.
  */
 export function produceWithPatches<T>(
   base: T,
   recipe: (draft: Draft<T>) => RecipeReturn<T>,
-): [T, Patch[], Patch[]] {
+): [T, readonly Patch[], readonly Patch[]] {
   const recorder: PatchRecorder = { patches: [], inverse: [] };
   const result = runProduce(base, recipe, recorder);
-  return [result, recorder.patches, recorder.inverse];
+  return [result, freezePatches(recorder.patches), freezePatches(recorder.inverse)];
+}
+
+/**
+ * Freeze a finished patch list, envelope and all. Values are canonical
+ * already; what is left is the list, each patch object, and any array a patch
+ * holds (`path`, `insert`, or a third-party kind's own). Through `_freeze`,
+ * so `skipFreezing()` covers it like the rest of what `produce` returns.
+ */
+function freezePatches(patches: Patch[]): readonly Patch[] {
+  for (const p of patches) {
+    for (const v of Object.values(p)) if (Array.isArray(v)) _freeze(v);
+    _freeze(p);
+  }
+  return _freeze(patches);
 }
 
 /**
