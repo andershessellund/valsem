@@ -108,6 +108,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
 | Iterating a `Map` draft | yields drafts | yields the **values**: `for (const [k, v] of d.m) v.x = 1` throws on the frozen value. Edit through the slot, `d.m.get(k).x = 1`; `get` is what hands out a draft. Iteration stays a read, so walking a large map drafts nothing |
+| `castDraft()` | for a `readonly` value headed into a mutable slot | the same, and also for every whole collection assigned into a slot: `d.todos = castDraft(ValueList.of(a, b))`, since a `ValueList` slot is typed as a `DraftList` |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draft(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
 | Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.remove(-1)` throw, `get` returns `T`), while ranges clamp (`slice(0, 10)`) |
 | Async recipes | silently wrong | rejected with an error |
@@ -303,7 +304,7 @@ it costs.
 
 | | |
 | --- | --- |
-| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `draft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical; `draft()` detaches a second root for material brought in from elsewhere |
+| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `draft`, `castDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical; `draft()` detaches a second root for material brought in from elsewhere |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
 | `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
 | `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |

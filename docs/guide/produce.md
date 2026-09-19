@@ -107,6 +107,21 @@ draft. Give such a class a method (a `toJSON`, a `with`; an accessor does not
 count, it is a property to the type system), or use the
 `[equals]`/`[hashCode]` form, before it goes into drafted state.
 
+**Assigning a whole collection.** A recipe may put a value wherever a draft
+is: `d.todos = ValueList.of(a, b)` works, and the value is adopted on the way
+out. TypeScript objects, though, because `Draft<T>` types that slot as a
+`DraftList` and a property cannot have a wider type for writing than for
+reading. `castDraft` says what you mean, and does nothing at runtime:
+
+```ts
+import { castDraft, produce } from 'valsem';
+
+produce(state, (d) => {
+  d.todos = castDraft(fetched.todos);         // replace the list with the one from the server
+  d.tags = castDraft(d.tags.union(moreTags)); // a draft's algebra returns a value
+});
+```
+
 Recipes must be **synchronous** — an `async` recipe returns a Promise, which
 is not a value, and is rejected with a teaching error. Await your data first,
 then produce.

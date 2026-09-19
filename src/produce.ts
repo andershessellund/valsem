@@ -1329,6 +1329,22 @@ export function draft<T>(value: T): Draft<T> {
 }
 
 /**
+ * `value`, typed as the draft of its type, for assigning a value into a draft
+ * slot: `d.todos = castDraft(ValueList.of(a, b))`, `d.tags =
+ * castDraft(d.tags.union(more))`, `d.rows = castDraft(other.rows)`.
+ *
+ * It does nothing at runtime. A recipe may put a value wherever a draft is
+ * (it is adopted on the way out), but `Draft<T>` types a collection slot as
+ * its draft class (`DraftList`), which a `ValueList` is not, and TypeScript
+ * cannot give a property a wider type for writing than for reading. The same
+ * goes for a `readonly T[]` headed for a `T[]` slot. immer and mutative have
+ * the same function under the same name, for the same reason.
+ */
+export function castDraft<T>(value: T): Draft<T> {
+  return value as Draft<T>;
+}
+
+/**
  * Like {@link produce}, additionally returning the semantic patches that turn
  * `base` into the result and the inverse patches that turn the result back
  * into `base` — all patch values canonical, and the patches frozen: the two

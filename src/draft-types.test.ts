@@ -12,8 +12,8 @@
 //     where the state type admits undefined) — immer's rule.
 //   - The curried form types its extra arguments from the recipe.
 // ---------------------------------------------------------------------------
-import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, nothing, type Draft, type RecipeReturn } from './produce.js';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import { produce, produceWithPatches, castDraft, nothing, type Draft, type RecipeReturn } from './produce.js';
 import { current, type Undraft } from './current.js';
 import { intern } from './intern.js';
 import { equals, hashCode } from './deep-equal.js';
@@ -21,6 +21,7 @@ import { deepHash } from './deep-hash.js';
 import { ValueDate } from './value-date.js';
 import { ValueMap } from './value-map.js';
 import { ValueList } from './value-list.js';
+import { ValueSet } from './value-set.js';
 import { InternedString } from './interned-string.js';
 import { RawArray } from './raw-array.js';
 import { DraftMap } from './draft-map.js';
@@ -196,5 +197,47 @@ describe('produce — the types describe the runtime', () => {
     expect(inc({ n: 1 })).toBe(intern({ n: 2 }));
     // @ts-expect-error — no extra arguments were declared
     inc({ n: 1 }, 2);
+  });
+});
+
+describe('castDraft: a value into a draft slot', () => {
+  interface Todo { readonly id: number; readonly done: boolean }
+  interface State {
+    readonly todos: ValueList<Todo>;
+    readonly tags: ValueSet<string>;
+    readonly rows: readonly Todo[];
+  }
+  const state: State = intern({ todos: ValueList.of({ id: 1, done: false }), tags: ValueSet.from(['a']), rows: [] });
+  const fetched: State = intern({ todos: ValueList.of({ id: 2, done: true }), tags: ValueSet.from(['b']), rows: [{ id: 3, done: false }] });
+
+  it('is what the types ask for, and nothing at runtime', () => {
+    expectTypeOf(castDraft(fetched.todos)).toEqualTypeOf<Draft<ValueList<Todo>>>();
+    expect(castDraft(fetched.todos)).toBe(fetched.todos);
+
+    const next = produce(state, (d) => {
+      // @ts-expect-error a ValueList is not the DraftList the slot is typed as: the reason castDraft exists
+      d.todos = fetched.todos;
+      // @ts-expect-error likewise for the value a draft's algebra returns
+      d.tags = d.tags.union(['c']);
+      // @ts-expect-error and for a readonly array headed into a mutable slot, as in immer
+      d.rows = fetched.rows;
+
+      d.todos = castDraft(fetched.todos);
+      d.tags = castDraft(d.tags.union(fetched.tags));
+      d.rows = castDraft(fetched.rows);
+    });
+    expect(next.todos).toBe(fetched.todos);
+    expect(next.tags).toBe(ValueSet.from(['a', 'b', 'c'])); // 'c' from the uncast line above: a type error, and it ran
+    expect(next.rows).toBe(fetched.rows);
+  });
+
+  it('the cast value is still editable through its slot', () => {
+    const next = produce(state, (d) => {
+      d.todos = castDraft(fetched.todos);
+      d.todos.get(0).done = false; // read back, it is a DraftList over the assigned value
+      d.todos.push({ id: 9, done: true });
+    });
+    expect(next.todos).toBe(ValueList.of({ id: 2, done: false }, { id: 9, done: true }));
+    expect(fetched.todos.get(0).done).toBe(true); // copy-on-write: the assigned value is untouched
   });
 });
