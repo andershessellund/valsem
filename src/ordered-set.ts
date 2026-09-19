@@ -24,6 +24,7 @@ import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND,
 import { applyAnchorUpdates, anchorsFor, PairIterator } from './ordered-core.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createOrderedSetDraft, type OrderedSetState } from './draft-ordered-set.js';
+import { ownIterable } from './shared.js';
 
 const CFG = createTrieConfig(2); // member, anchor
 const pool = createInternPool<OrderedSet<unknown>>();
@@ -223,7 +224,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   static from<T>(values: Iterable<T>): OrderedSet<T> {
     const members: unknown[] = [];
     const seen = new Set<unknown>();
-    for (const raw of values) {
+    for (const raw of ownIterable(values)) {
       const v = intern(raw);
       // SameValueZero, as the trie compares: NaN is one member.
       const key = v !== v ? NaN : v;

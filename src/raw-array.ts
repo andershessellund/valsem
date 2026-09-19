@@ -24,7 +24,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern } from './intern.js';
 import { hashNumber } from './hasher.js';
-import { toInteger } from './shared.js';
+import { toInteger, ownAt, ownElements } from './shared.js';
 
 let nextId = 0;
 const NOT_YET = Symbol('valsem.raw-array.not-yet');
@@ -53,9 +53,14 @@ export class RawArray<T> {
     Object.freeze(this);
   }
 
-  /** A view over `items` — copied once (a native slice, holes preserved), so later mutation of the caller's array does not reach it. */
+  /**
+   * A view over `items` — copied once, so later mutation of the caller's array
+   * does not reach it. An array is copied by its OWN elements: a native
+   * `slice()` copies an inherited index into the copy as an own element, after
+   * which no own-property check can tell it from data.
+   */
   static from<T>(items: Iterable<T> | ArrayLike<T>): RawArray<T> {
-    const arr = Array.isArray(items) ? (items as unknown[]).slice() : Array.from(items as Iterable<T>);
+    const arr = Array.isArray(items) ? ownElements(items as unknown[]) : Array.from(items as Iterable<T>);
     return new RawArray<T>(arr);
   }
 
@@ -66,9 +71,7 @@ export class RawArray<T> {
   #admit(i: number): T {
     const c = this.#canon[i];
     if (c !== NOT_YET) return c as T;
-    // Own slot only: a hole would read through to Array.prototype.
-    const raw = Object.prototype.hasOwnProperty.call(this.#raw, i) ? this.#raw[i] : undefined;
-    const v = intern(raw) as T;
+    const v = intern(ownAt(this.#raw, i)) as T;
     this.#canon[i] = v;
     this.#raw[i] = undefined; // the raw record is not needed again
     return v;

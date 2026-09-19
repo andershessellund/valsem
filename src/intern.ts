@@ -32,7 +32,7 @@ import {
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord, _isForeignObjectPrototype } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
-import { same } from './shared.js';
+import { same, ownAt } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
 
@@ -199,7 +199,7 @@ export function intern<T>(value: T): T {
       // reads through to Array.prototype (a polluted one would leak in).
       const internalized = new Array<unknown>(obj.length);
       for (let i = 0; i < obj.length; i++) {
-        internalized[i] = Object.prototype.hasOwnProperty.call(obj, i) ? intern(obj[i]) : undefined;
+        internalized[i] = intern(ownAt(obj, i));
       }
       return lookupOrStore(internalized, (c) => shallowRefEqual(c, internalized), true) as T;
     } finally {

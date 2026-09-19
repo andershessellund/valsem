@@ -466,7 +466,10 @@ function buildNode(
     return consC(cfg, hs[ids[0]!]!, slots);
   }
   // Partition by the five bits at `shift`, in bit order.
-  const buckets: (number[] | undefined)[] = new Array(32);
+  // Filled, not sparse: `buckets[b]` is read before it is written, and a hole
+  // reads through to Array.prototype. With `Array.prototype[5] = []` every
+  // build would have pushed into that one shared array.
+  const buckets: (number[] | undefined)[] = new Array<number[] | undefined>(32).fill(undefined);
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i]!;
     const b = (hs[id]! >>> shift) & 31;

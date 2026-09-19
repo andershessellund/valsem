@@ -35,7 +35,7 @@ import {
 } from './draft-core.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { toInteger } from './shared.js';
+import { toInteger, ownElements } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -232,7 +232,7 @@ export function createListDraft<T>(
 
 function applyListPatch(state: ListState, p: Patch): void {
   if (p.kind === 'list.set') state.draft.set(p.index, p.value);
-  else if (p.kind === 'list.splice') state.draft.splice(p.index, p.remove, ...(p.insert as unknown[]));
+  else if (p.kind === 'list.splice') state.draft.splice(p.index, p.remove, ...ownElements(p.insert as unknown[]));
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a list draft`);
 }
 
