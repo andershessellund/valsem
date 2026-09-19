@@ -20,7 +20,9 @@ import {
   type PatchPath,
   type PatchRecorder,
   snapshotOf,
+  inspectDraft,
 } from './draft-core.js';
+import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
 import type { OrderedSet } from './ordered-set.js';
 
 const INTERNAL = Symbol('valsem.draft-ordered-set');
@@ -139,6 +141,11 @@ export class DraftOrderedSet<T> implements Iterable<T> {
 
   [Symbol.iterator](): IterableIterator<T> {
     return this.values();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectDraft('DraftOrderedSet', this, () => this.size, () => new Set(this), depth, options, inspect);
   }
 
   forEach(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => void, thisArg?: unknown): void {

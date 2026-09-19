@@ -19,6 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createMapDraft, type MapState } from './draft-map.js';
@@ -147,6 +148,15 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     const out: [K, V][] = [];
     trieForEach(CFG, this.#root, (slots, i) => out.push([slots[i] as K, slots[i + 1] as V]));
     return out;
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `ValueMap(n)` and the contents, where private state would print as `ValueMap {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('ValueMap', this.size, () => new Map(this), depth, options, inspect);
+  }
+  /** `[object ValueMap]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'ValueMap';
   }
 
   [equalsSym](other: unknown): boolean {

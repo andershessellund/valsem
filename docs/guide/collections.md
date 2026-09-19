@@ -145,6 +145,11 @@ Two things to know before relying on it:
   use `OrderedMap` and `OrderedSet`, whose order is part of the value and
   whose strings are stable.
 
+`console.log` sees them too: on Node (and wherever `util.inspect` is used, a
+test runner's diff included) a collection prints as `ValueList(2) [ 1, 2 ]`
+or `OrderedMap(1) { 'a' => 1 }`, the way a native `Map` does, and a draft
+inside a recipe prints what it holds at that moment.
+
 ## `OrderedMap` and `OrderedSet` — insertion order as part of the value
 
 `ValueMap` and `ValueSet` iterate in a content-determined order, which is

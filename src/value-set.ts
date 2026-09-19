@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createSetDraft, type SetState } from './draft-set.js';
@@ -208,6 +209,15 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   /** Whether this set shares no member with `other`. */
   isDisjointFrom(other: Iterable<unknown>): boolean {
     return trieIsDisjoint(CFG, this.#root, ValueSet.#of(other).#root);
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `ValueSet(n)` and the contents, where private state would print as `ValueSet {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('ValueSet', this.size, () => new Set(this), depth, options, inspect);
+  }
+  /** `[object ValueSet]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'ValueSet';
   }
 
   [equalsSym](other: unknown): boolean {

@@ -16,7 +16,7 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
-import { same } from './shared.js';
+import { same, inspectAs, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
@@ -658,4 +658,22 @@ export function seqTailProfile(
     }
   }
   return { setIdx, finalLen: len, low };
+}
+
+/**
+ * {@link inspectAs} for a collection draft: what it holds right now, by
+ * iteration (no snapshot: `console.log` must not throw on material that is
+ * not a value yet), and `[revoked DraftList]` once its recipe has ended, when
+ * every other access throws.
+ */
+export function inspectDraft(
+  name: string,
+  draft: object,
+  size: () => number,
+  body: () => unknown,
+  depth: number,
+  options: InspectOptions,
+  inspect: Inspect,
+): string {
+  return stateOf(draft)?.revoked === true ? `[revoked ${name}]` : inspectAs(name, size(), body, depth, options, inspect);
 }

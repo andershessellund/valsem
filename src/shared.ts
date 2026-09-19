@@ -96,3 +96,33 @@ function showArg(value: unknown): string {
  * (`map`, `filter`, `take`, …) exactly as generators would.
  */
 export const IteratorBase = ((globalThis as { Iterator?: unknown }).Iterator ?? Object) as new () => object;
+
+/**
+ * Node's `util.inspect` hook (what `console.log` and a debugger's hover
+ * call). A class with `#private` state prints as `ValueList {}`: the
+ * contents are exactly what inspection cannot see. A registered symbol, so
+ * nothing is imported and other runtimes ignore it.
+ */
+export const INSPECT = Symbol.for('nodejs.util.inspect.custom');
+
+/** The three arguments Node passes the hook, as far as they are used. */
+export type InspectOptions = { depth?: number | null };
+export type Inspect = (value: unknown, options?: object) => string;
+
+/**
+ * `Name(size) <contents>`, the way Node prints a native collection:
+ * `ValueList(2) [ 1, 2 ]`, `ValueMap(1) { 'a' => 1 }`. `body` is an array, or
+ * a native Map/Set of the contents, which Node already knows how to print
+ * (nesting, depth, colours, line breaks); its own `Map(1) ` label is dropped
+ * for ours.
+ */
+export function inspectAs(name: string, size: number, body: () => unknown, depth: number, options: InspectOptions, inspect: Inspect): string {
+  // Node passes the levels LEFT as `depth` (`options.depth` is the total, and
+  // `null`, "no limit", makes the first a meaningless negative number). The
+  // body stands for this collection, so it is printed with exactly the levels
+  // this collection has left: one more level would be lost to the wrapper.
+  const unlimited = options.depth === null;
+  if (!unlimited && depth < 0) return `[${name}]`;
+  const inner = inspect(body(), { ...options, depth: unlimited ? null : depth });
+  return `${name}(${size}) ${inner.replace(/^(?:Map|Set)\(\d+\) /, '')}`;
+}

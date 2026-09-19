@@ -24,7 +24,9 @@ import {
   type Patch,
   type PatchPath,
   type PatchRecorder,
+  inspectDraft,
 } from './draft-core.js';
+import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
 import type { ValueMap } from './value-map.js';
 import type { Draft } from './produce.js';
 
@@ -163,6 +165,11 @@ export class DraftMap<K, V> {
 
   [Symbol.iterator](): IterableIterator<[K, V]> {
     return this.entries();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectDraft('DraftMap', this, () => this.size, () => new Map(this), depth, options, inspect);
   }
 
   forEach(fn: (value: V, key: K, map: DraftMap<K, V>) => void, thisArg?: unknown): void {

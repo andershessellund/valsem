@@ -18,7 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { elementIndex, insertionIndex } from './shared.js';
+import { elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -199,6 +199,15 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   /** What `JSON.stringify` sees: the members in order, as a fresh plain array; the order is the value's, so the string is stable (D46). */
   toJSON(): T[] {
     return this.#list.toJSON();
+  }
+
+  /** What `console.log` shows (Node's `util.inspect`): `OrderedSet(n)` and the contents, where private state would print as `OrderedSet {}`. */
+  [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
+    return inspectAs('OrderedSet', this.size, () => new Set(this), depth, options, inspect);
+  }
+  /** `[object OrderedSet]`, and the name a minifier cannot take. */
+  get [Symbol.toStringTag](): string {
+    return 'OrderedSet';
   }
 
   /** The `produce` draft protocol: a {@link DraftOrderedSet} over this set. */
