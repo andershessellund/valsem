@@ -1,0 +1,279 @@
+{
+  "runtime": {
+    "name": "spidermonkey",
+    "version": "156.0",
+    "engine": "SpiderMonkey shell"
+  },
+  "machine": {
+    "cpu": "Apple M2 Pro",
+    "platform": "darwin arm64"
+  },
+  "date": "2026-09-19",
+  "commit": "4b17e70",
+  "valsem": "0.0.4",
+  "libraries": {
+    "immer": "11.1.18",
+    "mutative": "1.3.0",
+    "immutable": "5.1.9",
+    "fast-deep-equal": "3.1.3"
+  },
+  "suites": [
+    {
+      "id": "frozen-array",
+      "title": "Frozen arrays — what the engine charges for the frozen state",
+      "description": "\nvalsem freezes the plain arrays it canonicalises. The `Object.freeze` call is a map transition (~0.1 µs at any size);\nthe cost is the frozen **state**: engines have fast paths for frozen elements in some builtins and not in others.\nThe first row is the freeze call itself — a map transition on V8, an O(n) walk on JavaScriptCore, where it is the\ndominant cost of canonicalising a large array. Each following row is one operation over a 10,000-element array,\nunfrozen and then frozen, with one function per call site so the keyed loads stay monomorphic. Three element kinds: integers (Smi), doubles, and objects. This is the cost\n`skipFreezing()` buys back in the user's own loops; `ValueList` never pays it (its leaves are unfrozen inside a frozen\nwrapper).\n",
+      "columns": [
+        "ints unfrozen",
+        "ints frozen",
+        "doubles unfrozen",
+        "doubles frozen",
+        "objects unfrozen",
+        "objects frozen"
+      ],
+      "unit": "ns",
+      "ratio": null,
+      "commit": "4b17e70",
+      "date": "2026-09-19",
+      "rows": [
+        {
+          "name": "the Object.freeze call itself (10k elements)",
+          "values": {
+            "ints unfrozen": null,
+            "ints frozen": 7256.064,
+            "doubles unfrozen": null,
+            "doubles frozen": 18896.896,
+            "objects unfrozen": null,
+            "objects frozen": 5975.04
+          }
+        },
+        {
+          "name": "indexed loop read",
+          "values": {
+            "ints unfrozen": 6479.957333333334,
+            "ints frozen": 6395.306666666666,
+            "doubles unfrozen": 9217.962666666666,
+            "doubles frozen": 8923.989333333333,
+            "objects unfrozen": 18727.68,
+            "objects frozen": 18560.682666666668
+          }
+        },
+        {
+          "name": "for…of",
+          "values": {
+            "ints unfrozen": 31005.952,
+            "ints frozen": 31851.264,
+            "doubles unfrozen": 32794.368,
+            "doubles frozen": 31938.645333333334,
+            "objects unfrozen": 46754.73066666667,
+            "objects frozen": 45393.92
+          }
+        },
+        {
+          "name": "forEach",
+          "values": {
+            "ints unfrozen": 38944,
+            "ints frozen": 39129.344,
+            "doubles unfrozen": 55032.064,
+            "doubles frozen": 54369.024,
+            "objects unfrozen": 72020.05333333333,
+            "objects frozen": 72886.272
+          }
+        },
+        {
+          "name": "map",
+          "values": {
+            "ints unfrozen": 28101.632,
+            "ints frozen": 24678.997333333333,
+            "doubles unfrozen": 27874.986666666668,
+            "doubles frozen": 28812.373333333333,
+            "objects unfrozen": 39585.706666666665,
+            "objects frozen": 36195.92533333333
+          }
+        },
+        {
+          "name": "filter",
+          "values": {
+            "ints unfrozen": 46082.901333333335,
+            "ints frozen": 50751.31733333333,
+            "doubles unfrozen": 57018.96533333333,
+            "doubles frozen": 55912.02133333333,
+            "objects unfrozen": 82467.66933333334,
+            "objects frozen": 81315.328
+          }
+        },
+        {
+          "name": "reduce",
+          "values": {
+            "ints unfrozen": 35592.704,
+            "ints frozen": 35251.02933333333,
+            "doubles unfrozen": 55500.62933333333,
+            "doubles frozen": 56030.293333333335,
+            "objects unfrozen": 65473.365333333335,
+            "objects frozen": 64114.005333333334
+          }
+        },
+        {
+          "name": "indexOf (miss)",
+          "values": {
+            "ints unfrozen": 4185.770666666666,
+            "ints frozen": 4146.688,
+            "doubles unfrozen": 4185.770666666666,
+            "doubles frozen": 4357.376,
+            "objects unfrozen": 4142.336,
+            "objects frozen": 4141.312
+          }
+        },
+        {
+          "name": "slice()",
+          "values": {
+            "ints unfrozen": 1434.0266666666666,
+            "ints frozen": 1448.0213333333334,
+            "doubles unfrozen": 1525.4186666666667,
+            "doubles frozen": 1514.4106666666667,
+            "objects unfrozen": 1484.3733333333332,
+            "objects frozen": 1496.6613333333332
+          }
+        },
+        {
+          "name": "spread [...a]",
+          "values": {
+            "ints unfrozen": 47837.013333333336,
+            "ints frozen": 48468.05333333334,
+            "doubles unfrozen": 47890.77333333333,
+            "doubles frozen": 48490.752,
+            "objects unfrozen": 48240.04266666667,
+            "objects frozen": 47113.728
+          }
+        },
+        {
+          "name": "concat",
+          "values": {
+            "ints unfrozen": 1347.328,
+            "ints frozen": 1445.632,
+            "doubles unfrozen": 1444.352,
+            "doubles frozen": 1455.36,
+            "objects unfrozen": 1366.016,
+            "objects frozen": 1521.3226666666667
+          }
+        },
+        {
+          "name": "JSON.stringify",
+          "values": {
+            "ints unfrozen": 80621.824,
+            "ints frozen": 80231.168,
+            "doubles unfrozen": 282972.16,
+            "doubles frozen": 285342.208,
+            "objects unfrozen": 450483.968,
+            "objects frozen": 451390.208
+          }
+        },
+        {
+          "name": "at(-1) ×1000",
+          "values": {
+            "ints unfrozen": 1195.264,
+            "ints frozen": 1183.744,
+            "doubles unfrozen": 901.888,
+            "doubles frozen": 914.944,
+            "objects unfrozen": 2383.616,
+            "objects frozen": 2437.888
+          }
+        }
+      ]
+    },
+    {
+      "id": "skip-freezing",
+      "title": "skipFreezing() — what the switch buys, by engine",
+      "description": "\nThe same operations in two processes, one of which called `skipFreezing()` first (it is a one-way switch per process,\nso each column is a child process of its own). Freezing is on by default and stays on: a stray mutation of canonical\nstate throws instead of corrupting every holder of the value. What it costs depends on the engine, which is why this\ntable matters more in one column of the header than in the other.\n\n- On **SpiderMonkey** (Firefox) the switch buys nothing: the freeze is cheap and a frozen array reads at full speed.\n- On **V8** (Node, Chrome) `Object.freeze` is a map transition, so valsem's own operations barely move (an edit in a\n  large plain array gains a little, since a frozen array is slower to copy). What the switch buys is in *your* code:\n  V8 has no fast path for frozen elements in several builtins, so loops over canonical arrays run 2–3× faster\n  unfrozen.\n- On **JavaScriptCore** (Safari, Bun) freezing an array is an O(n) walk, and `produce` freezes the new array of every\n  edit: one edit in a 10,000-element plain array is milliseconds with freezing on and microseconds without. An app\n  that keeps large plain arrays in state and runs on Safari should call `skipFreezing()` in production (freeze in\n  development and test, as with immer), or hold those sequences in a `ValueList`, whose leaves are small arrays\n  inside a frozen wrapper and which pays neither cost: the `ValueList` rows do not move on either engine.\n",
+      "columns": [
+        "freezing on",
+        "skipFreezing()"
+      ],
+      "unit": "ns",
+      "ratio": [
+        "skipFreezing()",
+        "freezing on"
+      ],
+      "commit": "4b17e70",
+      "date": "2026-09-19",
+      "rows": [
+        {
+          "name": "produce: one edit in a 10,000-record plain array",
+          "values": {
+            "freezing on": 30033.92,
+            "skipFreezing()": 29650.773333333334
+          }
+        },
+        {
+          "name": "produce: the same edit, in a ValueList",
+          "values": {
+            "freezing on": 5741.312,
+            "skipFreezing()": 6969.941333333333
+          }
+        },
+        {
+          "name": "produce: one field of a 3-key record",
+          "values": {
+            "freezing on": 1021.80096,
+            "skipFreezing()": 1029.57056
+          }
+        },
+        {
+          "name": "intern: a new 10,000-number array",
+          "values": {
+            "freezing on": 427997.86666666664,
+            "skipFreezing()": 424550.4
+          }
+        },
+        {
+          "name": "intern: 1,000 new 10-field records",
+          "values": {
+            "freezing on": 1807626.6666666667,
+            "skipFreezing()": 1544215.4666666666
+          }
+        },
+        {
+          "name": "your code: indexed loop over a canonical 10,000-record array",
+          "values": {
+            "freezing on": 46524.58666666667,
+            "skipFreezing()": 47369.89866666667
+          }
+        },
+        {
+          "name": "your code: for…of",
+          "values": {
+            "freezing on": 48208.725333333336,
+            "skipFreezing()": 48009.216
+          }
+        },
+        {
+          "name": "your code: arr.filter(…)",
+          "values": {
+            "freezing on": 44883.84,
+            "skipFreezing()": 44024.96
+          }
+        },
+        {
+          "name": "your code: arr.map(…)",
+          "values": {
+            "freezing on": 42610.24,
+            "skipFreezing()": 42856.64
+          }
+        },
+        {
+          "name": "your code: JSON.stringify(state)",
+          "values": {
+            "freezing on": 887965.8666666667,
+            "skipFreezing()": 890171.7333333333
+          }
+        },
+        {
+          "name": "your code: for…of over a ValueList of the same records",
+          "values": {
+            "freezing on": 82381.12,
+            "skipFreezing()": 81536.32
+          }
+        }
+      ]
+    }
+  ]
+}
