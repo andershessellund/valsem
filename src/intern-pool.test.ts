@@ -68,6 +68,44 @@ afterEach(() => {
   _drainNow();
 });
 
+describe('InternPool — the index is sharded', () => {
+  it('finds every member again, whatever bits its hash has', () => {
+    // Low-entropy hashes (a consumer's `x + 31 * y`), high-bit-only hashes and
+    // well-mixed ones: every member is found under its own hash, and no other.
+    const pool = createInternPool<{ v: number }>();
+    const members: [{ v: number }, number][] = [];
+    for (let i = 0; i < 3000; i++) {
+      const hash = i % 3 === 0 ? i : i % 3 === 1 ? (i << 20) >>> 0 : Math.imul(i, 0x85ebca6b) >>> 0;
+      members.push([pool.register({ v: i }, hash), hash]);
+    }
+    expect(_poolStats(pool).slots).toBe(3000);
+    for (const [member, hash] of members) {
+      expect(pool.lookup(hash, (c) => c === member)).toBe(member);
+    }
+    expect(pool.lookup(0xdeadbeef, () => true)).toBeUndefined();
+    expect(pool.size()).toBe(3000);
+  });
+
+  it('members that share a full hash still share a bucket', () => {
+    const pool = createInternPool<{ v: number }>();
+    const a = pool.register({ v: 1 }, 0xcafe);
+    const b = pool.register({ v: 2 }, 0xcafe);
+    expect(_poolStats(pool)).toEqual({ slots: 2, buckets: 1 });
+    expect(pool.lookup(0xcafe, (c) => c.v === 2)).toBe(b);
+    expect(pool.lookup(0xcafe, (c) => c.v === 1)).toBe(a);
+  });
+
+  (hasGC ? it : it.skip)('reclaims dead members from every shard', async () => {
+    const pool = createInternPool<{ v: number }>();
+    (() => {
+      for (let i = 0; i < 2000; i++) pool.register({ v: i }, Math.imul(i, 0x85ebca6b) >>> 0);
+    })();
+    expect(_poolStats(pool).slots).toBe(2000);
+    expect(await collectUntil(() => _poolStats(pool).slots === 0)).toBe(true);
+    expect(_poolStats(pool).buckets).toBe(0);
+  });
+});
+
 describe('InternPool — canonicality', () => {
   it('intern() collapses equal instances to one ===', () => {
     const pool = createInternPool<Point>();
@@ -104,11 +142,13 @@ describe('InternPool — canonicality', () => {
 
   it('hashes sharing a 30-bit key (different full hash) never alias', () => {
     const pool = createInternPool<{ v: number }>();
-    // Keys are `hash & 0x3fffffff`: these three share one bucket but differ in the top bits.
+    // Keys are `hash & 0x3fffffff`: these three share a KEY and differ in the
+    // top bits. The shard is chosen from the full hash, and the top two bits
+    // always move it, so each has a bucket of its own in a different Map.
     const a = pool.register({ v: 1 }, 5);
     const b = pool.register({ v: 2 }, 5 + (1 << 30));
     const c = pool.register({ v: 3 }, 5 + (2 << 30));
-    expect(_poolStats(pool)).toEqual({ slots: 3, buckets: 1 });
+    expect(_poolStats(pool)).toEqual({ slots: 3, buckets: 3 });
     expect(pool.lookup(5, () => true)).toBe(a);
     expect(pool.lookup(5 + (1 << 30), () => true)).toBe(b);
     expect(pool.lookup(5 + (2 << 30), () => true)).toBe(c);
