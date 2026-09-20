@@ -341,28 +341,15 @@ function hashObjectValue(obj: object): number {
 }
 
 /**
- * @internal deepHash for a plain record or array, also returning the raw
- * accumulator (and defined-key count for records) so canonicalization can
- * cache them for incremental finalize hashing.
+ * @internal deepHash for an array, also returning the raw accumulator (and
+ * its length as `n`) so canonicalization can cache them for incremental
+ * finalize hashing. Arrays only: `intern` folds a record's hash itself, from
+ * the children it has just interned, without a second walk.
  */
-export function _deepHashWithAcc(obj: object): { h: number; acc: number; n: number } {
-  if (Array.isArray(obj)) {
-    let acc = 0;
-    for (let i = 0; i < obj.length; i++) {
-      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
-    }
-    return { h: _arrayHashOf(obj.length, acc), acc: acc >>> 0, n: obj.length };
-  }
-  const rec = obj as Record<string | symbol, unknown>;
-  const keys = _recordKeys(rec); // own keys only — see hashObjectValue
+export function _arrayHashWithAcc(arr: readonly unknown[]): { h: number; acc: number; n: number } {
   let acc = 0;
-  let n = 0;
-  for (let i = 0; i < keys.length; i++) {
-    const k = keys[i]!;
-    const v = rec[k];
-    if (v === undefined) continue;
-    acc = (acc + _entryTerm(k, deepHash(v))) >>> 0;
-    n++;
+  for (let i = 0; i < arr.length; i++) {
+    acc = (acc + _elementTerm(i, deepHash(arr[i]))) | 0;
   }
-  return { h: _recordHashOf(n, acc), acc, n };
+  return { h: _arrayHashOf(arr.length, acc), acc: acc >>> 0, n: arr.length };
 }

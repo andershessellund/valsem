@@ -8,9 +8,11 @@ import { intern } from './intern.js';
 import { HashMap } from './hash-map.js';
 import { ValueSet } from './value-set.js';
 import { ValueMap } from './value-map.js';
-import { produce, produceWithPatches, applyPatches, toDraft } from './produce.js';
+import { produce, produceWithPatches, toDraft } from './produce.js';
 import { current } from './current.js';
 import { DRAFT_STATE } from './draft.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 const reg = Symbol.for('valsem.test.reg');
 const uniq = Symbol('uniq');
@@ -43,6 +45,19 @@ describe('symbols as values', () => {
     expect(ValueMap.from([[uniq, 1]]).get(uniq)).toBe(1);
     expect(intern({ kind: uniq })).toBe(intern({ kind: uniq }));
     expect(produce(intern({ kind: reg }), (d) => void (d.kind = uniq))).toBe(intern({ kind: uniq }));
+  });
+});
+
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('symbols as members — %s', (_name, c) => {
+  it('a registered symbol is a member by name, a unique one by identity, through every door', () => {
+    const held = c.of(uniq, reg);
+    expect(c.of(uniq, Symbol.for('valsem.test.reg'))).toBe(held);
+    expect(c.chained(uniq, reg)).toBe(held);
+    expect(produce(c.of(uniq), (d) => c.draftAdd(d, reg))).toBe(held);
+    expect(c.has(held, uniq)).toBe(true);
+    expect(c.has(held, Symbol.for('valsem.test.reg'))).toBe(true);
+    expect(c.has(held, other)).toBe(false); // the same description is not the same symbol
+    expect(c.of(other, reg)).not.toBe(held);
   });
 });
 
@@ -124,8 +139,7 @@ describe('symbol keys on record drafts', () => {
       { kind: 'record.set', path: [], key: reg, value: 'z' },
       { kind: 'record.set', path: [], key: other, value: 1 },
     ]);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 
   it('current() sees them', () => {

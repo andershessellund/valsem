@@ -17,7 +17,8 @@ import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
-import { leaf, mulberry32, shuffle, shuffledClone, valueTree } from './property.test-helpers.js';
+import { leaf, shuffledClone, valueTree } from './property.test-helpers.js';
+import { mulberry32, shuffle } from './rng.test-helpers.js';
 
 const seedArb = fc.integer({ min: 0, max: 0x7fffffff });
 

@@ -23,7 +23,7 @@
 // equal lookup — the silent wrong answer this package exists to avoid.
 // ---------------------------------------------------------------------------
 
-import { deepHash, _deepHashWithAcc, _metaOf, _setMeta, _entryTerm, _recordHashOf } from './deep-hash.js';
+import { deepHash, _arrayHashWithAcc, _metaOf, _setMeta, _entryTerm, _recordHashOf } from './deep-hash.js';
 import {
   interned as internedSym,
   _equalsMethods,
@@ -346,7 +346,7 @@ function matchesRecord(c: object, keys: (string | symbol)[], vals: unknown[], n:
  * are shared across every interned kind, so this must also reject candidates of
  * a different kind that merely collided on the hash.
  * @param freeze - Whether to freeze `obj` when it becomes canonical. True for
- * the plain objects and arrays valsem builds itself; false for registered
+ * the arrays valsem builds itself; false for registered
  * immutable types, which are immutable by contract and may not tolerate it.
  */
 function lookupOrStore(
@@ -354,10 +354,11 @@ function lookupOrStore(
   matches: (candidate: object) => boolean,
   freeze: boolean,
 ): object {
-  // `freeze` ⟺ plain data valsem builds itself — capture the accumulator so
-  // successors of this canonical value hash incrementally.
+  // `freeze` ⟺ the array valsem has just built (the one caller that passes
+  // true; a record is pooled where its hash is folded, in `intern`) — capture
+  // the accumulator so successors of this canonical value hash incrementally.
   if (freeze) {
-    const { h, acc, n } = _deepHashWithAcc(obj);
+    const { h, acc, n } = _arrayHashWithAcc(obj as unknown[]);
     const existing = pool.lookup(h, matches);
     if (existing !== undefined) return existing;
     _setMeta(obj, h, acc, n);
@@ -431,8 +432,8 @@ export function _accOf(obj: object): { a: number; n: number } | undefined {
  * @internal Canonicalize plain data whose hash and accumulator were computed
  * incrementally (produce's finalize fast path). The caller guarantees: `obj`
  * is in canonical form (records: no undefined values, any key order; children
- * all canonical) and `h`/`acc`/`n` are exactly what `_deepHashWithAcc(obj)`
- * would return.
+ * all canonical) and `h`/`acc`/`n` are exactly what hashing `obj` from scratch
+ * would give.
  */
 export function _internPrehashed(obj: object, h: number, acc: number, n: number): object {
   const existing = pool.lookup(h, (c) => shallowRefEqual(c, obj));

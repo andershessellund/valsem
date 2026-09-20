@@ -1,17 +1,24 @@
 // Collision-path stress for the hash-consed trie.
 //
-// A degenerate hasher (every leaf hashes to 0) is installed BEFORE the
-// collections load, so every key collides on all 32 bits: each operation
-// walks the full 7-level prefix chain into one collision node. This
-// deterministically exercises the paths a seeded hasher essentially never
-// takes — chain construction, collision-node canonical ordering (mixed
-// primitive types and object ordinals), in-collision updates, and full chain
-// unwinding on delete.
+// A degenerate hasher (every string hashes to 0, and every number) is
+// installed BEFORE the collections load, so every key collides on all 32
+// bits with every other key OF ITS KIND: each operation walks the full
+// 7-level prefix chain into one collision node. This deterministically
+// exercises the paths a seeded hasher essentially never takes — chain
+// construction, collision-node canonical ordering within a kind (numbers,
+// bigints, strings, symbols, object ordinals), in-collision updates, and
+// full chain unwinding on delete.
+//
+// Kinds stay apart here: a leaf's hash is mixed with its kind's tag, so a
+// constant hasher gives strings one hash and numbers another. Nodes holding
+// SEVERAL kinds, and the ordered collections, the intern pool and memoize
+// under collision, are collisions.test.ts.
 //
 // This file relies on vitest's per-file process isolation: configureHasher
 // is once-per-process, and here it must run before any hashing.
 import { describe, it, expect } from 'vitest';
 import { configureHasher } from './hasher.js';
+import { shuffled } from './rng.test-helpers.js';
 
 configureHasher({ string: () => 0, number: () => 0 });
 
@@ -78,9 +85,13 @@ describe('total-collision trie (degenerate hasher)', () => {
     expect(m.has('zzz')).toBe(false);
   });
 
-  it('canonical member order covers every type rank (mixed members converge)', () => {
-    // memberCompare orders collision-node members by type rank, then within a
-    // rank; every branch decides canonical form, so every rank must converge.
+  it('canonical member order within every kind (mixed members converge)', () => {
+    // memberCompare orders collision-node members by kind, then within the
+    // kind; every within-kind branch decides canonical form, so each must
+    // converge. Each kind has its own node here (see the header): numbers in
+    // one, strings in another, bigints, records. undefined, null and the
+    // booleans have fixed hashes and sit in no collision node at all; they
+    // are here as ordinary neighbours. Across kinds: collisions.test.ts.
     const members: unknown[] = [
       undefined, null, true, false,
       3, -1, 0, NaN, Infinity, -Infinity, 2.5,
@@ -88,22 +99,13 @@ describe('total-collision trie (degenerate hasher)', () => {
       'b', 'a', '', 'ab',
       intern({ k: 1 }), intern({ k: 2 }), intern([1]),
     ];
-    const rnd = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
-    const shuffle = (xs: unknown[], r: () => number) => {
-      const a = xs.slice();
-      for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(r() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-      return a;
-    };
     const canonical = ValueSet.from(members);
     expect(canonical.size).toBe(members.length);
     for (let s = 1; s <= 12; s++) {
-      const built = ValueSet.from(shuffle(members, rnd(s)));
+      const built = ValueSet.from(shuffled(members, s));
       expect(built).toBe(canonical);
       let chained = ValueSet.empty<unknown>();
-      for (const m of shuffle(members, rnd(s + 100))) chained = chained.add(m);
+      for (const m of shuffled(members, s + 100)) chained = chained.add(m);
       expect(chained).toBe(canonical);
     }
     for (const m of members) expect(canonical.has(m)).toBe(true);

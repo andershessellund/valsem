@@ -13,6 +13,7 @@ import { OrderedSet } from './ordered-set.js';
 import { DraftOrderedMap } from './draft-ordered-map.js';
 import { DraftOrderedSet } from './draft-ordered-set.js';
 import { ValueList } from './value-list.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 type Row = { n: number };
 const base = () =>
@@ -126,8 +127,7 @@ describe('DraftOrderedMap', () => {
     expect([...moved.keys()]).toEqual(['b', 'c', 'a']);
     expect(patches.map((p) => p.kind)).toEqual(['omap.delete', 'omap.set']);
     expect(inverse.map((p) => p.kind)).toEqual(['omap.delete', 'omap.insert']);
-    expect(applyPatches(b, patches)).toBe(moved);
-    expect(applyPatches(moved, inverse)).toBe(b);
+    expectPatchRoundTrip(b, moved, patches, inverse);
   });
 
   it('patches replay the operations in order, nested edits patch under the key, and both directions converge', () => {
@@ -147,8 +147,7 @@ describe('DraftOrderedMap', () => {
       { kind: 'omap.insert', path: [], index: 0, key: 'z', value: intern({ n: 0 }) },
       { kind: 'record.set', path: ['a'], key: 'n', value: 10 },
     ]);
-    expect(applyPatches(b, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(b);
+    expectPatchRoundTrip(b, next, patches, inverse);
   });
 
   it('clear emits a delete per key and inverts to sets in the original order', () => {
@@ -158,8 +157,7 @@ describe('DraftOrderedMap', () => {
       d.set('q', { n: 9 });
     });
     expect(patches.map((p) => p.kind)).toEqual(['omap.delete', 'omap.delete', 'omap.delete', 'omap.set']);
-    expect(applyPatches(b, patches)).toBe(cleared);
-    expect(applyPatches(cleared, inverse)).toBe(b);
+    expectPatchRoundTrip(b, cleared, patches, inverse);
   });
 
   it('current() is the canonical map as it stands; original() is the base; the draft stays live', () => {
@@ -200,8 +198,7 @@ describe('DraftOrderedMap', () => {
       'tags:oset.delete',
       'tags:oset.add',
     ]);
-    expect(applyPatches(state, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(state);
+    expectPatchRoundTrip(state, next, patches, inverse);
   });
 
   it('a canonical value assigned into the draft is copied on write when read back', () => {
@@ -288,8 +285,7 @@ describe('DraftOrderedSet', () => {
       { kind: 'oset.insert', path: [], index: 1, value: 'z' },
       { kind: 'oset.delete', path: [], value: 'c' },
     ]);
-    expect(applyPatches(b, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(b);
+    expectPatchRoundTrip(b, next, patches, inverse);
     const [same, none] = produceWithPatches(b, (d) => {
       d.add('x');
       d.delete('x');

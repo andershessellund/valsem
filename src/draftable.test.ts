@@ -5,7 +5,7 @@
 // guide shows.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import { produce, produceWithPatches, applyPatches, type Draft } from './produce.js';
+import { produce, produceWithPatches, type Draft } from './produce.js';
 import { current, original } from './current.js';
 import {
   toDraft,
@@ -28,6 +28,7 @@ import { deepHash } from './deep-hash.js';
 import { createInternPool } from './intern-pool.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 // A custom patch kind, registered by declaration merging so it narrows exactly.
 declare module './draft-core.js' {
@@ -196,8 +197,7 @@ describe('a third-party draftable', () => {
       { kind: 'record.set', path: ['range', 'meta'], key: 'label', value: 'z' },
       { kind: 'interval.set', path: ['range'], lo: 2, hi: 10 },
     ]);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 
   it('supports current() and original() through `snapshot`', () => {

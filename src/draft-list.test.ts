@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { ValueList } from './value-list.js';
 import { DraftList } from './draft-list.js';
-import { produce, produceWithPatches, applyPatches, isDraft } from './produce.js';
+import { produce, produceWithPatches, isDraft } from './produce.js';
 import { current, original } from './current.js';
 import { intern } from './intern.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 const arrOf = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i, v: i % 5 }));
 
@@ -66,8 +67,7 @@ describe('ValueList inside produce — the chunked draft', () => {
       { kind: 'list.splice', path: [], index: 500, remove: 10, insert: [intern({ id: -500, v: 0 })] },
       { kind: 'record.set', path: [0], key: 'v', value: 7 },
     ]);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 
   it('property: a recipe of random operations equals the same operations on an array', () => {
@@ -104,8 +104,7 @@ describe('ValueList inside produce — the chunked draft', () => {
           expect([...d]).toEqual(mirror);
         });
         expect(next).toBe(ValueList.from(mirror));
-        expect(applyPatches(base, patches)).toBe(next);
-        expect(applyPatches(next, inverse)).toBe(base);
+        expectPatchRoundTrip(base, next, patches, inverse);
       }),
       { numRuns: 200 },
     );

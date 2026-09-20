@@ -10,6 +10,8 @@
 // hash seed is shared through globalThis, so hashes agree across copies.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from 'vitest';
+// Loaded with copy A (the static import runs first, into the graph A then joins).
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 const A = await import('./index.js');
 vi.resetModules();
@@ -51,6 +53,21 @@ describe('duplicate install — two module graphs', () => {
     expect(A.deepEqual(A.InternedString.for('q'), B.InternedString.for('q'))).toBe(false);
     // …exactly as [equals] itself answers.
     expect(la[A.equals](lb)).toBe(false);
+  });
+
+  it.each(COLLECTIONS.map((c) => [c.name, c] as const))("%s from the other copy is a different type, and opaque to intern", (name, c) => {
+    const local = c.of('a');
+    const Foreign = (B as unknown as Record<string, { from(items: unknown[]): object }>)[name]!;
+    const foreign = Foreign.from(c.keyed ? [['a', 'a']] : ['a']);
+    expect(local).toBeInstanceOf((A as unknown as Record<string, unknown>)[name]); // the roster is copy A's
+    expect(foreign).not.toBeInstanceOf(c.type);
+    for (const copy of [A, B]) {
+      expect(copy.deepEqual(local, foreign)).toBe(false);
+      expect(copy.deepEqual(foreign, local)).toBe(false);
+    }
+    expect(A.intern(foreign)).toBe(foreign);
+    expect(c.contents(c.of(foreign))[0]).toBe(foreign); // held as an opaque member
+    expect(c.of(foreign)).not.toBe(c.of(local));
   });
 
   it("intern passes the other copy's collections through untouched", () => {

@@ -12,7 +12,8 @@ import fc from 'fast-check';
 import { deepEqual, equals } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { intern } from './intern.js';
-import { valueTree, shuffledClone, mulberry32 } from './property.test-helpers.js';
+import { valueTree, shuffledClone } from './property.test-helpers.js';
+import { mulberry32 } from './rng.test-helpers.js';
 
 describe('property — deepEqual is an equivalence relation', () => {
   it('reflexive: deepEqual(v, v) for every value', () => {

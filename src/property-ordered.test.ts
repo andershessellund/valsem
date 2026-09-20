@@ -15,6 +15,7 @@ import { OrderedSet } from './ordered-set.js';
 import { ValueList } from './value-list.js';
 import { produceWithPatches, applyPatches } from './produce.js';
 import { current } from './current.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 type Op =
   | { t: 'append'; k: number; v: number }
@@ -212,8 +213,7 @@ describe('OrderedMap / OrderedSet — random sequences against the model', () =>
         });
         expect(next).toBe(OrderedMap.from(model));
         expect(snapshot).toBe(next);
-        expect(applyPatches(base, patches)).toBe(next);
-        expect(applyPatches(next, inverse)).toBe(base);
+        expectPatchRoundTrip(base, next, patches, inverse);
         if (next === base) expect(patches).toEqual([]);
         const [nextSet, sp, si] = produceWithPatches(baseSet, (d) => {
           const keys = new Set(model.map(([k]) => k));

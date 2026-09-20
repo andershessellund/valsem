@@ -21,6 +21,7 @@ import { applyPatches, produceWithPatches, type Patch } from './produce.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { OrderedMap } from './ordered-map.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 type Leaf = { x: number; y?: number };
 type Rec = { x: number; y?: number; n: { k: number } };
@@ -135,8 +136,7 @@ const check = (ops: Op[]): void => {
   const [result, patches, inverse] = produceWithPatches(base, (d) => {
     for (const o of ops) run(d, o);
   });
-  expect(applyPatches(base, patches)).toBe(result);
-  expect(applyPatches(result, inverse)).toBe(base);
+  expectPatchRoundTrip(base, result, patches, inverse);
   if (result === base) {
     expect(patches).toEqual([]);
     expect(inverse).toEqual([]);

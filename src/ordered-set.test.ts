@@ -9,24 +9,8 @@ import { ValueList } from './value-list.js';
 import { intern } from './intern.js';
 import { deepEqual, hashCode, interned } from './deep-equal.js';
 import { HashSet } from './hash-set.js';
+import { runStarts } from './ordered.test-helpers.js';
 
-
-/** The index at which each run (leaf, then the open tail) of `list` starts — where an inserted key becomes an anchor. */
-function runStarts(list: ValueList<unknown>): number[] {
-  const { tree, tail } = list._structure();
-  const starts: number[] = [];
-  let pos = 0;
-  const walk = (node: unknown[]): void => {
-    if (node.length !== 0 && Array.isArray(node[0])) for (const kid of node) walk(kid as unknown[]);
-    else {
-      starts.push(pos);
-      pos += node.length;
-    }
-  };
-  if (tree !== null) walk(tree as unknown[]);
-  if (tail.length !== 0) starts.push(pos);
-  return starts;
-}
 
 describe('OrderedSet', () => {
   it('empty sets are one instance; equal member sequences are one object however built', () => {

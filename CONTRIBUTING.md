@@ -28,8 +28,55 @@ pnpm docs:build      # the documentation site
 CI runs the first four on Node 22 and on the latest Node, and the last two
 once: they check what the tests cannot see, since the tests import from
 `src/` (the `exports` map, how the published types resolve, the docs build).
-The Temporal suites need a runtime with a native `Temporal` and skip
-themselves without one.
+The Temporal suites run against the runtime's own `Temporal` where there is
+one (the latest Node) and against `temporal-polyfill`, a dev dependency, where
+there is not (Node 22).
+
+A few suites skip themselves when the runtime lacks something they need (the
+`--expose-gc` and `--allow-natives-syntax` flags that `vitest.config.ts`
+passes, iterator helpers). CI provides all of it, so in CI a skipped test
+fails the run: a suite that quietly stopped running looks exactly like a
+passing one.
+
+## Where a test goes
+
+Tests sit beside the source, in `src/`, and come in four kinds. The kind
+decides the file.
+
+- **One type's behaviour** goes in that type's file (`ordered-map.test.ts`):
+  what `insertAt` does, which errors it throws, the sizes where its structure
+  changes shape.
+- **A law of the whole library** gets a file of its own, named for the law
+  (`negative-zero`, `markers`, `iteration`, `intern-on-entry`, `symbols`), and
+  runs over the **roster** in `roster.test-helpers.ts`: one table of every
+  value type, in the shape a law needs. A law holds for every type, so it must
+  not keep a list of its own; such lists are complete on the day they are
+  written. `roster.test.ts` checks the table against what `index.ts` exports,
+  so a new value type fails the build until it is enrolled, and is under every
+  law once it is. The `property-*` files are laws too, stated over generated
+  values: their domain is `property.test-helpers.ts`, and a new type belongs
+  in `valueTree` and `shuffledClone` there. (A property test of ONE type stays
+  in that type's file; the prefix means "law", not "uses fast-check".)
+- **Hostile input** goes in `hardening.test.ts` when it is a threat stated in
+  advance (prototype pollution, forged markers, malformed patches), and in
+  `adversarial.test.ts` when it is a defect that shipped, or its neighbour,
+  pinned so it stays fixed. `produce-corpus*.test.ts` is the same idea for
+  cases taken from other libraries' suites.
+- **Once-per-process state** gets a file to itself, because vitest gives each
+  file its own process: a replaced hasher (`hamt-collisions`, `collisions`),
+  `skip-checks`, `skip-freezing`, a second copy of the module graph
+  (`duplicate-install`). These are why `isolate` stays on.
+
+Shared machinery is in `*.test-helpers.ts` (kept out of the build and the
+package): the roster, the property arbitraries, `expectPatchRoundTrip` for the
+two patch laws, `withPolluted`, a seeded rng. `rng.test-helpers.ts` imports
+nothing from valsem, on purpose: the collision suites install their hasher
+before any collection loads.
+
+`pnpm test:coverage` prints what no test reaches. There is no threshold; read
+the uncovered lines when reviewing. What is left uncovered is mostly "this is
+a bug" guards and hash coincidences no test can arrange, and the collision
+suites exist because that list once held working code.
 
 ## Pull requests
 
@@ -78,8 +125,9 @@ Write the title as the changelog line you would want to read: it is one.
 
 What a PR should contain:
 
-- **Tests.** A bug fix starts with a test that fails without it. Property and
-  adversarial suites exist; extend them when the change touches a law they state.
+- **Tests.** A bug fix starts with a test that fails without it. A new value
+  type is enrolled in the roster and the property arbitraries; a change that
+  touches a law extends that law's suite ([where a test goes](#where-a-test-goes)).
 - **Docs**, when behaviour changes: the guide page, `docs/api.md`, and the
   `DESIGN.md` section.
 - **A `DECISIONS.md` entry**, when the change makes or reverses a design choice:

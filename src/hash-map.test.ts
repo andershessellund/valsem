@@ -318,3 +318,12 @@ describe('HashMap — keys interned on entry', () => {
     expect(m.get(k)).toBeUndefined();
   });
 });
+
+describe('HashMap.from', () => {
+  it('builds from entries', () => {
+    const m = HashMap.from([[{ a: 1 }, 'x'], [{ a: 1 }, 'y']]);
+    expect(m.size).toBe(1);
+    expect(m.get({ a: 1 })).toBe('y');
+    expect(isCanonical([...m.keys()][0])).toBe(true);
+  });
+});

@@ -20,6 +20,7 @@ import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { memoize } from './memoize.js';
 import { produce } from './produce.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 class Money {
   readonly [hashCode]: number;
@@ -160,6 +161,19 @@ describe('a class with [equals] and [hashCode] is a value', () => {
     expect(b).toBeInstanceOf(B);
     expect(intern(new A())).toBe(a);
     expect(intern(new B())).toBe(b);
+  });
+});
+
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('a value type is a member like any other — %s', (_name, c) => {
+  it('is pooled at the door, found by an equal instance, and equal content is one collection', () => {
+    const held = c.of(eur(1), eur(2));
+    for (const stored of c.contents(held)) expect(isCanonical(stored)).toBe(true);
+    expect(c.contents(held)).toContain(intern(eur(1))); // by identity: the pooled instance, not a copy
+    expect(c.has(held, eur(2))).toBe(true);
+    expect(c.has(held, new Money(2, 'DKK'))).toBe(false);
+    expect(c.of(eur(1), eur(2))).toBe(held);
+    expect(c.chained(eur(1), eur(2))).toBe(held);
+    expect(produce(c.of(eur(1)), (d) => c.draftAdd(d, eur(2)))).toBe(held);
   });
 });
 

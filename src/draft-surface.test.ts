@@ -11,31 +11,21 @@
 // its snapshot, and gives back values: only `get` hands out a draft.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { applyPatches, castDraft, produce, produceWithPatches } from './produce.js';
+import { castDraft, produce, produceWithPatches } from './produce.js';
 import { current } from './current.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
-import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { OrderedMap } from './ordered-map.js';
 import { OrderedSet } from './ordered-set.js';
-import { DraftList } from './draft-list.js';
-import { DraftMap } from './draft-map.js';
-import { DraftSet } from './draft-set.js';
-import { DraftOrderedMap } from './draft-ordered-map.js';
-import { DraftOrderedSet } from './draft-ordered-set.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 const members = (proto: object): string[] =>
   Object.getOwnPropertyNames(proto).filter((name) => name !== 'constructor' && !name.startsWith('_'));
 
 describe('a draft has its value\u2019s methods', () => {
-  it.each([
-    ['ValueList', ValueList, DraftList],
-    ['ValueMap', ValueMap, DraftMap],
-    ['ValueSet', ValueSet, DraftSet],
-    ['OrderedMap', OrderedMap, DraftOrderedMap],
-    ['OrderedSet', OrderedSet, DraftOrderedSet],
-  ] as const)('%s', (_, Value, DraftClass) => {
+  it.each(COLLECTIONS.map((c) => [c.name, c.type, c.draftType] as const))('%s', (_, Value, DraftClass) => {
     const onDraft = new Set(members(DraftClass.prototype));
     const missing = members(Value.prototype).filter((name) => !onDraft.has(name));
     expect(missing).toEqual([]);
@@ -59,8 +49,7 @@ describe('DraftList: insert, remove, shift, unshift, forEach', () => {
       expect(seen).toEqual([['p', 0], ['q', 1], ['b', 2], ['c', 3]]);
     });
     expect(next.l.toArray()).toEqual(['p', 'q', 'b', 'c']);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 
   it('name a place that exists, like the value\u2019s', () => {
@@ -122,8 +111,7 @@ describe('what does not edit answers about the value the draft would be right no
       expect(d.l.setMany([[0, 9], [2, 7], [0, 8]])).toBe(d.l);
     });
     expect(next.l.toArray()).toEqual([8, 2, 7]);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
     const kept = produce(base, (d) => {
       expect(() => d.l.setMany([[0, 9], [3, 0]])).toThrow('DraftList.setMany: index 3 out of range [0, 3)');
     });

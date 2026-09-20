@@ -1,57 +1,59 @@
-// Iteration protocol of the three collections: explicit-stack iterator
-// objects (not generators), so the protocol details are pinned here —
-// done-state, fresh iterators per call, iterator helpers where the runtime
-// has them, forEach signatures, and the structural boundaries (trie levels,
-// tree/tail, multi-level tree) that the stacks must cross correctly.
+// Iteration protocol of the collections: explicit-stack iterator objects
+// (not generators), so the protocol details are pinned here — done-state,
+// fresh iterators per call, iterator helpers where the runtime has them,
+// forEach signatures, and the structural boundaries (trie levels, tree/tail,
+// multi-level tree) that the stacks must cross correctly.
+//
+// The protocol is a law of every collection, so it runs over the roster,
+// on every iterator each one hands out. What is particular to one type's
+// structure (which boundaries its stack crosses) follows, type by type.
 import { describe, it, expect } from 'vitest';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { ValueList } from './value-list.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 const hasIteratorHelpers = typeof (globalThis as { Iterator?: unknown }).Iterator === 'function';
 
-describe('iterator protocol', () => {
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('iterator protocol — %s', (_name, c) => {
   it('every iterator is its own iterable, reports done once, and stays done', () => {
-    const iters: IterableIterator<unknown>[] = [
-      ValueMap.from([['a', 1]]).keys(),
-      ValueMap.from([['a', 1]]).values(),
-      ValueMap.from([['a', 1]]).entries(),
-      ValueMap.from([['a', 1]])[Symbol.iterator](),
-      ValueSet.from(['a']).values(),
-      ValueSet.from(['a']).entries(),
-      ValueList.of('a')[Symbol.iterator](),
-    ];
-    for (const it of iters) {
-      expect(it[Symbol.iterator]()).toBe(it);
-      expect(it.next().done).toBe(false);
-      const end = it.next();
-      expect(end).toEqual({ value: undefined, done: true });
-      expect(it.next()).toEqual({ value: undefined, done: true });
+    for (const [which, it] of c.iterators(c.of('a'))) {
+      expect(it[Symbol.iterator](), which).toBe(it);
+      expect(it.next().done, which).toBe(false);
+      expect(it.next(), which).toEqual({ value: undefined, done: true });
+      expect(it.next(), which).toEqual({ value: undefined, done: true });
     }
   });
 
   it('each call returns a fresh, independent iterator', () => {
-    const m = ValueMap.from([
-      ['a', 1],
-      ['b', 2],
-    ]);
-    const x = m.keys();
-    const y = m.keys();
-    x.next();
-    expect([...y].length).toBe(2);
-    expect([...x].length).toBe(1);
-    expect([...m.keys()].length).toBe(2);
+    const value = c.of('a', 'b');
+    const first = c.iterators(value);
+    const second = c.iterators(value);
+    first.forEach(([which, x], i) => {
+      const y = second[i]![1];
+      expect(y === x, which).toBe(false); // compared here, not by expect(), which walks an iterable it is handed
+      x.next();
+      expect([...y].length, which).toBe(2);
+      expect([...x].length, which).toBe(1);
+    });
   });
 
-  it('empty collections iterate to done immediately', () => {
-    expect([...ValueMap.empty()]).toEqual([]);
-    expect([...ValueMap.empty().values()]).toEqual([]);
-    expect([...ValueSet.empty()]).toEqual([]);
-    expect([...ValueSet.empty().entries()]).toEqual([]);
-    expect([...ValueList.empty()]).toEqual([]);
-    expect(ValueMap.empty().keys().next()).toEqual({ value: undefined, done: true });
+  it('an empty collection iterates to done immediately', () => {
+    for (const [which, it] of c.iterators(c.empty())) expect(it.next(), which).toEqual({ value: undefined, done: true });
+    expect([...(c.empty() as Iterable<unknown>)]).toEqual([]);
   });
 
+  it.skipIf(!hasIteratorHelpers)('the iterator helpers work on every iterator', () => {
+    for (const [which, it] of c.iterators(c.of(1, 2, 3))) {
+      expect(it.take(2).toArray().length, which).toBe(2);
+    }
+    for (const [which, it] of c.iterators(c.of(1, 2, 3))) {
+      expect(it.map(() => 1).reduce((a, b) => a + b, 0), which).toBe(3);
+    }
+  });
+});
+
+describe('iterator helpers, by what they yield', () => {
   it.skipIf(!hasIteratorHelpers)('iterator helpers work on every iterator', () => {
     const m = ValueMap.from([
       ['a', 1],

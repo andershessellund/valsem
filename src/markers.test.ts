@@ -2,26 +2,17 @@
 // The protocol markers on valsem's own value types are prototype getters over
 // a private field: no own symbol property exists, so a spread or Object.assign
 // copy carries no marker and cannot pass for canonical.
+//
+// A law of every value type, so it runs over the roster.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { hashCode, interned, deepEqual } from './deep-equal.js';
 import { intern, isCanonical } from './intern.js';
 import { deepHash } from './deep-hash.js';
-import { ValueList } from './value-list.js';
-import { ValueMap } from './value-map.js';
-import { ValueSet } from './value-set.js';
-import { ValueDate } from './value-date.js';
 import { InternedString } from './interned-string.js';
+import { VALUE_TYPES } from './roster.test-helpers.js';
 
-const values: [string, object][] = [
-  ['ValueList', ValueList.of(1, 2)],
-  ['ValueMap', ValueMap.from([['k', 1]])],
-  ['ValueSet', ValueSet.from([1])],
-  ['ValueDate', ValueDate.of(0)],
-  ['InternedString', InternedString.for('text')],
-];
-
-describe.each(values)('%s markers', (_name, v) => {
+describe.each(VALUE_TYPES.map((t) => [t.name, t.sample()] as const))('%s markers', (_name, v) => {
   it('answer the protocol without being own properties', () => {
     expect((v as Record<symbol, unknown>)[interned]).toBe(true);
     expect(typeof (v as Record<symbol, unknown>)[hashCode]).toBe('number');

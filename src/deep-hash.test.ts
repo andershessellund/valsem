@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { deepHash } from './deep-hash.js';
 import { deepEqual, equals, hashCode } from './deep-equal.js';
+import { Temporal } from './temporal.test-helpers.js';
 
 describe('deepHash', () => {
   // --- Consistency with deepEqual ---
@@ -257,37 +258,16 @@ describe('deepHash', () => {
 });
 
 describe('deepHash — diagnostic for unregistered Temporal', () => {
-  // Native Temporal is a recent-Node feature; on the runtime-floor CI leg
-  // there is no global to build a value from, so this one case skips.
-  it.skipIf(typeof (globalThis as { Temporal?: unknown }).Temporal === 'undefined')(
-    'points at the valsem/temporal import',
-    () => {
-    expect(() => deepHash((globalThis as { Temporal?: any }).Temporal.PlainDate.from('2026-08-31'))).toThrow(
-      /import 'valsem\/temporal'/,
-    );
-    },
-  );
+  // `valsem/temporal` is not imported in this file, so the Temporal here —
+  // native, or the polyfill on a runtime without one — is unregistered.
+  it('points at the valsem/temporal import', () => {
+    expect(() => deepHash(Temporal.PlainDate.from('2026-08-31'))).toThrow(/import 'valsem\/temporal'/);
+  });
 
   it('keeps the generic message for other unregistered classes', () => {
     class Whatever {}
     expect(() => deepHash(new Whatever())).toThrow(
       /class instance 'Whatever' has no \[hashCode\] or registered hash handler/,
     );
-  });
-});
-
-describe('deepHash — own keys only (prototype pollution cannot split the invariant)', () => {
-  it('an Object.prototype record and an equal null-prototype record hash alike under pollution', () => {
-    const a = { x: 1 };
-    const b = Object.assign(Object.create(null), { x: 1 }) as Record<string, unknown>;
-    expect(deepEqual(a, b)).toBe(true);
-    (Object.prototype as unknown as Record<string, unknown>)['polluted'] = 7;
-    try {
-      expect(deepEqual(a, b)).toBe(true);
-      expect(deepHash(a)).toBe(deepHash(b));
-      expect(deepHash({ x: 1 })).toBe(deepHash(a));
-    } finally {
-      delete (Object.prototype as unknown as Record<string, unknown>)['polluted'];
-    }
   });
 });

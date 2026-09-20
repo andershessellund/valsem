@@ -11,20 +11,7 @@ import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { deepEqual } from './deep-equal.js';
 import { intern } from './intern.js';
-
-/** Deterministic shuffle (LCG) — variation comes from the seeded hashes. */
-function shuffled<T>(items: readonly T[], seed: number): T[] {
-  const a = items.slice();
-  let s = seed >>> 0;
-  for (let i = a.length - 1; i > 0; i--) {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    const j = s % (i + 1);
-    const t = a[i]!;
-    a[i] = a[j]!;
-    a[j] = t;
-  }
-  return a;
-}
+import { shuffled } from './rng.test-helpers.js';
 
 describe('ValueMap — hash-consed canonicality', () => {
   it('converges across insertion orders (300 keys, several shuffles)', () => {
