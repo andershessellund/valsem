@@ -3,6 +3,9 @@
 // hard way. Where valsem's semantics deliberately diverge (canonical results,
 // record undefined-dropping, symbol keys as part of the value), the divergence is
 // asserted, not skipped.
+//
+// immer is Copyright (c) 2017 Michel Weststrate, MIT-licensed; the notice is
+// in NOTICE at the repository root.
 import { describe, it, expect } from 'vitest';
 import { produce, produceWithPatches, applyPatches, nothing, type Draft } from './produce.js';
 import { intern } from './intern.js';

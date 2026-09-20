@@ -2,6 +2,9 @@
 // array.test.ts, edge cases) — the second corpus pass after immer's. Where
 // valsem's canonical semantics deliberately diverge (set dedup, ===
 // convergence on no-ops, async rejection), the divergence is asserted.
+//
+// mutative is Copyright (c) 2022 Michael Lin, MIT-licensed; the notice is in
+// NOTICE at the repository root.
 import { describe, expect, it } from 'vitest';
 import { produce, produceWithPatches } from './produce.js';
 import { intern } from './intern.js';
