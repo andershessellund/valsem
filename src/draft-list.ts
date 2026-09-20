@@ -36,7 +36,7 @@ import {
 } from './draft-core.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { extentArg, elementIndex, insertionIndex, INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, type Inspect, type InspectOptions } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -62,7 +62,7 @@ export interface ListState<T = unknown> extends DraftState<ValueList<T>> {
 function flushTail(s: ListState): void {
   if (s.tail.length === 0) return;
   const len = s.work.length;
-  s.work = s.work.splice(len, 0, new Array<unknown>(s.tail.length).fill(undefined));
+  s.work = s.work._spliceItems(len, 0, new Array<unknown>(s.tail.length).fill(undefined));
   for (let j = 0; j < s.tail.length; j++) s.overlay.set(len + j, s.tail[j]!);
   s.tail = [];
 }
@@ -175,13 +175,14 @@ export class DraftList<T> implements Iterable<T> {
     // "up to". Checked before anything moves.
     const len = s.work.length + s.tail.length;
     const at = insertionIndex(start, len, 'DraftList.splice', 'start');
+    spliceCount(deleteCount, values.length, 'DraftList.splice');
     const rc = deleteCount === undefined ? len - at : Math.min(extentArg(deleteCount, 'DraftList.splice', 'deleteCount'), len - at);
     flushTail(s);
     markChanged(s);
     const removed: unknown[] = [];
     for (let i = at; i < at + rc; i++) removed.push(this.#read(s, i));
     s.ops.push({ t: 'splice', i: at, rc, inserted: values.slice(), removed: removed.slice() });
-    s.work = s.work.splice(at, rc, new Array<unknown>(values.length).fill(undefined));
+    s.work = s.work._spliceItems(at, rc, new Array<unknown>(values.length).fill(undefined));
     // Re-index the overlay around the edit.
     const delta = values.length - rc;
     if (s.overlay.size !== 0) {
@@ -344,7 +345,7 @@ function snapshotList(state: DraftState<ValueList<unknown>>): unknown {
   const edits: [number, unknown][] = [];
   for (const [i, e] of s.overlay) edits.push([i, snapshotOf(e.v)]);
   const result = s.work.setMany(edits);
-  return s.tail.length === 0 ? result : result.splice(result.length, 0, s.tail.map((e) => snapshotOf(e.v)));
+  return s.tail.length === 0 ? result : result._spliceItems(result.length, 0, s.tail.map((e) => snapshotOf(e.v)));
 }
 
 function finalizeList(
@@ -372,7 +373,7 @@ function finalizeList(
   if (state.tail.length !== 0) {
     const at = state.work.length;
     const tail = state.tail.map((e, j) => resolve(e.v, slotPath(e, at + j), recorder));
-    result = result.splice(result.length, 0, tail);
+    result = result._spliceItems(result.length, 0, tail);
   }
   if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
   state.result = result;

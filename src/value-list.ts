@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, indexArg, extentArg, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, sameSlots, IteratorBase, indexArg, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -458,9 +458,15 @@ export class ValueList<T> implements Iterable<T> {
     return node.kids[rem] as T;
   }
 
-  /** Append `value` (interned on entry). An array copy of the open run; the tree is touched only when the run closes. */
-  push(value: T): ValueList<T> {
-    const v = intern(value);
+  /**
+   * Append `values` (interned on entry), as `Array.prototype.push` takes
+   * them. One value is an array copy of the open run, and the tree is touched
+   * only when the run closes; several are a splice at the end. With none,
+   * `this`.
+   */
+  push(...values: T[]): ValueList<T> {
+    if (values.length !== 1) return values.length === 0 ? this : this._spliceItems(this.length, 0, values);
+    const v = intern(values[0]);
     const tail = this.#tail.slice();
     tail.push(v);
     if (!leafClosed(tail)) return ValueList.#of<T>(this.#root, tail);
@@ -493,9 +499,18 @@ export class ValueList<T> implements Iterable<T> {
    * place in the list: an integer in `[0, length]`, not counted from the end,
    * or a `RangeError`. `deleteCount` is how much, and means "up to": an
    * integer ≥ 0 clamped to what is there, with an omitted (or `undefined`)
-   * count, or `Infinity`, removing through the end.
+   * count, or `Infinity`, removing through the end (with items after it, an
+   * `undefined` count throws: `Array` reads that one as 0). The items follow the
+   * count as `Array.prototype.splice` takes them, so spreading an array is
+   * bounded by the engine's argument limit: for a long one, `concat` a
+   * `ValueList.from(array)`.
    */
-  splice(start: number, deleteCount?: number, items: readonly T[] = []): ValueList<T> {
+  splice(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
+    return this._spliceItems(start, spliceCount(deleteCount, items.length, 'ValueList.splice'), items);
+  }
+
+  /** `splice` with the items as an array: what the drafts and `push` call, with no argument limit. */
+  _spliceItems(start: number, deleteCount: number | undefined, items: readonly T[]): ValueList<T> {
     const n = this.length;
     start = insertionIndex(start, n, 'ValueList.splice', 'start');
     const end =
@@ -533,7 +548,7 @@ export class ValueList<T> implements Iterable<T> {
       if (old === v || (old !== old && v !== v)) return this;
       // The open run holds no boundary element, so only a new boundary changes
       // the chunking (closing the run at `j`); let the general path re-chunk.
-      if (itemBoundary(internHash(v))) return this.splice(index, 1, [v]);
+      if (itemBoundary(internHash(v))) return this.splice(index, 1, v);
       const tail = this.#tail.slice();
       tail[j] = v;
       return ValueList.#of<T>(root, tail);
@@ -543,7 +558,7 @@ export class ValueList<T> implements Iterable<T> {
     if (old === v || (old !== old && v !== v)) return this;
     const hOld = internHash(old);
     const hNew = internHash(v);
-    if (itemBoundary(hOld) !== itemBoundary(hNew)) return this.splice(index, 1, [v]);
+    if (itemBoundary(hOld) !== itemBoundary(hNew)) return this.splice(index, 1, v);
     const items = p.leaf.kids.slice();
     items[p.off] = v;
     const hashes = new Array<number>(items.length);
@@ -551,7 +566,7 @@ export class ValueList<T> implements Iterable<T> {
     let node = consLeaf(items, hashes);
     let prev = p.leaf;
     for (let k = p.frames.length - 1; k >= 0; k--) {
-      if (nodeBoundary(prev) !== nodeBoundary(node)) return this.splice(index, 1, [v]);
+      if (nodeBoundary(prev) !== nodeBoundary(node)) return this.splice(index, 1, v);
       const f = p.frames[k]!;
       const kids = f.node.kids.slice() as CNode[];
       kids[f.i] = node;
@@ -603,7 +618,7 @@ export class ValueList<T> implements Iterable<T> {
 
   /** Insert `value` (interned on entry) before `index`, an integer in `[0, length]` (else a `RangeError`); O(log n) expected. */
   insert(index: number, value: T): ValueList<T> {
-    return this.splice(insertionIndex(index, this.length, 'ValueList.insert'), 0, [value]);
+    return this.splice(insertionIndex(index, this.length, 'ValueList.insert'), 0, value);
   }
   /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`); O(log n) expected. */
   remove(index: number): ValueList<T> {

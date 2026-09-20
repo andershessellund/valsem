@@ -50,7 +50,7 @@ describe('-0 is stored as +0', () => {
     expect(isPlusZero(ValueList.of(-0).get(0))).toBe(true);
     expect(isPlusZero(ValueList.empty<number>().push(-0).get(0))).toBe(true);
     expect(isPlusZero(ValueList.of(1).set(0, -0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1).splice(0, 0, [-0]).get(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1).splice(0, 0, -0).get(0))).toBe(true);
     expect(isPlusZero(ValueList.of(1, 2).setMany([[0, -0], [1, -0]]).get(1))).toBe(true);
     expect(isPlusZero(ValueList.of(-0).toArray()[0])).toBe(true);
     expect(ValueList.of(-0)).toBe(ValueList.of(0));

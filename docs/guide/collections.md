@@ -59,6 +59,11 @@ names, and what fails throws a `RangeError` before anything is touched:
   `Infinity` for "the rest", clamped to what is there. A *negative* count is
   a `RangeError` (`Array` reads it as 0): how much to remove has no negative
   meaning, and a count that came out negative is a computation gone wrong.
+  `push` and `splice` take their items as `Array`'s do, `list.push(a, b)` and
+  `list.splice(i, 1, a, b)`, and return the new list. One reading differs, so
+  it throws: `splice(i, undefined, x)` deletes nothing for `Array` and would
+  remove through the end here. Leave the count out, or pass `Infinity` for
+  "the rest, and insert".
 - **A non-integer** (`NaN`, `1.5`, `'2'`) throws everywhere. `Array` would
   make it index 0 or 1; here that edit would land in a canonical value.
 

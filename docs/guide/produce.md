@@ -140,8 +140,10 @@ coerced throws here, a required position that is missing included:
 `splice()`, `splice(undefined)` and `copyWithin(undefined, 1)` are `RangeError`s
 where `Array` reads the `undefined` as 0. An *optional* argument left
 `undefined` means its default, as it does to `Array`, with one exception:
-`d.items.splice(i, undefined, x)` throws, since `Array` takes that count as 0
-and `DraftList` as "through the end"; pass the count, or leave it out.
+`splice(i, undefined, x)` throws, on a plain array, a `DraftList` and a
+`ValueList` alike, since `Array` takes that count as 0 and valsem's lists
+read a missing one as "through the end"; pass the count (`Infinity` for the
+rest), or leave it out.
 
 Patches are exact for the same reason: `applyPatches` refuses a `list.set`
 or `list.splice` whose index or count does not fit the value, because a
