@@ -4,10 +4,10 @@
 
 Every number below is produced by `pnpm bench`, which runs the suites in `bench/suites/` on Node (V8) and on Bun (JavaScriptCore), and the engine-level ones in the SpiderMonkey shell (Firefox's engine); it writes one JSON file per runtime and renders this file. Each section describes exactly what its suite measures. Cells show **node / bun / spidermonkey**, or fewer where a section says which runtimes ran it. The rationale behind the designs these numbers reflect lives in [DECISIONS.md](https://github.com/andershessellund/valsem/blob/main/DECISIONS.md).
 
-| | node 26.3.0 (V8) | bun 1.4.2 (JavaScriptCore) | spidermonkey 156.0 (SpiderMonkey shell) |
+| | node 26.8.1 (V8) | bun 1.4.2 (JavaScriptCore) | spidermonkey 156.0 (SpiderMonkey shell) |
 | --- | --- | --- | --- |
 | machine | Apple M2 Pro, darwin arm64 | Apple M2 Pro, darwin arm64 | Apple M2 Pro, darwin arm64 |
-| date, commit | 2026-09-19, `34445d2` | 2026-09-19, `34445d2` | 2026-09-19, `34445d2` |
+| date, commit | 2026-09-20, `2a2bee6` | 2026-09-20, `2a2bee6` | 2026-09-20, `2a2bee6` |
 | valsem | 0.0.4 | 0.0.4 | 0.0.4 |
 | immer / mutative / immutable / fast-deep-equal | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 | 11.1.18 / 1.3.0 / 5.1.9 / 3.1.3 |
 
@@ -38,15 +38,15 @@ except the recurrent row. Arenas:
 
 |  | valsem | immer (autofreeze on) | immer (autofreeze off) | mutative | note |
 | --- | --- | --- | --- | --- | --- |
-| big-array 10k, one edit, synchronous loop | 21.3 µs / 3.26 ms | 579.1 µs / 2.38 ms | 3.8 µs / 5.1 µs | 2.9 µs / 7.1 µs |  |
-| big-array 10k, one edit, held + one per macrotask | 13.9 µs / 3.42 ms | — | 6.7 µs / 8.3 µs | 5.9 µs / 7.6 µs |  |
-| wide-record 1000 keys, one edit | 2.7 µs / 37.6 µs | 206.7 µs / 81.6 µs | 119.0 µs / 30.9 µs | 209.2 µs / 51.7 µs |  |
-| value-map 10k, one set, through the draft | 3.0 µs / 2.0 µs | 465.4 µs / 147.6 µs | — | 389.8 µs / 30.9 µs |  |
-| value-map 10k, one set, direct persistent op | 919 ns / 870 ns | — | — | — |  |
-| value-list 10k, set + push, through the draft | 11.9 µs / 9.3 µs | — | 10.6 µs / 9.4 µs | 10.2 µs / 10.9 µs |  |
-| value-list 10k, set + push, direct persistent ops | 4.6 µs / 2.2 µs | — | — | — |  |
-| small-churn 3-key record, one field | 1.2 µs / 1.3 µs | 573 ns / 587 ns | 436 ns / 421 ns | 464 ns / 514 ns |  |
-| recurrent: big-array cycling 10 configurations, held | 3.3 µs / 2.9 µs | 530.1 µs / 2.22 ms | 3.9 µs / 3.7 µs | 3.9 µs / 6.1 µs | valsem returns 10 pooled instances; equality afterwards is === |
+| big-array 10k, one edit, synchronous loop | 29.3 µs / 3.20 ms | 557.8 µs / 2.36 ms | 3.9 µs / 5.3 µs | 2.9 µs / 6.9 µs |  |
+| big-array 10k, one edit, held + one per macrotask | 13.5 µs / 3.23 ms | — | 7.9 µs / 7.7 µs | 6.0 µs / 7.6 µs |  |
+| wide-record 1000 keys, one edit | 2.7 µs / 37.1 µs | 206.8 µs / 76.8 µs | 113.4 µs / 28.6 µs | 208.5 µs / 50.4 µs |  |
+| value-map 10k, one set, through the draft | 2.8 µs / 2.1 µs | 460.6 µs / 139.7 µs | — | 390.3 µs / 30.6 µs |  |
+| value-map 10k, one set, direct persistent op | 983 ns / 970 ns | — | — | — |  |
+| value-list 10k, set + push, through the draft | 13.6 µs / 12.8 µs | — | 10.4 µs / 9.4 µs | 9.9 µs / 9.7 µs |  |
+| value-list 10k, set + push, direct persistent ops | 3.1 µs / 3.6 µs | — | — | — |  |
+| small-churn 3-key record, one field | 1.3 µs / 1.2 µs | 576 ns / 548 ns | 443 ns / 397 ns | 452 ns / 471 ns |  |
+| recurrent: big-array cycling 10 configurations, held | 3.3 µs / 2.6 µs | 522.5 µs / 2.09 ms | 3.7 µs / 3.9 µs | 3.8 µs / 6.3 µs | valsem returns 10 pooled instances; equality afterwards is === |
 
 ## The boundary — admitting raw data
 
@@ -70,24 +70,24 @@ transfers in ~2.7 ms and the 10k one in ~27 ms, off the main thread; admission r
 
 |  | per response |
 | --- | --- |
-| 1000 × 10: JSON.parse | 385.3 µs / 363.6 µs |
-| 1000 × 10: structuredClone | 720.6 µs / 448.7 µs |
-| 1000 × 10: immer auto-freeze walk | 252.3 µs / 332.1 µs |
-| 1000 × 10: intern, all new content | 1.59 ms / 1.20 ms |
-| 1000 × 10: intern, unchanged refetch (all pool hits) | 805.9 µs / 695.0 µs |
-| 1000 × 10: intern, refetch with 10% of records changed | 969.7 µs / 925.4 µs |
-| 1000 × 10: ValueList.from, all new content | 1.80 ms / 933.6 µs |
-| 1000 × 10: ValueList.from, canonical records (the list alone) | 123.2 µs / 68.6 µs |
-| 1000 × 10: RawArray.from + slice(0, 100) — admit only the visible window | 132.3 µs / 106.8 µs |
-| 10000 × 10: JSON.parse | 3.51 ms / 3.70 ms |
-| 10000 × 10: structuredClone | 7.13 ms / 4.92 ms |
-| 10000 × 10: immer auto-freeze walk | 2.28 ms / 4.32 ms |
-| 10000 × 10: intern, all new content | 17.41 ms / 11.43 ms |
-| 10000 × 10: intern, unchanged refetch (all pool hits) | 8.78 ms / 7.17 ms |
-| 10000 × 10: intern, refetch with 10% of records changed | 10.08 ms / 10.24 ms |
-| 10000 × 10: ValueList.from, all new content | 18.03 ms / 9.66 ms |
-| 10000 × 10: ValueList.from, canonical records (the list alone) | 1.10 ms / 540.5 µs |
-| 10000 × 10: RawArray.from + slice(0, 100) — admit only the visible window | 157.6 µs / 137.3 µs |
+| 1000 × 10: JSON.parse | 376.0 µs / 365.5 µs |
+| 1000 × 10: structuredClone | 728.1 µs / 443.9 µs |
+| 1000 × 10: immer auto-freeze walk | 245.0 µs / 321.1 µs |
+| 1000 × 10: intern, all new content | 1.55 ms / 967.1 µs |
+| 1000 × 10: intern, unchanged refetch (all pool hits) | 801.8 µs / 631.7 µs |
+| 1000 × 10: intern, refetch with 10% of records changed | 943.2 µs / 793.6 µs |
+| 1000 × 10: ValueList.from, all new content | 1.64 ms / 894.6 µs |
+| 1000 × 10: ValueList.from, canonical records (the list alone) | 123.7 µs / 66.3 µs |
+| 1000 × 10: RawArray.from + slice(0, 100) — admit only the visible window | 129.0 µs / 93.1 µs |
+| 10000 × 10: JSON.parse | 3.44 ms / 3.49 ms |
+| 10000 × 10: structuredClone | 7.25 ms / 4.64 ms |
+| 10000 × 10: immer auto-freeze walk | 2.28 ms / 4.16 ms |
+| 10000 × 10: intern, all new content | 17.85 ms / 10.50 ms |
+| 10000 × 10: intern, unchanged refetch (all pool hits) | 8.46 ms / 6.31 ms |
+| 10000 × 10: intern, refetch with 10% of records changed | 10.82 ms / 9.29 ms |
+| 10000 × 10: ValueList.from, all new content | 21.27 ms / 8.44 ms |
+| 10000 × 10: ValueList.from, canonical records (the list alone) | 1.11 ms / 562.3 µs |
+| 10000 × 10: RawArray.from + slice(0, 100) — admit only the visible window | 150.6 µs / 106.2 µs |
 
 ## deepEqual — against fast-deep-equal
 
@@ -105,29 +105,29 @@ semantics differ (`NaN` and undefined-valued keys). Rows:
 
 |  | valsem | fast-deep-equal | fast-deep-equal ÷ valsem |
 | --- | --- | --- | --- |
-| record 10 keys: raw = | 327 ns / 124 ns | 256 ns / 103 ns | 1/1.3× / 1/1.2× |
-| record 10 keys: raw ≠ | 206 ns / 73 ns | 170 ns / 53 ns | 1/1.2× / 1/1.4× |
-| record 10 keys: canonical ≠ | 24 ns / 19 ns | 174 ns / 63 ns | 7.2× / 3.4× |
-| record 100 keys: raw = | 5.0 µs / 987 ns | 4.6 µs / 975 ns | 1/1.1× / 1.0× |
-| record 100 keys: raw ≠ | 2.3 µs / 490 ns | 2.7 µs / 590 ns | 1.2× / 1.2× |
-| record 100 keys: canonical ≠ | 39 ns / 35 ns | 2.8 µs / 615 ns | 70.7× / 17.3× |
-| record 1000 keys: raw = | 237.5 µs / 42.8 µs | 235.0 µs / 51.0 µs | 1.0× / 1.2× |
-| record 1000 keys: raw ≠ | 90.2 µs / 11.0 µs | 123.8 µs / 30.6 µs | 1.4× / 2.8× |
-| record 1000 keys: canonical ≠ | 63 ns / 12 ns | 146.5 µs / 38.9 µs | 2318.7× / 3185.6× |
-| number array 10: raw = | 76 ns / 63 ns | 58 ns / 49 ns | 1/1.3× / 1/1.3× |
-| number array 10: raw ≠ | 56 ns / 39 ns | 34 ns / 30 ns | 1/1.7× / 1/1.3× |
-| number array 10: canonical ≠ | 29 ns / 12 ns | 60 ns / 123 ns | 2.1× / 9.9× |
-| number array 100: raw = | 470 ns / 548 ns | 488 ns / 384 ns | 1.0× / 1/1.4× |
-| number array 100: raw ≠ | 260 ns / 245 ns | 268 ns / 203 ns | 1.0× / 1/1.2× |
-| number array 100: canonical ≠ | 35 ns / 13 ns | 592 ns / 975 ns | 16.9× / 73.4× |
-| number array 1000: raw = | 4.4 µs / 4.4 µs | 4.6 µs / 3.7 µs | 1.1× / 1/1.2× |
-| number array 1000: raw ≠ | 2.2 µs / 2.2 µs | 2.3 µs / 1.8 µs | 1.1× / 1/1.2× |
-| number array 1000: canonical ≠ | 40 ns / 12 ns | 5.9 µs / 11.6 µs | 149.6× / 955.9× |
-| array of 100 records: raw = | 16.2 µs / 7.7 µs | 9.7 µs / 5.5 µs | 1/1.7× / 1/1.4× |
-| array of 100 records: raw ≠ | 8.3 µs / 3.8 µs | 4.8 µs / 2.6 µs | 1/1.7× / 1/1.5× |
-| array of 100 records: canonical ≠ | 33 ns / 17 ns | 666 ns / 1.0 µs | 19.9× / 61.7× |
-| boundary: raw wrappers, shared canonical payload = | 136 ns / 60 ns | 64 ns / 43 ns | 1/2.1× / 1/1.4× |
-| boundary: raw wrappers, distinct canonical payloads ≠ | 142 ns / 57 ns | 730 ns / 1.1 µs | 5.2× / 18.7× |
+| record 10 keys: raw = | 333 ns / 110 ns | 261 ns / 101 ns | 1/1.3× / 1/1.1× |
+| record 10 keys: raw ≠ | 206 ns / 66 ns | 168 ns / 52 ns | 1/1.2× / 1/1.3× |
+| record 10 keys: canonical ≠ | 25 ns / 19 ns | 173 ns / 59 ns | 6.9× / 3.1× |
+| record 100 keys: raw = | 4.9 µs / 957 ns | 4.5 µs / 952 ns | 1/1.1× / 1.0× |
+| record 100 keys: raw ≠ | 2.3 µs / 480 ns | 2.8 µs / 578 ns | 1.3× / 1.2× |
+| record 100 keys: canonical ≠ | 41 ns / 34 ns | 2.8 µs / 604 ns | 68.1× / 17.8× |
+| record 1000 keys: raw = | 225.7 µs / 39.0 µs | 219.6 µs / 47.7 µs | 1.0× / 1.2× |
+| record 1000 keys: raw ≠ | 82.0 µs / 7.7 µs | 117.0 µs / 28.7 µs | 1.4× / 3.7× |
+| record 1000 keys: canonical ≠ | 55 ns / 13 ns | 138.4 µs / 37.0 µs | 2516.2× / 2934.0× |
+| number array 10: raw = | 77 ns / 59 ns | 58 ns / 48 ns | 1/1.3× / 1/1.2× |
+| number array 10: raw ≠ | 55 ns / 37 ns | 34 ns / 29 ns | 1/1.6× / 1/1.3× |
+| number array 10: canonical ≠ | 29 ns / 12 ns | 60 ns / 121 ns | 2.0× / 9.9× |
+| number array 100: raw = | 474 ns / 499 ns | 465 ns / 371 ns | 1.0× / 1/1.3× |
+| number array 100: raw ≠ | 265 ns / 246 ns | 255 ns / 198 ns | 1.0× / 1/1.2× |
+| number array 100: canonical ≠ | 35 ns / 13 ns | 594 ns / 958 ns | 16.9× / 73.5× |
+| number array 1000: raw = | 4.4 µs / 4.5 µs | 4.4 µs / 3.6 µs | 1.0× / 1/1.3× |
+| number array 1000: raw ≠ | 2.2 µs / 2.3 µs | 2.2 µs / 1.8 µs | 1.0× / 1/1.3× |
+| number array 1000: canonical ≠ | 37 ns / 12 ns | 6.1 µs / 11.5 µs | 165.6× / 961.6× |
+| array of 100 records: raw = | 15.9 µs / 7.0 µs | 9.5 µs / 5.5 µs | 1/1.7× / 1/1.3× |
+| array of 100 records: raw ≠ | 8.0 µs / 3.6 µs | 4.7 µs / 2.5 µs | 1/1.7× / 1/1.4× |
+| array of 100 records: canonical ≠ | 32 ns / 13 ns | 651 ns / 1.0 µs | 20.3× / 76.9× |
+| boundary: raw wrappers, shared canonical payload = | 131 ns / 60 ns | 63 ns / 42 ns | 1/2.1× / 1/1.4× |
+| boundary: raw wrappers, distinct canonical payloads ≠ | 133 ns / 54 ns | 719 ns / 1.0 µs | 5.4× / 19.4× |
 
 ## ValueMap, ValueSet, ValueList — against Immutable.js
 
@@ -154,69 +154,69 @@ The last rows use record values, where the semantics differ by design: valsem ca
 
 |  | valsem | Immutable | Immutable ÷ valsem |
 | --- | --- | --- | --- |
-| Map 100: build from entries | 14.2 µs / 17.4 µs | 6.5 µs / 7.5 µs | 1/2.2× / 1/2.3× |
-| Map 100: get (hit) | 49 ns / 39 ns | 22 ns / 21 ns | 1/2.3× / 1/1.8× |
-| Map 100: has (miss) | 44 ns / 48 ns | 25 ns / 66 ns | 1/1.7× / 1.4× |
-| Map 100: set existing key → novel value | 1.8 µs / 965 ns | 123 ns / 149 ns | 1/14.9× / 1/6.5× |
-| Map 100: set new key | 2.0 µs / 1.1 µs | 121 ns / 212 ns | 1/16.7× / 1/5.2× |
-| Map 100: delete existing | 512 ns / 539 ns | 116 ns / 140 ns | 1/4.4× / 1/3.8× |
+| Map 100: build from entries | 14.0 µs / 16.3 µs | 6.4 µs / 7.2 µs | 1/2.2× / 1/2.3× |
+| Map 100: get (hit) | 48 ns / 38 ns | 21 ns / 21 ns | 1/2.3× / 1/1.8× |
+| Map 100: has (miss) | 44 ns / 49 ns | 25 ns / 64 ns | 1/1.8× / 1.3× |
+| Map 100: set existing key → novel value | 1.8 µs / 875 ns | 123 ns / 144 ns | 1/14.4× / 1/6.1× |
+| Map 100: set new key | 1.8 µs / 953 ns | 117 ns / 203 ns | 1/15.4× / 1/4.7× |
+| Map 100: delete existing | 521 ns / 479 ns | 112 ns / 136 ns | 1/4.6× / 1/3.5× |
 | Map 100: iterate entries | 1.2 µs / 2.0 µs | 1.3 µs / 2.0 µs | 1.1× / 1.0× |
-| Map 100: set one key, then hash | 1.0 µs / 855 ns | 3.1 µs / 8.0 µs | 2.9× / 9.3× |
-| Map 100: equals = (independent builds) | 17 ns / 12 ns | 3.5 µs / 4.5 µs | 205.9× / 368.9× |
-| Map 100: equals ≠ (one entry differs), cold | 40 ns / 38 ns | 484 ns / 663 ns | 12.2× / 17.7× |
-| Map 100: equals ≠, Immutable hashes warmed | 18 ns / 8 ns | 25 ns / 30 ns | 1.3× / 3.7× |
-| Map 10000: build from entries | 1.98 ms / 1.82 ms | 943.8 µs / 1.17 ms | 1/2.1× / 1/1.6× |
-| Map 10000: get (hit) | 69 ns / 60 ns | 69 ns / 76 ns | 1.0× / 1.3× |
-| Map 10000: has (miss) | 66 ns / 95 ns | 75 ns / 121 ns | 1.1× / 1.3× |
-| Map 10000: set existing key → novel value | 3.0 µs / 1.6 µs | 239 ns / 261 ns | 1/12.5× / 1/6.3× |
-| Map 10000: set new key | 3.2 µs / 1.8 µs | 197 ns / 299 ns | 1/16.5× / 1/6.0× |
-| Map 10000: delete existing | 1.3 µs / 1.2 µs | 218 ns / 250 ns | 1/5.8× / 1/4.8× |
-| Map 10000: iterate entries | 140.8 µs / 189.4 µs | 187.1 µs / 269.2 µs | 1.3× / 1.4× |
-| Map 10000: set one key, then hash | 1.5 µs / 1.8 µs | 424.9 µs / 1.01 ms | 276.2× / 555.6× |
-| Map 10000: equals = (independent builds) | 23 ns / 35 ns | 612.7 µs / 886.9 µs | 26429.4× / 25416.7× |
-| Map 10000: equals ≠ (one entry differs), cold | 36 ns / 28 ns | 110.0 µs / 163.2 µs | 3083.7× / 5858.9× |
-| Map 10000: equals ≠, Immutable hashes warmed | 11 ns / 7 ns | 45 ns / 35 ns | 4.0× / 5.2× |
-| Set 100: build from members | 11.1 µs / 12.4 µs | 8.0 µs / 6.9 µs | 1/1.4× / 1/1.8× |
-| Set 100: has (hit) | 39 ns / 35 ns | 31 ns / 35 ns | 1/1.3× / 1.0× |
-| Set 100: add new member | 1.8 µs / 912 ns | 145 ns / 216 ns | 1/12.5× / 1/4.2× |
-| Set 100: delete existing | 439 ns / 385 ns | 121 ns / 139 ns | 1/3.6× / 1/2.8× |
-| Set 100: iterate members | 1.0 µs / 1.4 µs | 1.2 µs / 1.4 µs | 1.1× / 1.0× |
-| Set 100: add one member, then hash | 899 ns / 759 ns | 3.1 µs / 3.4 µs | 3.5× / 4.4× |
-| Set 100: equals = (independent builds) | 17 ns / 8 ns | 4.4 µs / 3.9 µs | 254.7× / 464.7× |
-| Set 100: equals ≠ (one member differs), cold | 48 ns / 33 ns | 3.4 µs / 3.1 µs | 72.3× / 95.2× |
-| Set 100: equals ≠, Immutable hashes warmed | 32 ns / 12 ns | 31 ns / 48 ns | 1/1.1× / 4.0× |
-| Set 10000: build from members | 1.62 ms / 1.56 ms | 923.9 µs / 1.12 ms | 1/1.7× / 1/1.4× |
-| Set 10000: has (hit) | 69 ns / 60 ns | 68 ns / 66 ns | 1.0× / 1.1× |
-| Set 10000: add new member | 2.9 µs / 1.6 µs | 223 ns / 313 ns | 1/13.0× / 1/5.1× |
-| Set 10000: delete existing | 1.1 µs / 1.0 µs | 221 ns / 255 ns | 1/5.0× / 1/4.0× |
-| Set 10000: iterate members | 105.2 µs / 143.0 µs | 157.3 µs / 249.2 µs | 1.5× / 1.7× |
-| Set 10000: add one member, then hash | 1.5 µs / 2.0 µs | 363.0 µs / 365.6 µs | 240.7× / 186.6× |
-| Set 10000: equals = (independent builds) | 32 ns / 29 ns | 694.6 µs / 892.2 µs | 21513.5× / 31149.8× |
-| Set 10000: equals ≠ (one member differs), cold | 36 ns / 40 ns | 516.6 µs / 668.3 µs | 14169.3× / 16773.8× |
-| Set 10000: equals ≠, Immutable hashes warmed | 11 ns / 11 ns | 69 ns / 41 ns | 6.1× / 3.8× |
-| List 100: build from array | 4.1 µs / 3.7 µs | 3.0 µs / 2.7 µs | 1/1.3× / 1/1.4× |
+| Map 100: set one key, then hash | 1.0 µs / 807 ns | 3.0 µs / 7.9 µs | 2.9× / 9.8× |
+| Map 100: equals = (independent builds) | 17 ns / 13 ns | 3.4 µs / 4.4 µs | 207.8× / 335.1× |
+| Map 100: equals ≠ (one entry differs), cold | 40 ns / 32 ns | 469 ns / 649 ns | 11.7× / 20.2× |
+| Map 100: equals ≠, Immutable hashes warmed | 17 ns / 8 ns | 24 ns / 29 ns | 1.4× / 3.9× |
+| Map 10000: build from entries | 1.87 ms / 1.69 ms | 927.6 µs / 1.12 ms | 1/2.0× / 1/1.5× |
+| Map 10000: get (hit) | 67 ns / 56 ns | 65 ns / 72 ns | 1.0× / 1.3× |
+| Map 10000: has (miss) | 66 ns / 89 ns | 75 ns / 114 ns | 1.1× / 1.3× |
+| Map 10000: set existing key → novel value | 2.6 µs / 1.4 µs | 234 ns / 253 ns | 1/11.0× / 1/5.6× |
+| Map 10000: set new key | 2.8 µs / 1.6 µs | 195 ns / 280 ns | 1/14.5× / 1/5.7× |
+| Map 10000: delete existing | 1.2 µs / 1.1 µs | 216 ns / 239 ns | 1/5.4× / 1/4.6× |
+| Map 10000: iterate entries | 139.3 µs / 186.2 µs | 176.2 µs / 264.1 µs | 1.3× / 1.4× |
+| Map 10000: set one key, then hash | 1.5 µs / 1.7 µs | 411.2 µs / 956.9 µs | 277.8× / 567.9× |
+| Map 10000: equals = (independent builds) | 22 ns / 20 ns | 594.7 µs / 852.8 µs | 27184.7× / 42532.7× |
+| Map 10000: equals ≠ (one entry differs), cold | 30 ns / 37 ns | 108.1 µs / 157.0 µs | 3580.3× / 4216.3× |
+| Map 10000: equals ≠, Immutable hashes warmed | 11 ns / 6 ns | 44 ns / 35 ns | 4.1× / 5.5× |
+| Set 100: build from members | 10.7 µs / 12.0 µs | 7.9 µs / 6.8 µs | 1/1.4× / 1/1.8× |
+| Set 100: has (hit) | 38 ns / 34 ns | 31 ns / 33 ns | 1/1.2× / 1.0× |
+| Set 100: add new member | 1.7 µs / 787 ns | 134 ns / 207 ns | 1/13.0× / 1/3.8× |
+| Set 100: delete existing | 433 ns / 390 ns | 116 ns / 130 ns | 1/3.7× / 1/3.0× |
+| Set 100: iterate members | 1.0 µs / 1.4 µs | 1.2 µs / 1.4 µs | 1.2× / 1.0× |
+| Set 100: add one member, then hash | 855 ns / 700 ns | 3.1 µs / 3.3 µs | 3.6× / 4.7× |
+| Set 100: equals = (independent builds) | 18 ns / 7 ns | 4.3 µs / 3.8 µs | 242.5× / 538.6× |
+| Set 100: equals ≠ (one member differs), cold | 47 ns / 28 ns | 3.5 µs / 2.9 µs | 74.2× / 104.7× |
+| Set 100: equals ≠, Immutable hashes warmed | 32 ns / 11 ns | 30 ns / 47 ns | 1.0× / 4.1× |
+| Set 10000: build from members | 1.58 ms / 1.42 ms | 903.7 µs / 1.08 ms | 1/1.7× / 1/1.3× |
+| Set 10000: has (hit) | 68 ns / 57 ns | 67 ns / 64 ns | 1.0× / 1.1× |
+| Set 10000: add new member | 2.7 µs / 1.4 µs | 223 ns / 293 ns | 1/12.2× / 1/4.9× |
+| Set 10000: delete existing | 1.0 µs / 948 ns | 216 ns / 245 ns | 1/4.8× / 1/3.9× |
+| Set 10000: iterate members | 105.2 µs / 145.4 µs | 154.1 µs / 240.2 µs | 1.5× / 1.7× |
+| Set 10000: add one member, then hash | 1.5 µs / 1.9 µs | 355.6 µs / 351.4 µs | 233.8× / 184.2× |
+| Set 10000: equals = (independent builds) | 29 ns / 32 ns | 668.7 µs / 862.4 µs | 23132.3× / 26704.0× |
+| Set 10000: equals ≠ (one member differs), cold | 30 ns / 38 ns | 505.8 µs / 644.3 µs | 16599.1× / 16829.5× |
+| Set 10000: equals ≠, Immutable hashes warmed | 11 ns / 11 ns | 67 ns / 40 ns | 6.2× / 3.7× |
+| List 100: build from array | 4.0 µs / 3.7 µs | 3.0 µs / 2.6 µs | 1/1.3× / 1/1.4× |
 | List 100: get (mid index) | 10 ns / 11 ns | 11 ns / 11 ns | 1.1× / 1.0× |
-| List 100: set (mid) → novel value | 3.1 µs / 1.6 µs | 73 ns / 69 ns | 1/42.8× / 1/23.0× |
-| List 100: push | 851 ns / 549 ns | 73 ns / 80 ns | 1/11.7× / 1/6.9× |
-| List 100: pop | 129 ns / 255 ns | 52 ns / 64 ns | 1/2.5× / 1/4.0× |
-| List 100: iterate elements | 623 ns / 923 ns | 1.5 µs / 1.3 µs | 2.4× / 1.4× |
-| List 100: push one, then hash | 532 ns / 482 ns | 2.5 µs / 6.8 µs | 4.6× / 14.0× |
-| List 100: equals = (from vs push chain) | 20 ns / 9 ns | 4.0 µs / 2.9 µs | 206.8× / 317.9× |
-| List 100: equals ≠ (one element differs), cold | 48 ns / 14 ns | 2.1 µs / 1.7 µs | 42.8× / 115.1× |
-| List 100: equals ≠, Immutable hashes warmed | 32 ns / 11 ns | 39 ns / 42 ns | 1.2× / 3.9× |
-| List 10000: build from array | 349.8 µs / 316.7 µs | 364.3 µs / 306.8 µs | 1.0× / 1.0× |
-| List 10000: get (mid index) | 16 ns / 10 ns | 19 ns / 13 ns | 1.2× / 1.2× |
-| List 10000: set (mid) → novel value | 4.8 µs / 2.9 µs | 109 ns / 101 ns | 1/44.3× / 1/28.7× |
-| List 10000: push | 977 ns / 556 ns | 87 ns / 93 ns | 1/11.2× / 1/6.0× |
-| List 10000: pop | 227 ns / 381 ns | 64 ns / 62 ns | 1/3.6× / 1/6.2× |
-| List 10000: iterate elements | 60.1 µs / 80.4 µs | 193.0 µs / 154.8 µs | 3.2× / 1.9× |
-| List 10000: push one, then hash | 786 ns / 739 ns | 274.5 µs / 646.9 µs | 349.3× / 875.2× |
-| List 10000: equals = (from vs push chain) | 21 ns / 22 ns | 466.9 µs / 311.0 µs | 21870.2× / 14047.6× |
-| List 10000: equals ≠ (one element differs), cold | 27 ns / 29 ns | 232.8 µs / 158.4 µs | 8763.9× / 5480.2× |
-| List 10000: equals ≠, Immutable hashes warmed | 9 ns / 10 ns | 58 ns / 44 ns | 6.1× / 4.3× |
-| Map 10k with record values: build from raw records | 7.58 ms / 6.39 ms | 1.42 ms / 1.45 ms | 1/5.3× / 1/4.4× |
-| Map 10k with record values: build from canonical records | 2.40 ms / 2.37 ms | 1.19 ms / 1.21 ms | 1/2.0× / 1/2.0× |
-| Map 10k with record values: set one raw record | 3.9 µs / 2.0 µs | 233 ns / 238 ns | 1/16.8× / 1/8.5× |
+| List 100: set (mid) → novel value | 3.1 µs / 1.5 µs | 72 ns / 67 ns | 1/42.4× / 1/22.1× |
+| List 100: push | 992 ns / 523 ns | 71 ns / 78 ns | 1/14.0× / 1/6.7× |
+| List 100: pop | 216 ns / 212 ns | 51 ns / 64 ns | 1/4.2× / 1/3.3× |
+| List 100: iterate elements | 595 ns / 906 ns | 1.4 µs / 1.3 µs | 2.4× / 1.4× |
+| List 100: push one, then hash | 643 ns / 502 ns | 2.5 µs / 6.3 µs | 3.9× / 12.5× |
+| List 100: equals = (from vs push chain) | 19 ns / 8 ns | 4.0 µs / 2.8 µs | 209.8× / 348.6× |
+| List 100: equals ≠ (one element differs), cold | 49 ns / 13 ns | 2.1 µs / 1.6 µs | 42.0× / 122.5× |
+| List 100: equals ≠, Immutable hashes warmed | 32 ns / 11 ns | 38 ns / 41 ns | 1.2× / 3.8× |
+| List 10000: build from array | 339.1 µs / 302.9 µs | 355.8 µs / 305.0 µs | 1.0× / 1.0× |
+| List 10000: get (mid index) | 15 ns / 10 ns | 18 ns / 12 ns | 1.1× / 1.2× |
+| List 10000: set (mid) → novel value | 3.7 µs / 2.2 µs | 105 ns / 100 ns | 1/35.2× / 1/21.9× |
+| List 10000: push | 862 ns / 546 ns | 85 ns / 91 ns | 1/10.1× / 1/6.0× |
+| List 10000: pop | 182 ns / 267 ns | 64 ns / 61 ns | 1/2.9× / 1/4.4× |
+| List 10000: iterate elements | 58.8 µs / 78.6 µs | 192.8 µs / 154.0 µs | 3.3× / 2.0× |
+| List 10000: push one, then hash | 724 ns / 801 ns | 272.7 µs / 639.6 µs | 376.6× / 798.7× |
+| List 10000: equals = (from vs push chain) | 22 ns / 23 ns | 462.7 µs / 300.8 µs | 20661.2× / 12974.7× |
+| List 10000: equals ≠ (one element differs), cold | 24 ns / 24 ns | 232.0 µs / 154.0 µs | 9477.6× / 6358.5× |
+| List 10000: equals ≠, Immutable hashes warmed | 9 ns / 10 ns | 57 ns / 42 ns | 6.1× / 4.4× |
+| Map 10k with record values: build from raw records | 7.10 ms / 6.01 ms | 1.42 ms / 1.39 ms | 1/5.0× / 1/4.3× |
+| Map 10k with record values: build from canonical records | 2.36 ms / 1.93 ms | 1.18 ms / 1.17 ms | 1/2.0× / 1/1.6× |
+| Map 10k with record values: set one raw record | 3.5 µs / 1.7 µs | 229 ns / 229 ns | 1/15.2× / 1/7.6× |
 
 ## HashMap — against a native Map
 
@@ -229,12 +229,12 @@ native `Map` column is the same map with keys interned beforehand — the escape
 
 |  | HashMap | native Map |
 | --- | --- | --- |
-| get, canonical object key | 26 ns / 25 ns | 20 ns / 9 ns |
-| get, primitive key | 11 ns / 17 ns | 24 ns / 6 ns |
-| set, existing canonical key | 38 ns / 25 ns | 20 ns / 11 ns |
-| get, raw 2-key object (interned first; a native Map misses) | 291 ns / 220 ns | — |
-| get, raw 50-record payload key | 14.8 µs / 12.6 µs | — |
-| set, a novel raw 2-key object per call (a pool entry each) | 1.1 µs / 422 ns | — |
+| get, canonical object key | 25 ns / 25 ns | 20 ns / 9 ns |
+| get, primitive key | 10 ns / 17 ns | 24 ns / 7 ns |
+| set, existing canonical key | 36 ns / 21 ns | 20 ns / 12 ns |
+| get, raw 2-key object (interned first; a native Map misses) | 293 ns / 239 ns | — |
+| get, raw 50-record payload key | 14.6 µs / 11.9 µs | — |
+| set, a novel raw 2-key object per call (a pool entry each) | 882 ns / 512 ns | — |
 
 ## memoize — hit and miss cost by argument kind
 
@@ -248,19 +248,19 @@ one raw record argument versus its canonical twin.
 
 |  | per call |
 | --- | --- |
-| recompute, no memo | 637 ns / 418 ns |
-| hit, both arguments canonical | 53 ns / 51 ns |
-| hit, fresh filter literal + canonical list (the reselect case) | 261 ns / 140 ns |
-| hit, fresh filter literal + ValueList | 335 ns / 156 ns |
-| hit, both arguments raw (100 × 3-key records) | 31.9 µs / 19.7 µs |
-| hit, maxSize 8, working set of 8 | 73 ns / 59 ns |
-| miss + evict, maxSize 8, working set of 9 | 5.0 µs / 4.3 µs |
-| hit, one raw 3-key record argument | 341 ns / 205 ns |
-| hit, one canonical 3-key record argument | 47 ns / 49 ns |
-| hit, one raw 20-key record argument | 1.2 µs / 800 ns |
-| hit, one canonical 20-key record argument | 47 ns / 40 ns |
-| hit, one raw 200-key record argument | 21.1 µs / 8.6 µs |
-| hit, one canonical 200-key record argument | 38 ns / 40 ns |
+| recompute, no memo | 625 ns / 401 ns |
+| hit, both arguments canonical | 65 ns / 52 ns |
+| hit, fresh filter literal + canonical list (the reselect case) | 274 ns / 157 ns |
+| hit, fresh filter literal + ValueList | 337 ns / 163 ns |
+| hit, both arguments raw (100 × 3-key records) | 33.9 µs / 18.0 µs |
+| hit, maxSize 8, working set of 8 | 71 ns / 61 ns |
+| miss + evict, maxSize 8, working set of 9 | 5.3 µs / 4.3 µs |
+| hit, one raw 3-key record argument | 343 ns / 185 ns |
+| hit, one canonical 3-key record argument | 49 ns / 48 ns |
+| hit, one raw 20-key record argument | 1.2 µs / 724 ns |
+| hit, one canonical 20-key record argument | 42 ns / 41 ns |
+| hit, one raw 200-key record argument | 20.3 µs / 7.7 µs |
+| hit, one canonical 200-key record argument | 37 ns / 41 ns |
 
 ## ValueList — operations and diff at 100k elements
 
@@ -278,25 +278,25 @@ list with three changed records, which shares nothing by lineage with the origin
 
 |  | ValueList | pointer scan |
 | --- | --- | --- |
-| from, raw records (admission dominates) | 56.20 ms / 28.91 ms | — |
-| from, canonical records | 7.11 ms / 7.26 ms | — |
-| get, sequential | 20 ns / 11 ns | — |
-| get, random | 78 ns / 83 ns | — |
-| iterate for…of | 417.1 µs / 1.02 ms | — |
-| toArray (memoized) | 381 ns / 200 ns | — |
-| push | 2.2 µs / 925 ns | — |
-| pop | 612 ns / 422 ns | — |
-| set, middle | 7.0 µs / 3.7 µs | — |
-| insert at 0 | 8.7 µs / 5.2 µs | — |
-| insert, middle | 8.6 µs / 7.0 µs | — |
-| remove at 0 | 4.0 µs / 3.1 µs | — |
-| slice, middle half | 7.3 µs / 4.8 µs | — |
-| concat, two halves | 4.4 µs / 5.0 µs | — |
-| diff: 1 point edit (1 hunks) | 3.9 µs / 5.5 µs | 822.2 µs / 2.87 ms |
-| diff: 10 point edits (10 hunks) | 11.4 µs / 14.6 µs | 818.8 µs / 3.46 ms |
-| diff: 100 point edits (100 hunks) | 66.7 µs / 95.9 µs | 812.8 µs / 2.74 ms |
-| diff: insert + remove (2 hunks) | 5.9 µs / 7.0 µs | 837.3 µs / 2.88 ms |
-| diff: refetch, 3 changed, independently built (3 hunks) | 4.4 µs / 5.6 µs | 820.7 µs / 3.04 ms |
+| from, raw records (admission dominates) | 47.94 ms / 28.33 ms | — |
+| from, canonical records | 6.38 ms / 6.14 ms | — |
+| get, sequential | 19 ns / 12 ns | — |
+| get, random | 74 ns / 83 ns | — |
+| iterate for…of | 418.1 µs / 992.5 µs | — |
+| toArray (memoized) | 338 ns / 202 ns | — |
+| push | 1.8 µs / 991 ns | — |
+| pop | 385 ns / 276 ns | — |
+| set, middle | 8.0 µs / 4.4 µs | — |
+| insert at 0 | 9.1 µs / 5.2 µs | — |
+| insert, middle | 7.7 µs / 5.9 µs | — |
+| remove at 0 | 4.5 µs / 3.2 µs | — |
+| slice, middle half | 6.5 µs / 4.2 µs | — |
+| concat, two halves | 5.0 µs / 5.7 µs | — |
+| diff: 1 point edit (1 hunks) | 3.9 µs / 5.4 µs | 798.3 µs / 2.77 ms |
+| diff: 10 point edits (10 hunks) | 10.8 µs / 12.5 µs | 804.8 µs / 2.92 ms |
+| diff: 100 point edits (100 hunks) | 62.9 µs / 93.9 µs | 804.0 µs / 2.79 ms |
+| diff: insert + remove (2 hunks) | 5.8 µs / 7.4 µs | 825.3 µs / 2.80 ms |
+| diff: refetch, 3 changed, independently built (3 hunks) | 4.5 µs / 5.5 µs | 800.9 µs / 2.74 ms |
 
 ## ValueList inside produce — batched updates
 
@@ -311,18 +311,18 @@ leaf and ancestor once) and the tail as one splice. The last row is the direct p
 
 |  | per produce |
 | --- | --- |
-| 1 set | 7.7 µs / 4.7 µs |
-| 1 nested edit (get(i).v = x) | 7.8 µs / 4.4 µs |
-| 100 sets, spread out | 683.2 µs / 384.5 µs |
-| 100 nested edits, spread out | 651.3 µs / 418.9 µs |
-| push 100 | 154.5 µs / 79.2 µs |
-| 1 insert at n/2 | 14.2 µs / 8.0 µs |
-| 10 inserts + 10 removes, spread out | 164.3 µs / 169.5 µs |
-| 100 sets + 10 inserts + 10 removes | 831.0 µs / 648.5 µs |
-| splice 1,000 out of the middle | 42.1 µs / 21.8 µs |
-| pop 100 then push 100 | 216.2 µs / 104.6 µs |
-| reference: direct set | 5.1 µs / 2.8 µs |
-| reference: direct insert | 10.3 µs / 4.4 µs |
+| 1 set | 7.5 µs / 5.2 µs |
+| 1 nested edit (get(i).v = x) | 6.9 µs / 5.2 µs |
+| 100 sets, spread out | 594.3 µs / 377.8 µs |
+| 100 nested edits, spread out | 572.3 µs / 417.2 µs |
+| push 100 | 130.9 µs / 77.9 µs |
+| 1 insert at n/2 | 15.2 µs / 8.2 µs |
+| 10 inserts + 10 removes, spread out | 156.5 µs / 178.0 µs |
+| 100 sets + 10 inserts + 10 removes | 726.2 µs / 648.4 µs |
+| splice 1,000 out of the middle | 39.4 µs / 21.7 µs |
+| pop 100 then push 100 | 182.1 µs / 99.2 µs |
+| reference: direct set | 4.3 µs / 3.1 µs |
+| reference: direct insert | 8.7 µs / 4.6 µs |
 
 ## OrderedMap, OrderedSet — against Immutable.js
 
@@ -346,39 +346,39 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
 
 |  | valsem | Immutable | Immutable ÷ valsem |
 | --- | --- | --- | --- |
-| OrderedMap 100: build from entries | 38.2 µs / 40.1 µs | 18.2 µs / 25.1 µs | 1/2.1× / 1/1.6× |
-| OrderedMap 100: get | 80 ns / 67 ns | 52 ns / 63 ns | 1/1.6× / 1/1.1× |
-| OrderedMap 100: set existing key → novel value | 4.5 µs / 4.0 µs | 251 ns / 196 ns | 1/17.9× / 1/20.2× |
-| OrderedMap 100: append a new key | 4.5 µs / 3.5 µs | 509 ns / 509 ns | 1/8.8× / 1/7.0× |
-| OrderedMap 100: delete a middle key | 8.3 µs / 8.4 µs | 373 ns / 400 ns | 1/22.2× / 1/21.0× |
-| OrderedMap 100: indexOf a middle key | 214 ns / 181 ns | 1.8 µs / 1.2 µs | 8.4× / 6.4× |
-| OrderedMap 100: insert at n/2 | 16.3 µs / 10.1 µs | — | — / — |
-| OrderedMap 100: iterate entries | 2.8 µs / 3.9 µs | 4.2 µs / 3.4 µs | 1.5× / 1/1.1× |
-| OrderedMap 100: equals = (from vs set chain) | 29 ns / 35 ns | 4.9 µs / 4.4 µs | 168.6× / 126.8× |
-| OrderedMap 100: draft, 10 sets + 1 deletes | 60.0 µs / 43.9 µs | 1.7 µs / 1.9 µs | 1/35.5× / 1/23.2× |
-| OrderedMap 10000: build from entries | 4.25 ms / 3.50 ms | 1.93 ms / 2.89 ms | 1/2.2× / 1/1.2× |
-| OrderedMap 10000: get | 105 ns / 61 ns | 123 ns / 85 ns | 1.2× / 1.4× |
-| OrderedMap 10000: set existing key → novel value | 7.7 µs / 5.0 µs | 333 ns / 233 ns | 1/23.0× / 1/21.6× |
-| OrderedMap 10000: append a new key | 4.0 µs / 2.8 µs | 758 ns / 482 ns | 1/5.3× / 1/5.8× |
-| OrderedMap 10000: delete a middle key | 44.0 µs / 37.6 µs | 810 ns / 491 ns | 1/54.4× / 1/76.6× |
-| OrderedMap 10000: indexOf a middle key | 548 ns / 484 ns | 282.9 µs / 122.8 µs | 516.3× / 253.5× |
-| OrderedMap 10000: insert at n/2 | 33.7 µs / 26.1 µs | — | — / — |
-| OrderedMap 10000: iterate entries | 250.4 µs / 344.8 µs | 383.9 µs / 342.7 µs | 1.5× / 1.0× |
-| OrderedMap 10000: equals = (from vs set chain) | 34 ns / 482 ns | 586.6 µs / 496.9 µs | 17329.7× / 1031.4× |
-| OrderedMap 10000: draft, 10 sets + 1 deletes | 96.8 µs / 71.8 µs | 3.0 µs / 2.5 µs | 1/32.0× / 1/29.0× |
-| OrderedMap 10000: draft, 100 sets + 10 deletes | 1.35 ms / 946.9 µs | 26.6 µs / 26.4 µs | 1/50.8× / 1/35.9× |
-| OrderedSet 100: build from members | 27.9 µs / 25.9 µs | 17.5 µs / 19.0 µs | 1/1.6× / 1/1.4× |
-| OrderedSet 100: has | 51 ns / 44 ns | 44 ns / 47 ns | 1/1.2× / 1.1× |
-| OrderedSet 100: add a new member | 2.4 µs / 1.5 µs | 492 ns / 367 ns | 1/4.8× / 1/4.0× |
-| OrderedSet 100: delete a middle member | 7.7 µs / 6.8 µs | 416 ns / 278 ns | 1/18.5× / 1/24.4× |
-| OrderedSet 100: indexOf a middle member | 244 ns / 240 ns | 2.1 µs / 1.1 µs | 8.8× / 4.7× |
-| OrderedSet 100: iterate members | 2.8 µs / 1.1 µs | 3.4 µs / 2.1 µs | 1.2× / 2.0× |
-| OrderedSet 10000: build from members | 3.57 ms / 2.77 ms | 1.93 ms / 2.39 ms | 1/1.9× / 1/1.2× |
-| OrderedSet 10000: has | 95 ns / 68 ns | 86 ns / 89 ns | 1/1.1× / 1.3× |
-| OrderedSet 10000: add a new member | 3.5 µs / 2.4 µs | 739 ns / 503 ns | 1/4.7× / 1/4.7× |
-| OrderedSet 10000: delete a middle member | 36.1 µs / 25.9 µs | 640 ns / 497 ns | 1/56.3× / 1/52.2× |
-| OrderedSet 10000: indexOf a middle member | 496 ns / 529 ns | 260.2 µs / 137.5 µs | 524.8× / 259.8× |
-| OrderedSet 10000: iterate members | 74.1 µs / 94.3 µs | 308.2 µs / 220.5 µs | 4.2× / 2.3× |
+| OrderedMap 100: build from entries | 35.1 µs / 37.3 µs | 16.9 µs / 24.0 µs | 1/2.1× / 1/1.6× |
+| OrderedMap 100: get | 74 ns / 69 ns | 50 ns / 49 ns | 1/1.5× / 1/1.4× |
+| OrderedMap 100: set existing key → novel value | 4.4 µs / 4.0 µs | 239 ns / 194 ns | 1/18.2× / 1/20.6× |
+| OrderedMap 100: append a new key | 3.8 µs / 3.1 µs | 496 ns / 508 ns | 1/7.7× / 1/6.0× |
+| OrderedMap 100: delete a middle key | 8.7 µs / 9.0 µs | 360 ns / 412 ns | 1/24.2× / 1/21.9× |
+| OrderedMap 100: indexOf a middle key | 218 ns / 199 ns | 1.7 µs / 1.2 µs | 8.0× / 6.0× |
+| OrderedMap 100: insert at n/2 | 14.9 µs / 14.1 µs | — | — / — |
+| OrderedMap 100: iterate entries | 2.8 µs / 3.8 µs | 4.3 µs / 3.4 µs | 1.5× / 1/1.1× |
+| OrderedMap 100: equals = (from vs set chain) | 28 ns / 30 ns | 4.8 µs / 4.3 µs | 170.0× / 144.2× |
+| OrderedMap 100: draft, 10 sets + 1 deletes | 50.5 µs / 38.9 µs | 1.6 µs / 1.8 µs | 1/32.4× / 1/21.9× |
+| OrderedMap 10000: build from entries | 4.01 ms / 3.39 ms | 1.84 ms / 2.75 ms | 1/2.2× / 1/1.2× |
+| OrderedMap 10000: get | 85 ns / 58 ns | 99 ns / 88 ns | 1.2× / 1.5× |
+| OrderedMap 10000: set existing key → novel value | 5.6 µs / 4.6 µs | 290 ns / 233 ns | 1/19.3× / 1/19.9× |
+| OrderedMap 10000: append a new key | 3.8 µs / 3.6 µs | 694 ns / 488 ns | 1/5.5× / 1/7.4× |
+| OrderedMap 10000: delete a middle key | 40.4 µs / 37.9 µs | 700 ns / 477 ns | 1/57.7× / 1/79.3× |
+| OrderedMap 10000: indexOf a middle key | 526 ns / 494 ns | 277.3 µs / 125.0 µs | 527.1× / 253.0× |
+| OrderedMap 10000: insert at n/2 | 75.9 µs / 26.0 µs | — | — / — |
+| OrderedMap 10000: iterate entries | 243.3 µs / 334.8 µs | 376.5 µs / 340.0 µs | 1.5× / 1.0× |
+| OrderedMap 10000: equals = (from vs set chain) | 33 ns / 448 ns | 567.2 µs / 498.0 µs | 17286.9× / 1111.8× |
+| OrderedMap 10000: draft, 10 sets + 1 deletes | 94.0 µs / 70.8 µs | 2.8 µs / 2.5 µs | 1/33.6× / 1/28.4× |
+| OrderedMap 10000: draft, 100 sets + 10 deletes | 1.19 ms / 958.2 µs | 23.9 µs / 26.9 µs | 1/49.8× / 1/35.7× |
+| OrderedSet 100: build from members | 26.8 µs / 25.4 µs | 16.9 µs / 17.2 µs | 1/1.6× / 1/1.5× |
+| OrderedSet 100: has | 50 ns / 44 ns | 41 ns / 49 ns | 1/1.2× / 1.1× |
+| OrderedSet 100: add a new member | 2.4 µs / 2.1 µs | 478 ns / 347 ns | 1/5.1× / 1/6.2× |
+| OrderedSet 100: delete a middle member | 6.6 µs / 6.5 µs | 402 ns / 266 ns | 1/16.3× / 1/24.3× |
+| OrderedSet 100: indexOf a middle member | 223 ns / 203 ns | 2.1 µs / 1.1 µs | 9.3× / 5.5× |
+| OrderedSet 100: iterate members | 2.6 µs / 1.0 µs | 3.4 µs / 1.9 µs | 1.3× / 1.9× |
+| OrderedSet 10000: build from members | 3.32 ms / 2.74 ms | 1.79 ms / 2.34 ms | 1/1.9× / 1/1.2× |
+| OrderedSet 10000: has | 86 ns / 66 ns | 79 ns / 89 ns | 1/1.1× / 1.4× |
+| OrderedSet 10000: add a new member | 3.3 µs / 2.6 µs | 679 ns / 524 ns | 1/4.8× / 1/5.0× |
+| OrderedSet 10000: delete a middle member | 28.0 µs / 25.6 µs | 598 ns / 506 ns | 1/46.7× / 1/50.6× |
+| OrderedSet 10000: indexOf a middle member | 477 ns / 525 ns | 253.6 µs / 140.0 µs | 531.3× / 266.6× |
+| OrderedSet 10000: iterate members | 71.3 µs / 94.6 µs | 305.2 µs / 223.1 µs | 4.3× / 2.4× |
 
 ## Frozen arrays — what the engine charges for the frozen state
 
@@ -392,19 +392,19 @@ wrapper).
 
 |  | ints unfrozen | ints frozen | doubles unfrozen | doubles frozen | objects unfrozen | objects frozen |
 | --- | --- | --- | --- | --- | --- | --- |
-| the Object.freeze call itself (10k elements) | — | 127 ns / 1.84 ms / 5.3 µs | — | 199.0 µs / 1.84 ms / 17.2 µs | — | 157 ns / 1.87 ms / 5.3 µs |
-| indexed loop read | 5.1 µs / 6.3 µs / 6.4 µs | 60.8 µs / 106.8 µs / 6.5 µs | 60.9 µs / 15.7 µs / 9.4 µs | 59.3 µs / 110.4 µs / 9.3 µs | 63.7 µs / 23.2 µs / 19.0 µs | 69.7 µs / 117.5 µs / 18.7 µs |
-| for…of | 4.9 µs / 8.8 µs / 29.9 µs | 83.4 µs / 179.9 µs / 31.8 µs | 76.0 µs / 69.3 µs / 32.3 µs | 67.8 µs / 184.0 µs / 31.5 µs | 70.5 µs / 22.4 µs / 45.2 µs | 68.9 µs / 194.9 µs / 44.7 µs |
-| forEach | 27.5 µs / 23.1 µs / 45.2 µs | 242.8 µs / 189.5 µs / 44.9 µs | 85.2 µs / 50.2 µs / 141.1 µs | 257.5 µs / 201.3 µs / 133.7 µs | 80.8 µs / 50.1 µs / 147.6 µs | 254.4 µs / 205.1 µs / 146.2 µs |
-| map | 61.5 µs / 21.7 µs / 26.4 µs | 60.7 µs / 204.8 µs / 24.8 µs | 80.2 µs / 25.9 µs / 27.6 µs | 77.2 µs / 196.5 µs / 27.7 µs | 68.4 µs / 34.5 µs / 37.3 µs | 68.8 µs / 203.5 µs / 34.5 µs |
-| filter | 83.5 µs / 179.9 µs / 44.9 µs | 269.6 µs / 353.3 µs / 46.7 µs | 209.5 µs / 170.7 µs / 56.5 µs | 410.5 µs / 358.2 µs / 55.6 µs | 205.5 µs / 185.3 µs / 80.5 µs | 443.5 µs / 369.7 µs / 78.2 µs |
-| reduce | 56.4 µs / 11.8 µs / 34.9 µs | 56.7 µs / 187.0 µs / 34.5 µs | 76.6 µs / 23.7 µs / 54.4 µs | 70.9 µs / 197.0 µs / 54.5 µs | 92.8 µs / 26.7 µs / 64.1 µs | 93.2 µs / 201.9 µs / 63.6 µs |
-| indexOf (miss) | 2.0 µs / 5.2 µs / 4.2 µs | 4.5 µs / 98.9 µs / 4.2 µs | 2.0 µs / 11.9 µs / 4.1 µs | 6.1 µs / 101.7 µs / 4.1 µs | 6.0 µs / 12.2 µs / 4.1 µs | 6.0 µs / 103.7 µs / 4.1 µs |
-| slice() | 1.7 µs / 7.2 µs / 1.7 µs | 234.5 µs / 132.5 µs / 1.7 µs | 1.6 µs / 3.2 µs / 1.7 µs | 246.3 µs / 134.0 µs / 1.7 µs | 1.6 µs / 1.5 µs / 1.7 µs | 230.0 µs / 140.2 µs / 1.7 µs |
-| spread [...a] | 1.6 µs / 8.9 µs / 46.2 µs | 1.7 µs / 134.2 µs / 45.7 µs | 1.7 µs / 7.5 µs / 45.9 µs | 1.6 µs / 144.0 µs / 45.4 µs | 2.0 µs / 9.9 µs / 45.7 µs | 1.7 µs / 142.2 µs / 45.3 µs |
-| concat | 3.5 µs / 2.4 µs / 1.4 µs | 28.7 µs / 144.4 µs / 1.4 µs | 1.9 µs / 3.0 µs / 1.3 µs | 29.4 µs / 145.1 µs / 1.3 µs | 3.0 µs / 2.6 µs / 1.4 µs | 29.4 µs / 150.4 µs / 1.3 µs |
-| JSON.stringify | 44.6 µs / 66.4 µs / 80.3 µs | 209.3 µs / 230.5 µs / 79.2 µs | 150.5 µs / 165.7 µs / 282.4 µs | 321.4 µs / 333.5 µs / 282.8 µs | 236.8 µs / 209.7 µs / 464.6 µs | 548.1 µs / 866.1 µs / 466.7 µs |
-| at(-1) ×1000 | 876 ns / 2.2 µs / 1.2 µs | 20.8 µs / 10.9 µs / 1.3 µs | 4.2 µs / 5.8 µs / 940 ns | 20.9 µs / 12.8 µs / 894 ns | 3.5 µs / 4.5 µs / 2.5 µs | 21.4 µs / 13.2 µs / 2.6 µs |
+| the Object.freeze call itself (10k elements) | — | 92 ns / 1.85 ms / 5.8 µs | — | 235.7 µs / 1.85 ms / 19.7 µs | — | 163 ns / 1.87 ms / 7.1 µs |
+| indexed loop read | 4.9 µs / 6.1 µs / 6.5 µs | 59.5 µs / 101.9 µs / 6.5 µs | 60.2 µs / 15.3 µs / 9.0 µs | 58.6 µs / 109.7 µs / 8.8 µs | 62.3 µs / 22.7 µs / 18.5 µs | 69.0 µs / 118.9 µs / 18.5 µs |
+| for…of | 4.9 µs / 8.9 µs / 29.4 µs | 84.8 µs / 179.3 µs / 31.4 µs | 73.2 µs / 71.6 µs / 31.6 µs | 65.7 µs / 185.2 µs / 30.5 µs | 69.0 µs / 22.4 µs / 44.9 µs | 65.9 µs / 194.1 µs / 44.3 µs |
+| forEach | 26.9 µs / 22.4 µs / 38.4 µs | 234.4 µs / 188.6 µs / 38.5 µs | 83.4 µs / 49.5 µs / 54.2 µs | 258.6 µs / 203.6 µs / 53.1 µs | 78.9 µs / 50.3 µs / 67.8 µs | 245.9 µs / 207.2 µs / 66.8 µs |
+| map | 59.3 µs / 36.3 µs / 25.3 µs | 59.5 µs / 202.1 µs / 24.4 µs | 78.1 µs / 37.9 µs / 27.9 µs | 75.3 µs / 195.5 µs / 28.0 µs | 66.3 µs / 44.8 µs / 36.7 µs | 65.9 µs / 203.6 µs / 33.7 µs |
+| filter | 80.0 µs / 28.4 µs / 44.3 µs | 265.2 µs / 213.2 µs / 44.4 µs | 214.7 µs / 139.8 µs / 55.7 µs | 413.5 µs / 365.6 µs / 55.4 µs | 201.8 µs / 179.4 µs / 77.6 µs | 448.8 µs / 359.9 µs / 77.2 µs |
+| reduce | 56.4 µs / 11.9 µs / 34.5 µs | 55.4 µs / 189.9 µs / 34.0 µs | 74.1 µs / 23.7 µs / 54.1 µs | 69.2 µs / 203.4 µs / 54.5 µs | 92.5 µs / 26.7 µs / 63.7 µs | 93.5 µs / 203.0 µs / 62.6 µs |
+| indexOf (miss) | 2.0 µs / 5.3 µs / 4.1 µs | 5.1 µs / 102.8 µs / 4.1 µs | 2.1 µs / 11.9 µs / 4.0 µs | 6.1 µs / 103.6 µs / 4.0 µs | 6.1 µs / 12.5 µs / 4.0 µs | 6.1 µs / 104.1 µs / 4.0 µs |
+| slice() | 1.5 µs / 5.7 µs / 1.3 µs | 232.3 µs / 135.3 µs / 1.4 µs | 1.4 µs / 1.5 µs / 1.3 µs | 241.4 µs / 137.4 µs / 1.4 µs | 1.7 µs / 4.2 µs / 1.3 µs | 225.9 µs / 141.5 µs / 1.7 µs |
+| spread [...a] | 1.6 µs / 7.0 µs / 45.4 µs | 1.7 µs / 135.2 µs / 46.0 µs | 1.7 µs / 10.2 µs / 45.7 µs | 1.6 µs / 142.0 µs / 45.4 µs | 1.7 µs / 9.0 µs / 45.1 µs | 1.7 µs / 141.4 µs / 44.5 µs |
+| concat | 3.4 µs / 2.5 µs / 1.6 µs | 28.4 µs / 145.2 µs / 1.6 µs | 1.8 µs / 3.5 µs / 1.6 µs | 29.3 µs / 147.7 µs / 1.4 µs | 3.0 µs / 3.4 µs / 1.3 µs | 29.1 µs / 153.1 µs / 1.3 µs |
+| JSON.stringify | 43.9 µs / 67.6 µs / 79.2 µs | 211.5 µs / 231.3 µs / 78.1 µs | 150.8 µs / 167.0 µs / 279.8 µs | 318.3 µs / 340.8 µs / 279.0 µs | 236.3 µs / 209.9 µs / 447.0 µs | 558.4 µs / 866.4 µs / 449.9 µs |
+| at(-1) ×1000 | 970 ns / 2.2 µs / 1.2 µs | 20.9 µs / 11.0 µs / 1.2 µs | 4.1 µs / 5.9 µs / 887 ns | 21.2 µs / 12.7 µs / 894 ns | 3.6 µs / 4.7 µs / 2.4 µs | 21.4 µs / 13.0 µs / 2.4 µs |
 
 ## skipFreezing() — what the switch buys, by engine
 
@@ -426,17 +426,17 @@ table matters more in one column of the header than in the other.
 
 |  | freezing on | skipFreezing() | freezing on ÷ skipFreezing() |
 | --- | --- | --- | --- |
-| produce: one edit in a 10,000-record plain array | 15.3 µs / 2.71 ms / 30.1 µs | 12.8 µs / 19.3 µs / 30.4 µs | 1.2× / 141.0× / 1.0× |
-| produce: the same edit, in a ValueList | 4.3 µs / 3.3 µs / 7.8 µs | 3.5 µs / 3.8 µs / 5.7 µs | 1.2× / 1/1.2× / 1.4× |
-| produce: one field of a 3-key record | 748 ns / 792 ns / 1.1 µs | 736 ns / 875 ns / 1.1 µs | 1.0× / 1/1.1× / 1.0× |
-| intern: a new 10,000-number array | 283.6 µs / 381.7 µs / 416.9 µs | 258.3 µs / 275.2 µs / 416.3 µs | 1.1× / 1.4× / 1.0× |
-| intern: 1,000 new 10-field records | 1.64 ms / 765.2 µs / 1.87 ms | 1.56 ms / 696.0 µs / 1.66 ms | 1.0× / 1.1× / 1.1× |
-| your code: indexed loop over a canonical 10,000-record array | 81.1 µs / 113.3 µs / 46.9 µs | 44.8 µs / 19.2 µs / 47.0 µs | 1.8× / 5.9× / 1.0× |
-| your code: for…of | 97.7 µs / 182.8 µs / 48.6 µs | 47.6 µs / 49.1 µs / 48.3 µs | 2.1× / 3.7× / 1.0× |
-| your code: arr.filter(…) | 255.2 µs / 197.6 µs / 44.9 µs | 75.2 µs / 23.4 µs / 44.1 µs | 3.4× / 8.5× / 1.0× |
-| your code: arr.map(…) | 67.3 µs / 191.4 µs / 42.9 µs | 67.1 µs / 19.7 µs / 43.0 µs | 1.0× / 9.7× / 1.0× |
-| your code: JSON.stringify(state) | 1.33 ms / 1.65 ms / 885.0 µs | 510.6 µs / 408.0 µs / 898.4 µs | 2.6× / 4.1× / 1.0× |
-| your code: for…of over a ValueList of the same records | 72.7 µs / 78.8 µs / 82.4 µs | 72.0 µs / 79.8 µs / 82.5 µs | 1.0× / 1.0× / 1.0× |
+| produce: one edit in a 10,000-record plain array | 13.7 µs / 2.78 ms / 29.8 µs | 12.0 µs / 19.4 µs / 29.6 µs | 1.1× / 143.3× / 1.0× |
+| produce: the same edit, in a ValueList | 3.9 µs / 4.9 µs / 6.7 µs | 4.1 µs / 3.5 µs / 6.0 µs | 1/1.1× / 1.4× / 1.1× |
+| produce: one field of a 3-key record | 705 ns / 887 ns / 1.0 µs | 706 ns / 870 ns / 1.0 µs | 1.0× / 1.0× / 1.0× |
+| intern: a new 10,000-number array | 179.4 µs / 384.0 µs / 419.3 µs | 167.2 µs / 278.6 µs / 427.9 µs | 1.1× / 1.4× / 1.0× |
+| intern: 1,000 new 10-field records | 1.51 ms / 745.2 µs / 1.67 ms | 1.45 ms / 707.1 µs / 1.54 ms | 1.0× / 1.1× / 1.1× |
+| your code: indexed loop over a canonical 10,000-record array | 78.6 µs / 113.2 µs / 46.2 µs | 44.8 µs / 19.4 µs / 46.0 µs | 1.8× / 5.8× / 1.0× |
+| your code: for…of | 97.1 µs / 182.5 µs / 47.8 µs | 47.1 µs / 49.0 µs / 48.2 µs | 2.1× / 3.7× / 1.0× |
+| your code: arr.filter(…) | 253.1 µs / 197.6 µs / 44.1 µs | 74.7 µs / 24.2 µs / 44.4 µs | 3.4× / 8.2× / 1.0× |
+| your code: arr.map(…) | 66.9 µs / 192.8 µs / 42.7 µs | 66.7 µs / 19.0 µs / 42.5 µs | 1.0× / 10.1× / 1.0× |
+| your code: JSON.stringify(state) | 1.33 ms / 1.65 ms / 883.3 µs | 507.7 µs / 407.3 µs / 884.4 µs | 2.6× / 4.1× / 1.0× |
+| your code: for…of over a ValueList of the same records | 71.9 µs / 77.0 µs / 82.0 µs | 71.6 µs / 75.7 µs / 81.6 µs | 1.0× / 1.0× / 1.0× |
 
 ## Copying a wide record — dictionary mode and megamorphic spread
 
@@ -452,10 +452,10 @@ Copy rows are for frozen fast-mode sources of 3, 20, 100 and 1,000 keys.
 
 |  | spread, ≤4 shapes | spread, megamorphic | Object.assign, megamorphic |
 | --- | --- | --- | --- |
-| copy a 3-key record | 16 ns / 21 ns | 39 ns / 19 ns | 16 ns / 30 ns |
-| copy a 20-key record | 40 ns / 34 ns | 250 ns / 31 ns | 42 ns / 36 ns |
-| copy a 100-key record | 122 ns / 111 ns | 2.3 µs / 96 ns | 115 ns / 104 ns |
-| copy a 1000-key record | 1.0 µs / 28.5 µs | 109.9 µs / 30.6 µs | 1.0 µs / 33.1 µs |
+| copy a 3-key record | 16 ns / 19 ns | 42 ns / 17 ns | 16 ns / 26 ns |
+| copy a 20-key record | 39 ns / 27 ns | 258 ns / 30 ns | 41 ns / 33 ns |
+| copy a 100-key record | 123 ns / 88 ns | 2.2 µs / 86 ns | 117 ns / 87 ns |
+| copy a 1000-key record | 1.0 µs / 27.1 µs | 114.6 µs / 27.0 µs | 1.0 µs / 27.1 µs |
 
 ## Bundle size
 
@@ -467,16 +467,16 @@ comparable entry points of those libraries. Node only.
 
 |  | minified | gzipped |
 | --- | --- | --- |
-| valsem: produce | 29.5 KB / — | 10.3 KB / — |
+| valsem: produce | 29.6 KB / — | 10.4 KB / — |
 | valsem: produce, current, original | 29.9 KB / — | 10.5 KB / — |
 | valsem: deepEqual | 3.7 KB / — | 1.6 KB / — |
 | valsem: intern | 13.2 KB / — | 5.1 KB / — |
-| valsem: HashMap | 14.1 KB / — | 5.5 KB / — |
-| valsem: ValueMap | 27.6 KB / — | 9.9 KB / — |
-| valsem: ValueList | 35.0 KB / — | 12.5 KB / — |
-| valsem: OrderedMap | 48.8 KB / — | 16.5 KB / — |
-| valsem: memoize | 15.4 KB / — | 5.9 KB / — |
-| valsem: everything | 90.5 KB / — | 27.9 KB / — |
+| valsem: HashMap | 14.2 KB / — | 5.5 KB / — |
+| valsem: ValueMap | 27.9 KB / — | 10.0 KB / — |
+| valsem: ValueList | 36.9 KB / — | 13.0 KB / — |
+| valsem: OrderedMap | 50.5 KB / — | 17.0 KB / — |
+| valsem: memoize | 15.3 KB / — | 5.9 KB / — |
+| valsem: everything | 93.9 KB / — | 28.5 KB / — |
 | immer: produce | 9.1 KB / — | 3.7 KB / — |
 | immer: produce + enableMapSet | 12.0 KB / — | 4.6 KB / — |
 | mutative: create | 18.7 KB / — | 6.2 KB / — |
