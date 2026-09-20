@@ -38,6 +38,21 @@ describe('ValueList', () => {
     expect(b[hashCode]).toBe(ValueList.of(1, 2, 3, 4)[hashCode]);
   });
 
+  it('push takes its values as Array.prototype.push does', () => {
+    const a = ValueList.of(1, 2);
+    expect(a.push(3, 4, 5)).toBe(ValueList.of(1, 2, 3, 4, 5));
+    expect(a.push()).toBe(a);
+    // Across leaf boundaries and at every starting size, several at once is one at a time.
+    const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
+    for (const n of [0, 1, 63, 64, 500]) {
+      const base = ValueList.from(range(n));
+      const more = range(200).map((x) => x + n);
+      let one = base;
+      for (const x of more) one = one.push(x);
+      expect(base.push(...more)).toBe(one);
+    }
+  });
+
   it('push: pool hit avoids new allocation', () => {
     const target = ValueList.of('x', 'y');
     const built = ValueList.of('x').push('y');
@@ -280,7 +295,7 @@ describe('ValueList — canonical form (content-chunked tree)', () => {
     check(list.remove(1999), base.slice(0, 1999));
     check(list.set(777, { id: -7 }), base.map((x, i) => (i === 777 ? { id: -7 } : x)));
     check(list.pop(), base.slice(0, -1));
-    check(list.splice(500, 300, arrOf(10, 9)), [...base.slice(0, 500), ...arrOf(10, 9), ...base.slice(800)]);
+    check(list.splice(500, 300, ...arrOf(10, 9)), [...base.slice(0, 500), ...arrOf(10, 9), ...base.slice(800)]);
     check(list.splice(0, 2000), []);
     check(list.slice(100, 900), base.slice(100, 900));
     check(list.slice(0, 2000), base);
@@ -318,7 +333,7 @@ describe('ValueList — property: every operation agrees with an array mirror an
             case 'set': if (n === 0) break; { const i = o.i % n; mirror = mirror.map((x, k) => (k === i ? o.v : x)); list = list.set(i, o.v); } break;
             case 'insert': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), o.v, ...mirror.slice(i)]; list = list.insert(i, o.v); } break;
             case 'remove': if (n === 0) break; { const i = o.i % n; mirror = [...mirror.slice(0, i), ...mirror.slice(i + 1)]; list = list.remove(i); } break;
-            case 'splice': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), ...o.items, ...mirror.slice(i + o.del)]; list = list.splice(i, o.del, o.items); } break;
+            case 'splice': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), ...o.items, ...mirror.slice(i + o.del)]; list = list.splice(i, o.del, ...o.items); } break;
             case 'slice': { const i = o.i % (n + 1); const j = o.j % (n + 1); mirror = mirror.slice(i, j); list = list.slice(i, j); } break;
             case 'concat': mirror = [...mirror, ...o.items]; list = list.concat(ValueList.from(o.items)); break;
           }

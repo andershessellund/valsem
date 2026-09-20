@@ -153,14 +153,18 @@ describe('ValueList: an edit names a place that exists', () => {
         const list = ValueList.from(range(n));
         const withCount = range(n);
         withCount.splice(start, del, ...items);
-        expect([...list.splice(start, del, items)]).toEqual(withCount);
+        expect([...list.splice(start, del, ...items)]).toEqual(withCount);
         const toEnd = range(n);
         toEnd.splice(start);
         expect([...list.splice(start)]).toEqual(toEnd);
-        // The items are one array here, so an `undefined` count is how a caller
-        // removes through the end AND inserts: it means "omitted", not 0.
-        expect([...list.splice(start, undefined, items)]).toEqual([...toEnd, ...items]);
-        expect(list.splice(start, del, items)).toBe(ValueList.from(withCount)); // and it is the canonical of that content
+        expect([...list.splice(start, undefined)]).toEqual(toEnd);
+        // The items follow the count as Array takes them, and Array reads an
+        // `undefined` count before items as 0: "the rest, and insert" is Infinity.
+        expect([...list.splice(start, Infinity, ...items)]).toEqual([...toEnd, ...items]);
+        if (items.length !== 0) {
+          expect(() => list.splice(start, undefined, ...items)).toThrow(/ValueList\.splice: deleteCount must be an integer when items follow it, got undefined/);
+        }
+        expect(list.splice(start, del, ...items)).toBe(ValueList.from(withCount)); // and it is the canonical of that content
       }),
       { numRuns: 600 },
     );
@@ -173,7 +177,7 @@ describe('ValueList: an edit names a place that exists', () => {
         for (const start of [n + k, -k, Infinity, -Infinity]) {
           expect(() => list.splice(start)).toThrow(RangeError);
           expect(() => list.splice(start, 1)).toThrow(RangeError);
-          expect(() => list.splice(start, 0, [9])).toThrow(RangeError);
+          expect(() => list.splice(start, 0, 9)).toThrow(RangeError);
         }
         expect(() => list.splice(0, -k)).toThrow(RangeError);
       }),
@@ -343,6 +347,20 @@ describe('the other index-taking entry points', () => {
     for (const bad of [...JUNK, -1]) {
       expect(() => produce(base, (d) => void (d.splice as Loose)(0, bad, 99))).toThrow(RangeError);
     }
+    // An `undefined` count before items: Array reads it as 0, "left out" reads
+    // as through the end, so it throws, and the draft is untouched.
+    let threw: unknown;
+    const kept = produce(base, (d) => {
+      try {
+        d.splice(2, undefined, 99);
+      } catch (e) {
+        threw = e;
+      }
+    });
+    expect(threw).toBeInstanceOf(RangeError);
+    expect((threw as Error).message).toMatch(/^DraftList\.splice: deleteCount must be an integer when items follow it, got undefined/);
+    expect(kept).toBe(base);
+    expect([...produce(base, (d) => void d.splice(2, undefined))]).toEqual(range(2)); // with no items it is the default
     produce(base, (d) => {
       d.push(8);
       expect(d.get(8)).toBe(8); // the tail counts

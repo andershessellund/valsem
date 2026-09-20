@@ -615,8 +615,10 @@ On a plain array in a recipe, the mutators valsem intercepts (`splice`,
 intercept anything. A required position that is missing throws like any
 other non-integer (`splice()`, `copyWithin(undefined, 1)`, where `Array`
 reads `undefined` as 0); an optional one left `undefined` means its default,
-as to `Array`, with one exception: `splice(i, undefined, x)` throws, because `Array` coerces that count to 0 and the `ValueList` twin
-reads it as "through the end", and one of the two deletes data. The check
+as to `Array`, with one exception: `splice(i, undefined, x)` throws, because
+`Array` coerces that count to 0 and the `ValueList` twin reads it as "through
+the end", and one of the two deletes data. Since D52 the twins take their
+items as `Array` does, so the same call throws on them too. The check
 runs before the draft is marked or copied, so a recipe that catches the
 error carries on with an untouched draft. **Rejected:** `TypeError` for
 non-numbers and `RangeError` for non-integers, as Temporal splits them: two
@@ -764,6 +766,30 @@ use site. It gained `toJSON` for JSON parity, and, with every other value
 type, its markers moved from own class fields to prototype getters over a
 private field (9 ns more to construct, no own symbol properties), so a
 spread copy carries no marker. DESIGN.md §6.7.
+
+### D52. `ValueList.push` and `splice` take their items as `Array` does
+
+`list.push(a, b)` and `list.splice(start, count, a, b)`: the items are rest
+arguments, as on `Array.prototype` and on `DraftList`, and the result is the
+new list.
+
+**Why.** A draft has every method of its value, and until now two of them
+shared a name and not a shape: `DraftList.push(a, b)` appended both,
+`ValueList.push(a, b)` dropped `b` without a word, and
+`ValueList.splice(0, 1, a, b)` inserted nothing, because the third parameter
+was one array. TypeScript caught it; JavaScript, and a `ValueList<unknown>`,
+did not. Where a method borrows `Array`'s name it now borrows `Array`'s
+arguments, and what differs is what must: the return value, and the checked
+positions of D45. With the items after the count, `splice(i, undefined, x)`
+is the call D45 already refuses on a plain array draft, `Array`'s "delete
+nothing" against "through the end", so `ValueList` and `DraftList` throw on
+it as well; `Infinity` says "the rest, and insert". **Rejected:** keeping the
+array parameter and throwing on surplus arguments: safe, and still two shapes
+for one name. **Cost.** Breaking for callers of the array form, silently so
+where the element type admits an array. Spreading a long array is bounded by
+the engine's argument limit, as it is for `Array`: `concat` a
+`ValueList.from(array)`. The drafts' own bulk edits go through an internal
+array form.
 
 ### D46. `JSON.stringify` sees the collections: arrays, and `[key, value]` pairs
 

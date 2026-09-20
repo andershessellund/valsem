@@ -61,6 +61,19 @@ export function extentArg(value: number, operation: string, name: string): numbe
   return n;
 }
 
+/**
+ * `splice`'s count when items follow it. Left out, the count means "through
+ * the end"; but `Array` reads an explicit `undefined` before items as 0, so
+ * one of the two readings deletes data, and the call throws. `Infinity` is
+ * how to say "the rest, and insert".
+ */
+export function spliceCount(deleteCount: number | undefined, itemCount: number, operation: string): number | undefined {
+  if (deleteCount === undefined && itemCount !== 0) {
+    throw new RangeError(`${operation}: deleteCount must be an integer when items follow it, got undefined (Infinity removes through the end)`);
+  }
+  return deleteCount;
+}
+
 /** The index of an element that exists: an integer in `[0, length)`. */
 export function elementIndex(index: number, length: number, operation: string): number {
   if (!Number.isInteger(index)) throw notAnInteger(index, operation, 'index');
