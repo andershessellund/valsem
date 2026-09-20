@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -144,19 +144,18 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   valueAt(index: number): V {
     return this.#vals.get(elementIndex(index, this.#keys.length, 'OrderedMap.valueAt'));
   }
-  /** The `[key, value]` entry at `index`, which must name one: an integer in `[0, size)`, or a `RangeError` (not counted from the end: that is {@link last}). */
-  at(index: number): [K, V] {
-    elementIndex(index, this.#keys.length, 'OrderedMap.at');
-    return [this.#keys.get(index), this.#vals.get(index)];
+  /** The `[key, value]` entry at `index` as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. {@link keyAt} and {@link valueAt} are the strict ones. */
+  at(index: number): [K, V] | undefined {
+    const i = atIndex(index, this.#keys.length, 'OrderedMap.at');
+    return i === -1 ? undefined : [this.#keys.get(i), this.#vals.get(i)];
   }
   /** The first entry, or `undefined` when empty. */
   first(): [K, V] | undefined {
-    return this.#keys.length === 0 ? undefined : this.at(0);
+    return this.at(0);
   }
   /** The last entry, or `undefined` when empty. */
   last(): [K, V] | undefined {
-    const n = this.#keys.length;
-    return n === 0 ? undefined : this.at(n - 1);
+    return this.at(-1);
   }
 
   /**

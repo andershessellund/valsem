@@ -89,7 +89,8 @@ describe('the published declarations, as a consumer compiles them', () => {
       interface Todo { readonly done: boolean }
       produce({ l: ValueList.of<Todo>({ done: false }), m: OrderedMap.from<string, Todo>([['k', { done: false }]]) }, (draft) => {
         draft.l.get(0).done = true;
-        draft.m.at(0)[1].done = true;
+        draft.m.valueAt(0).done = true;
+        draft.m.at(-1)![1].done = true;
         const first = draft.m.first();
         if (first !== undefined) first[1].done = true;
       });

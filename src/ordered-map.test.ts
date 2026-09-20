@@ -88,8 +88,10 @@ describe('OrderedMap — reads', () => {
     expect(m.keyAt(1)).toBe('b');
     expect(m.valueAt(1)).toBe(2);
     expect(m.at(2)).toEqual(['c', 3]);
-    expect(() => m.at(3)).toThrow(RangeError);
-    expect(() => m.at(-1)).toThrow(RangeError); // not counted from the end: that is last()
+    expect(m.at(3)).toBeUndefined(); // as Array.prototype.at: keyAt and valueAt are the strict ones
+    expect(m.at(-1)).toEqual(['c', 3]);
+    expect(m.at(-4)).toBeUndefined();
+    expect(() => m.valueAt(3)).toThrow(RangeError);
     expect(() => m.keyAt(3)).toThrow(RangeError);
     expect(() => m.valueAt(3)).toThrow(RangeError);
     expect(m.first()).toEqual(['a', 1]);

@@ -430,9 +430,10 @@ and does not pretend to be (D29).
   unchanged write returns `this`.
 - **Checked positions.** A positional argument is checked by what it names,
   and fails with a `RangeError` before anything is touched. An *element*
-  (`get`, `at`, `keyAt`, `valueAt`, `set`, `remove`) is an integer in
+  (`get`, `keyAt`, `valueAt`, `set`, `remove`) is an integer in
   `[0, length)`, so those reads return `T`, never `undefined` for "not
-  there". An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
+  there". `at` is the exception with a namesake: `Array.prototype.at`'s
+  bounds, a negative index from the end and `undefined` for no element (D56). An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
   an integer in `[0, length]`, not counted from the end. A *range*
   has an answer wherever it points, the part that exists: `slice`'s bounds
   keep `Array`'s clamping whole, and `splice`'s count is an amount, an

@@ -74,6 +74,18 @@ export function spliceCount(deleteCount: number | undefined, itemCount: number, 
   return deleteCount;
 }
 
+/**
+ * `Array.prototype.at`'s reading of an index: counted from the end when
+ * negative, and -1 when it names nothing, which is `at`'s `undefined`. Its
+ * bounds are `Array`'s; its type is not, as everywhere (D45): a non-integer
+ * is an upstream computation gone wrong, and throws.
+ */
+export function atIndex(index: number, length: number, operation: string): number {
+  const i = indexArg(index, operation, 'index');
+  const k = i < 0 ? length + i : i;
+  return k >= 0 && k < length ? k : -1;
+}
+
 /** The index of an element that exists: an integer in `[0, length)`. */
 export function elementIndex(index: number, length: number, operation: string): number {
   if (!Number.isInteger(index)) throw notAnInteger(index, operation, 'index');

@@ -623,9 +623,9 @@ runs before the draft is marked or copied, so a recipe that catches the
 error carries on with an untouched draft. **Rejected:** `TypeError` for
 non-numbers and `RangeError` for non-integers, as Temporal splits them: two
 error types for one mistake, and `set` and `insertAt` already answered
-`RangeError` for both. **Rejected:** negative indices in `at`, after
-`Array.prototype.at`: one rule for every element accessor is worth more than
-the namesake, and `last()` exists. **Cost.** Breaking for callers who relied
+`RangeError` for both. **Rejected, then reversed (D56):** negative indices
+in `at`, after `Array.prototype.at`; the argument then was that one rule for
+every element accessor is worth more than the namesake. **Cost.** Breaking for callers who relied
 on any of it; and `DraftList.get`'s return type is spelled `Draft<T> | (T &
 undefined)`, which is `Draft<T>` exactly, because a bare conditional type
 there is opaque to TypeScript's variance check and `ValueList<number>`
@@ -1405,6 +1405,27 @@ The last pass over the public names, while renaming still costs nothing.
 `size` is a getter: it walks every bucket and dereferences every weak
 reference, and a property should not cost O(n). **Cost.** Breaking, four
 times; nothing is published under the old names that anyone depends on.
+
+### D56. `at` is `Array.prototype.at`
+
+`at(index)` on `ValueList`, `OrderedSet`, `OrderedMap` and their drafts reads
+its index as `Array.prototype.at` does: a negative index counts from the end,
+and one that names no element gives `undefined`. The strict accessors are
+`get` on a list, `keyAt` and `valueAt` on an ordered map, and `valueAt`, new
+here, on an ordered set.
+
+**Why.** D45 refused this: one rule for every element accessor, and `last()`
+exists. But `at` is not a legacy name with legacy behaviour. It was added to
+the language in 2022 for exactly one reason, `arr.at(-1)`, so a method called
+`at` that throws on `-1` contradicts the only thing its name says; and since
+D52 the rule here is that a borrowed name brings its arguments. The strict
+accessor D45 wanted did not need this name: `ValueList` never had an `at`,
+it has `get`, and with `at` beside it a list now has both contracts under
+the names that mean them, the one that returns `T` and the one that probes.
+What is not borrowed is the coercion, as everywhere since D45: `at(0.5)` and
+`at(NaN)` throw, where `Array` reads index 0. **Cost.** Breaking on the
+ordered collections: `at` returns `T | undefined` where it threw and
+returned `T`; callers who want the throw say `valueAt`.
 
 ## Non-goals
 

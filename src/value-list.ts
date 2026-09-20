@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -419,6 +419,17 @@ export class ValueList<T> implements Iterable<T> {
   /** Number of elements. */
   get length(): number {
     return (this.#root === null ? 0 : this.#root.n) + this.#tail.length;
+  }
+
+  /**
+   * The element at `index` as `Array.prototype.at` reads it: a negative index
+   * counts from the end (`at(-1)` is the last element), and one that names
+   * nothing gives `undefined`. {@link get} is the strict one: it throws there
+   * and returns a `T`. A non-integer throws here too.
+   */
+  at(index: number): T | undefined {
+    const i = atIndex(index, this.length, 'ValueList.at');
+    return i === -1 ? undefined : this.get(i);
   }
 
   /**

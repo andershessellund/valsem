@@ -45,11 +45,15 @@ m1.get('sp');                    // 5
 **A position is checked.** What happens to an index depends on what it
 names, and what fails throws a `RangeError` before anything is touched:
 
-- **An element** (`get`, `set`, `remove`, and `at`/`keyAt`/`valueAt` on the
+- **An element** (`get`, `set`, `remove`, and `keyAt`/`valueAt` on the
   ordered collections) must exist: an integer in `[0, length)`. So `get(i)`
   returns a `T`, not a `T | undefined`, a loop over `length` needs no `!`,
-  and an `undefined` that comes back *is* an element. To probe, compare with
-  `length`.
+  and an `undefined` that comes back *is* an element.
+- **`at(i)` is `Array.prototype.at`**, on `ValueList` and the ordered
+  collections: a negative index counts from the end, so `list.at(-1)` is the
+  last element, and an index that names nothing gives `undefined`. It is the
+  accessor to probe with, and the one that takes `Array`'s bounds because it
+  takes `Array`'s name.
 - **An insertion point** (`insert`, `insertAt`, `splice`'s `start`) is an
   integer in `[0, length]`, never counted from the end, so the `-1` of an
   `indexOf` miss cannot quietly mean "the last one".

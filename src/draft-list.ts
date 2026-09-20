@@ -37,7 +37,7 @@ import {
 import { intern } from './intern.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { extentArg, spliceCount, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { atIndex, extentArg, spliceCount, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -128,6 +128,16 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
       return child as Draft<T>;
     }
     return value as Draft<T>;
+  }
+
+  /**
+   * The element at `index` (drafted, if it can be) as `Array.prototype.at`
+   * reads it: a negative index counts from the end, and one that names nothing
+   * gives `undefined`. `get` is the strict one.
+   */
+  at(index: number): Draft<T> | undefined {
+    const i = atIndex(index, this.length, 'DraftList.at');
+    return i === -1 ? undefined : this.get(i);
   }
 
   set(index: number, value: T): this {

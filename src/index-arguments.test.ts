@@ -8,7 +8,7 @@
 // review, finding 6). The fix coerced as Array does, ToIntegerOrInfinity.
 // Second (D45): positional arguments are CHECKED, by what they name.
 //
-//   - an ELEMENT (`get`, `at`, `keyAt`, `valueAt`, `set`, `remove`): an
+//   - an ELEMENT (`get`, `keyAt`, `valueAt`, `set`, `remove`): an
 //     integer in [0, length), or a RangeError. No element, no answer;
 //   - an INSERTION POINT (`insert`, `insertAt`, `splice`'s start): an integer
 //     in [0, length], not counted from the end, or a RangeError. An edit
@@ -251,6 +251,60 @@ describe('ValueList: a read names an element', () => {
   });
 });
 
+describe('at is Array.prototype.at, for whole arguments', () => {
+  // The one accessor that takes Array's bounds, because it takes Array's name:
+  // a negative index counts from the end, and one that names nothing is
+  // `undefined`. `get`, `keyAt` and `valueAt` stay the strict ones.
+  const whole = fc.oneof(fc.integer({ min: -12, max: 12 }), fc.constantFrom(Infinity, -Infinity, -0));
+
+  it('on ValueList, OrderedSet and OrderedMap, and on their drafts', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 8 }), whole, (n, i) => {
+        const xs = range(n);
+        const entries = xs.map((x) => [`k${x}`, x] as [string, number]);
+        const list = ValueList.from(xs);
+        const set = OrderedSet.from(xs);
+        const map = OrderedMap.from(entries);
+        expect(list.at(i)).toBe(xs.at(i));
+        expect(set.at(i)).toBe(xs.at(i));
+        expect(map.at(i)).toEqual(entries.at(i));
+        produce({ list, set, map }, (d) => {
+          expect(d.list.at(i)).toBe(xs.at(i));
+          expect(d.set.at(i)).toBe(xs.at(i));
+          expect(d.map.at(i)).toEqual(entries.at(i));
+          d.list.push(99); // and over what the recipe has done so far
+          expect(d.list.at(-1)).toBe(99);
+          expect(d.list.at(i)).toBe([...xs, 99].at(i));
+        });
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('hands out a draft on a draft, as get does', () => {
+    const next = produce({ l: ValueList.of({ v: 1 }, { v: 2 }), m: OrderedMap.from([['a', { v: 1 }]]) }, (d) => {
+      expect(d.l.at(-1)).toBe(d.l.get(1));
+      d.l.at(-1)!.v = 20;
+      d.m.at(-1)![1].v = 10;
+      expect(d.l.at(2)).toBeUndefined();
+      expect(d.m.at(1)).toBeUndefined();
+    });
+    expect(next.l).toBe(ValueList.of({ v: 1 }, { v: 20 }));
+    expect(next.m).toBe(OrderedMap.from([['a', { v: 10 }]]));
+  });
+
+  it('its bounds are Array’s and its type is not: a non-integer throws, as everywhere', () => {
+    const list = ValueList.of(1, 2, 3);
+    for (const bad of [...JUNK, undefined]) {
+      expect(() => (list.at as Loose)(bad)).toThrow(RangeError);
+      expect(() => (OrderedSet.of(1).at as Loose)(bad)).toThrow(RangeError);
+      expect(() => (OrderedMap.from([['a', 1]]).at as Loose)(bad)).toThrow(RangeError);
+    }
+    expect(() => (list.at as Loose)(0.5)).toThrow('ValueList.at: index must be an integer, got 0.5');
+    expect([1, 2, 3].at(0.5)).toBe(1); // where Array truncates
+  });
+});
+
 describe('the other index-taking entry points', () => {
   it('RawArray: slice is a range (Array’s, and the window past the last row is the rows there are); get names an element', () => {
     fc.assert(
@@ -273,17 +327,16 @@ describe('the other index-taking entry points', () => {
     for (const i of [3, -1, Infinity]) expect(() => raw.get!(i)).toThrow(RangeError);
   });
 
-  it('OrderedSet and OrderedMap: at, keyAt and valueAt name an entry; first and last have no index to get wrong', () => {
+  it('OrderedSet and OrderedMap: keyAt and valueAt name an entry; first and last have no index to get wrong', () => {
     const s = OrderedSet.from([1, 2, 3]);
     const m = OrderedMap.from([['a', 1], ['b', 2]]);
     for (const i of [NaN, 0.5, -1, Infinity, 3.5, 3]) {
-      expect(() => s.at(i)).toThrow(RangeError);
-      expect(() => m.at(i)).toThrow(RangeError);
+      expect(() => s.valueAt(i)).toThrow(RangeError);
       expect(() => m.keyAt(i)).toThrow(RangeError);
       expect(() => m.valueAt(i)).toThrow(RangeError);
     }
-    expect(s.at(1)).toBe(2);
-    expect(m.at(1)).toEqual(['b', 2]);
+    expect(s.valueAt(1)).toBe(2);
+    expect(m.valueAt(1)).toBe(2);
     expect(OrderedSet.empty().first()).toBeUndefined();
     expect(OrderedSet.empty().last()).toBeUndefined();
     expect(OrderedMap.empty().first()).toBeUndefined();
@@ -299,10 +352,10 @@ describe('the other index-taking entry points', () => {
       d.s.add(3);
       expect(d.s.at(2)).toBe(3);
       expect(d.m.keyAt(0)).toBe('a');
-      d.m.at(0)[1].v = 2; // an entry that exists is never undefined
-      for (const i of [NaN, 0.5, -1, 3]) expect(() => d.s.at(i)).toThrow(RangeError);
+      d.m.valueAt(0).v = 2; // an entry that exists is never undefined
+      for (const i of [NaN, 0.5, -1, 3]) expect(() => d.s.valueAt(i)).toThrow(RangeError);
       for (const i of [NaN, 0.5, -1, 1]) {
-        expect(() => d.m.at(i)).toThrow(RangeError);
+        expect(() => d.m.valueAt(i)).toThrow(RangeError);
         expect(() => d.m.keyAt(i)).toThrow(RangeError);
       }
       d.s.clear();

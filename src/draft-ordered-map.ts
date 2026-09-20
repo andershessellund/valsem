@@ -147,8 +147,9 @@ export class DraftOrderedMap<K, V> {
   }
 
   /**
-   * The `[key, value]` entry at `index` (the value drafted, if it can be),
-   * which must name one: an integer in `[0, size)`, or a `RangeError`.
+   * The `[key, value]` entry at `index` (the value drafted, if it can be), as
+   * `OrderedMap.at` and `Array.prototype.at` read it: a negative index counts
+   * from the end, and one that names nothing gives `undefined`.
    *
    * The value's type is `Draft<V>`, spelled as in `DraftList.get`: `V &
    * undefined` is `never` unless the map holds `undefined` values, where
@@ -156,18 +157,17 @@ export class DraftOrderedMap<K, V> {
    * opaque to TypeScript's variance check in the published declarations, and
    * `OrderedMap<string, number>` was not an `OrderedMap<string, unknown>`.
    */
-  at(index: number): [K, Draft<V> | (V & undefined)] {
-    const k = this.#state.work.keyAt(index) as K; // checks the index
-    return [k, this.get(k) as Draft<V> | (V & undefined)];
+  at(index: number): [K, Draft<V> | (V & undefined)] | undefined {
+    const e = this.#state.work.at(index); // reads the index as Array.prototype.at does
+    return e === undefined ? undefined : [e[0] as K, this.get(e[0] as K) as Draft<V> | (V & undefined)];
   }
 
   first(): [K, Draft<V> | (V & undefined)] | undefined {
-    return this.#state.work.size === 0 ? undefined : this.at(0);
+    return this.at(0);
   }
 
   last(): [K, Draft<V> | (V & undefined)] | undefined {
-    const n = this.#state.work.size;
-    return n === 0 ? undefined : this.at(n - 1);
+    return this.at(-1);
   }
 
   /** Set `key` → `value`: a present key keeps its position, a new key is appended. */
