@@ -63,10 +63,5 @@ export class InternedString {
     if (found !== undefined) return found;
     return pool.register(new InternedString(value, hash), hash);
   }
-
-  /** @internal Pool size — exposed for tests. */
-  static _poolSize(): number {
-    return pool.size();
-  }
 }
 

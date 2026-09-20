@@ -873,10 +873,6 @@ export class ValueList<T> implements Iterable<T> {
     return { tree: this.#root === null ? null : walk(this.#root), tail: this.#tail };
   }
 
-  /** @internal */
-  static _nodeStats(): { nodes: number; lists: number } {
-    return { nodes: cpool.size(), lists: lpool.size() };
-  }
   /** @internal Tree height of the closed part (0 for none). */
   get _height(): number {
     return this.#root === null ? 0 : this.#root.ht;

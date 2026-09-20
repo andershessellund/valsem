@@ -16,6 +16,7 @@ import { current } from './current.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueSet } from './value-set.js';
+import { ValueMap } from './value-map.js';
 import { OrderedMap } from './ordered-map.js';
 import { OrderedSet } from './ordered-set.js';
 import { expectPatchRoundTrip } from './patches.test-helpers.js';
@@ -143,5 +144,111 @@ describe('what does not edit answers about the value the draft would be right no
       expect(d.m.valueList).toBe(ValueList.of({ v: 5 }, { v: 2 }));
       expect(d.s.valueList).toBe(ValueList.of('o', 'p'));
     });
+  });
+});
+
+// Laws of every collection's draft, so over the roster.
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('a %s draft', (_name, c) => {
+  // `any`: the drafts' shared surface (delete, clear, keys…), untyped across five classes.
+  type AnyDraft = any;
+
+  it('is made by produce, and says so to anyone who calls its constructor', () => {
+    const Draft = c.draftType as unknown as new () => object;
+    expect(() => new Draft()).toThrow(/created by produce\(\)/);
+  });
+
+  it('removing what is not there answers false and is not a change', () => {
+    if (!c.distinct) return; // a list removes by index: index-arguments.test.ts
+    const base = c.of('a', 'b');
+    const [next, patches] = produceWithPatches(base, (d: AnyDraft) => {
+      expect(d.delete('missing')).toBe(false);
+      expect(d.delete({ not: 'there' })).toBe(false);
+      expect(d.delete('a')).toBe(true);
+      expect(d.delete('a')).toBe(false); // gone already
+      c.draftAdd(d, 'a');
+      expect(d.delete('a')).toBe(true);
+    });
+    expect(next).toBe(c.of('b'));
+    expect(patches.length).toBeGreaterThan(0);
+    expect(produce(base, (d: AnyDraft) => void d.delete('missing'))).toBe(base);
+  });
+
+  it('clearing what is already empty is not a change', () => {
+    if (!c.distinct) return;
+    const [next, patches, inverse] = produceWithPatches(c.empty(), (d: AnyDraft) => d.clear());
+    expect(next).toBe(c.empty());
+    expect(patches).toEqual([]);
+    expect(inverse).toEqual([]);
+  });
+
+  it('iterates what it holds right now: the base, less what was removed, plus what was added', () => {
+    if (!c.distinct) return;
+    produce(c.of('a', 'b', 'c'), (d: AnyDraft) => {
+      d.delete('b');
+      c.draftAdd(d, 'z');
+      c.draftAdd(d, 'passing'); // added and removed again inside the recipe: never seen
+      d.delete('passing');
+      const now = ['a', 'c', 'z'];
+      const sorted = (xs: Iterable<unknown>): unknown[] => (c.ordered ? [...xs] : [...xs].sort());
+      expect(sorted(d.keys())).toEqual(now);
+      expect(sorted(d.values())).toEqual(now);
+      expect(sorted([...d.entries()].map(([k]: [unknown, unknown]) => k))).toEqual(now);
+      expect(sorted([...d.entries()].map(([, v]: [unknown, unknown]) => v))).toEqual(now);
+      expect(d.size).toBe(3);
+    });
+  });
+
+  it('clearing after edits records the entries the recipe saw, and inverts', () => {
+    if (!c.distinct) return;
+    const base = c.of('a', 'b');
+    const [next, patches, inverse] = produceWithPatches(base, (d: AnyDraft) => {
+      c.draftAdd(d, 'c');
+      d.delete('a');
+      d.clear();
+      c.draftAdd(d, 'kept');
+    });
+    expect(next).toBe(c.of('kept'));
+    expectPatchRoundTrip(base, next, patches, inverse);
+  });
+
+  it('a write that changes nothing records nothing, beside one that does', () => {
+    const base = c.of('a', 'b');
+    const [next, patches, inverse] = produceWithPatches(base, (d: AnyDraft) => {
+      if (c.keyed) d.set('a', 'a'); // what it already holds
+      else if (c.distinct) d.add('a');
+      else d.set(0, 'a');
+      c.draftAdd(d, 'z');
+    });
+    expect(next).toBe(c.of('a', 'b', 'z'));
+    expect(patches.length).toBe(1);
+    expectPatchRoundTrip(base, next, patches, inverse);
+  });
+});
+
+describe('a map draft hands out a draft only for what can be drafted', () => {
+  it.each([
+    ['DraftMap', ValueMap],
+    ['DraftOrderedMap', OrderedMap],
+  ] as const)('%s.get of a primitive is the primitive, of a record a draft', (_name, Type) => {
+    const base = Type.from<string, unknown>([['n', 1], ['text', 'x'], ['none', undefined], ['rec', { v: 1 }]]);
+    const next = produce(base, (d) => {
+      expect(d.get('n')).toBe(1);
+      expect(d.get('text')).toBe('x');
+      expect(d.get('none')).toBeUndefined();
+      expect(d.get('missing')).toBeUndefined();
+      (d.get('rec') as { v: number }).v = 2;
+    });
+    expect(next).toBe(Type.from<string, unknown>([['n', 1], ['text', 'x'], ['none', undefined], ['rec', { v: 2 }]]));
+  });
+});
+
+describe('DraftList.splice with a start and nothing else removes to the end', () => {
+  it('as ValueList.splice and Array.prototype.splice do', () => {
+    const base = ValueList.of(1, 2, 3, 4);
+    const [next, patches, inverse] = produceWithPatches(base, (d) => {
+      expect(d.splice(1).length).toBe(3);
+    });
+    expect(next).toBe(ValueList.of(1));
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 });

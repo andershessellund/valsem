@@ -223,3 +223,18 @@ describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('current() and origi
     });
   });
 });
+
+describe('current() through raw material the recipe assigned', () => {
+  it('a raw ARRAY holding a draft is snapshotted through; one holding none is returned as it is', () => {
+    produce(intern({ item: { n: 1 }, held: null as unknown }), (d) => {
+      d.item.n = 2;
+      const withDraft = [d.item, 'x'];
+      const without = [1, [2, 3]];
+      d.held = { withDraft, without };
+      const snap = current(d) as unknown as { held: { withDraft: unknown[]; without: unknown[] } };
+      expect(snap.held.withDraft[0]).toBe(intern({ n: 2 }));
+      expect(isDraft(snap.held.withDraft[0])).toBe(false);
+      expect(current(d)).toBe(intern({ item: { n: 2 }, held: { withDraft: [{ n: 2 }, 'x'], without: [1, [2, 3]] } }));
+    });
+  });
+});

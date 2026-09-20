@@ -66,6 +66,11 @@ describe('the aim is true (a guard on this file’s own device)', () => {
     for (const tag of Object.values(TAG)) expect(mix(tag, unmix(tag, EVERYTHING))).toBe(EVERYTHING);
   });
 
+  it('the hasher is set once: a second configureHasher is refused, and the first stays', () => {
+    expect(() => configureHasher({ string: () => 1, number: () => 1 })).toThrow(/may only be called once/);
+    expect(internHash('still aimed')).toBe(EVERYTHING);
+  });
+
   it('every string and every number share one full hash', () => {
     for (const leaf of ['', 'a', 'another', 0, 1, -2.5, NaN, Infinity]) expect(internHash(leaf), String(leaf)).toBe(EVERYTHING);
   });
@@ -126,6 +131,50 @@ describe('OrderedMap and OrderedSet when every key collides', () => {
   });
 });
 
+describe('inside one collision node: what is not there, and what is left', () => {
+  it('deleting or looking up an absent key that collides with every present one changes nothing', () => {
+    const m = ValueMap.from<string | number, number>([['p', 1], ['q', 2], [3, 3]]);
+    expect(m.delete('absent')).toBe(m);
+    expect(m.delete(99)).toBe(m);
+    expect(m.get('absent')).toBeUndefined();
+    const s = ValueSet.from<string | number>(['p', 'q', 3]);
+    expect(s.delete('absent')).toBe(s);
+    expect(s.has(99)).toBe(false);
+    const om = OrderedMap.from<string | number, number>([['p', 1], ['q', 2], [3, 3]]);
+    expect(om.delete('absent')).toBe(om);
+    expect(om.indexOf('absent')).toBe(-1);
+    const os = OrderedSet.of<string | number>('p', 'q', 3);
+    expect(os.delete(99)).toBe(os);
+  });
+
+  it('set algebra that leaves one member, or none, of two collision nodes', () => {
+    const left = ValueSet.from<string | number>(['l1', 'both', 1]);
+    const right = ValueSet.from<string | number>(['r1', 'both', 2]);
+    const both = ValueSet.from<string | number>(['both']);
+    expect(left.intersection(right)).toBe(both);
+    expect(left.difference(ValueSet.from<string | number>(['l1', 1]))).toBe(both);
+    expect(left.symmetricDifference(ValueSet.from<string | number>(['l1', 1]))).toBe(both);
+    expect(both.union(both)).toBe(both);
+    expect(left.intersection(ValueSet.from<string | number>(['r1', 2]))).toBe(ValueSet.empty());
+    expect(both.isSubsetOf(left)).toBe(true);
+    expect(left.isSubsetOf(both)).toBe(false);
+    expect(both.isDisjointFrom(ValueSet.from<string | number>(['r1']))).toBe(true);
+    expect(both.difference(left)).toBe(ValueSet.empty());
+  });
+
+  it('a bulk build with repeated keys keeps the first position and the last value', () => {
+    const entries: [string | number, number][] = [];
+    for (let i = 0; i < 40; i++) entries.push([i % 2 ? `k${i % 10}` : i % 10, i]);
+    const om = OrderedMap.from(entries);
+    const expected = new Map<string | number, number>(entries);
+    expect([...om]).toEqual([...expected]);
+    let chained = OrderedMap.empty<string | number, number>();
+    for (const [k, v] of entries) chained = chained.set(k, v);
+    expect(om).toBe(chained);
+    expect(ValueMap.from(entries)).toBe(ValueMap.from([...expected]));
+  });
+});
+
 describe('the intern pool when every hash collides', () => {
   // Same shape, same leaf kinds: one record hash for all of them, so the
   // pool's own comparison is all that tells them apart.
@@ -162,6 +211,15 @@ describe('the intern pool when every hash collides', () => {
     });
     expect(rekeyed).toEqual({ b: 1 });
     expect(rekeyed).not.toBe(taken.key);
+
+    // An array remembers where its recipes led (base, edits → result), keyed
+    // by the result's hash. Here every push of a number has the same one.
+    const stem = intern([7, 8]);
+    const grown = [1, 2, 3].map((n) => produce(stem, (d) => void d.push(n)));
+    expect(grown.map((g) => internHash(g)).every((h) => h === internHash(grown[0]))).toBe(true);
+    expect(grown).toEqual([[7, 8, 1], [7, 8, 2], [7, 8, 3]]);
+    expect(produce(stem, (d) => void d.push(2))).toBe(grown[1]); // the remembered one, among its collisions
+    expect(produce(stem, (d) => void (d[0] = 9))).toEqual([9, 8]);
 
     const list = intern([1, 2, 3]);
     const swapped = produce(list, (d) => void d.reverse());
@@ -241,6 +299,28 @@ describe('collision nodes whose members are of different kinds', () => {
       expect(shrunk).toBe(ValueSet.from(members.filter((x) => !gone.includes(x))));
     }
     expect(shrunk).toBe(ValueSet.empty());
+    // Set algebra merges two such nodes member by member, which compares a
+    // member with ITSELF: the order must answer 0 for every kind, the ones
+    // with a fixed hash (undefined, null, a boolean) included.
+    const half = ValueSet.from(members.filter((_, i) => i % 2 === 0));
+    const rest = ValueSet.from(members.filter((_, i) => i % 2 === 1));
+    expect(half.union(rest)).toBe(canonical);
+    expect(canonical.union(half)).toBe(canonical);
+    expect(canonical.intersection(half)).toBe(half);
+    expect(canonical.difference(half)).toBe(rest);
+    expect(canonical.symmetricDifference(half)).toBe(rest);
+    expect(half.isSubsetOf(canonical)).toBe(true);
+    expect(canonical.isSubsetOf(half)).toBe(false);
+    expect(half.isDisjointFrom(rest)).toBe(true);
+    expect(half.isDisjointFrom(canonical)).toBe(false);
+    for (const part of [half, rest]) {
+      // Both operands hold every member of `part`, so each meets itself.
+      expect(canonical.union(part)).toBe(canonical);
+      expect(part.union(canonical)).toBe(canonical);
+      expect(canonical.intersection(part)).toBe(part);
+      expect(part.difference(canonical)).toBe(ValueSet.empty());
+      expect(part.isSubsetOf(canonical)).toBe(true);
+    }
     // …and as map keys, where an update inside the node must find its entry.
     let m = ValueMap.empty<unknown, number>();
     members.forEach((k, i) => (m = m.set(k, i)));

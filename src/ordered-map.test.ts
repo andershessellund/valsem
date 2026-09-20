@@ -286,3 +286,13 @@ describe('OrderedMap — sizes across tree levels', () => {
     expect(m).toBe(OrderedMap.from(model));
   });
 });
+
+describe('OrderedMap — what is not a key has no position and no anchor', () => {
+  it('indexOf is -1 and the anchor inspector answers undefined, for a raw probe too', () => {
+    const m = abc();
+    expect(m.indexOf('missing')).toBe(-1);
+    expect(m._anchorOf('missing')).toBeUndefined();
+    expect(OrderedMap.empty<unknown, number>()._anchorOf({ raw: 1 })).toBeUndefined();
+    expect(m._anchorOf('a')).not.toBeUndefined();
+  });
+});

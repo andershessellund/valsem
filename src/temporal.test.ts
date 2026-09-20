@@ -231,3 +231,13 @@ describe('temporal — interning', () => {
     expect(() => intern({ at: new Date(0) })).toThrow(/Temporal\.Instant/);
   });
 });
+
+describe('temporal — registration', () => {
+  it('registerTemporal() again is a no-op: importing the module twice, or calling it by hand, changes nothing', async () => {
+    const { registerTemporal } = await import('./temporal.js');
+    const before = intern(T.PlainDate.from('2026-08-31'));
+    expect(() => registerTemporal()).not.toThrow();
+    expect(() => registerTemporal()).not.toThrow();
+    expect(intern(T.PlainDate.from('2026-08-31'))).toBe(before);
+  });
+});

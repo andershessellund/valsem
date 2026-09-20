@@ -481,3 +481,57 @@ describe('the mutable built-ins', () => {
     expect(() => new HashMap().set(/a/g, 1)).toThrow(/source, flags/);
   });
 });
+
+describe('the protocol, at its edges', () => {
+  it('a value compared with what has no [equals] is unequal, whichever side it is on', () => {
+    class Bare {
+      constructor(readonly amount: number, readonly currency: string) {}
+    }
+    for (const other of [new Bare(1, 'EUR'), { amount: 1, currency: 'EUR' }, [1, 'EUR'], Object.create(null)]) {
+      expect(deepEqual(eur(1), other)).toBe(false);
+      expect(deepEqual(other, eur(1))).toBe(false); // the mirror: only `b` declares [equals]
+    }
+  });
+
+  it('[hashCode] may be a method; it is called on the value and read as a uint32', () => {
+    class Tag {
+      constructor(readonly name: string) {}
+      [equals](o: unknown): boolean {
+        return o instanceof Tag && o.name === this.name;
+      }
+      [hashCode](): number {
+        return -1 - this.name.length; // negative on purpose: normalised, like a handler's
+      }
+    }
+    expect(deepHash(new Tag('ab'))).toBe((-3) >>> 0);
+    expect(deepHash(new Tag('ab'))).toBe(deepHash(new Tag('cd')));
+    const m = new HashMap<Tag, number>();
+    m.set(new Tag('ab'), 1);
+    expect(m.get(new Tag('ab'))).toBe(1);
+    expect(m.get(new Tag('cd'))).toBeUndefined(); // same hash, not equal
+  });
+
+  it('an anonymous class, and an object whose prototype names no constructor, are refused by name all the same', () => {
+    const Anonymous = (() => class {})();
+    expect(Anonymous.name).toBe('');
+    expect(() => deepHash(new Anonymous())).toThrow(/^deepHash: /);
+    expect(() => intern(new Anonymous())).toThrow(TypeError);
+    const orphan: object = Object.create(Object.create(null)); // not plain, and no `constructor` anywhere
+    expect(() => deepHash(orphan)).toThrow(/^deepHash: /);
+    expect(() => intern(orphan)).toThrow(TypeError);
+    expect(() => fastEquals(new Anonymous(), 1)).toThrow(/an instance of an unregistered class/);
+    expect(() => fastEquals(orphan, 1)).toThrow(/a raw object/);
+    // (memoize once named it with `??`, and '' is not nullish: "an instance of , which…")
+    expect(() => memoize(() => new Anonymous())()).toThrow(/returned an instance of an anonymous class, which/);
+    expect(() => memoize(() => orphan)()).toThrow(/returned an instance of an anonymous class, which/);
+  });
+
+  it('registering an anonymous type twice with different functions is refused, without a name to give', () => {
+    const Anonymous = (() => class { readonly v = 1; })();
+    const eq = (): boolean => true;
+    const hash = (): number => 1;
+    deepEqual.register(Anonymous, eq, hash);
+    deepEqual.register(Anonymous, eq, hash); // the same pair again: idempotent
+    expect(() => deepEqual.register(Anonymous, eq, () => 2)).toThrow(/this type is already registered as a value/);
+  });
+});

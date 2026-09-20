@@ -117,6 +117,15 @@ describe('InternPool — canonicality', () => {
     expect(pool.intern(new Point(3, 4))).not.toBe(a);
   });
 
+  it('intern() of what is already canonical is that very object, without a lookup', () => {
+    const pool = createInternPool<Point>();
+    const a = pool.intern(new Point(1, 2));
+    expect(pool.intern(a)).toBe(a);
+    const other = createInternPool<Point>();
+    expect(other.intern(a)).toBe(a); // the marker is the claim, whichever pool made it
+    expect(other.size()).toBe(0);
+  });
+
   it('lookup/register honors predicates within one bucket (forced collision)', () => {
     const pool = createInternPool<{ v: number }>();
     const a = pool.register({ v: 1 }, 42);

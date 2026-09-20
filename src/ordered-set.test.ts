@@ -173,3 +173,13 @@ describe('OrderedSet — set-like for the native Set methods', () => {
     expect(new Set([7]).isDisjointFrom(s)).toBe(true);
   });
 });
+
+describe('OrderedSet — what is not a member has no position and no anchor', () => {
+  it('indexOf is -1 and the anchor inspector answers undefined, for a raw probe too', () => {
+    const s = OrderedSet.of('a', 'b');
+    expect(s.indexOf('missing')).toBe(-1);
+    expect(s._anchorOf('missing')).toBeUndefined();
+    expect(OrderedSet.empty<unknown>()._anchorOf({ raw: 1 })).toBeUndefined();
+    expect(s._anchorOf('a')).not.toBeUndefined();
+  });
+});

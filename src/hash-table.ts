@@ -14,11 +14,6 @@ export interface TableEntry {
 /** @internal */
 export class HashTable<E extends TableEntry> {
   readonly #buckets = new Map<number, E | E[]>();
-  #size = 0;
-
-  get size(): number {
-    return this.#size;
-  }
 
   /** The entry under `hash` for which `match` holds, if any. */
   find(hash: number, match: (entry: E) => boolean): E | undefined {
@@ -37,7 +32,6 @@ export class HashTable<E extends TableEntry> {
     if (b === undefined) this.#buckets.set(entry.hash, entry);
     else if (Array.isArray(b)) b.push(entry);
     else this.#buckets.set(entry.hash, [b, entry]);
-    this.#size++;
   }
 
   /** Remove `entry` (by identity). */
@@ -53,12 +47,10 @@ export class HashTable<E extends TableEntry> {
       if (b !== entry) return false;
       this.#buckets.delete(entry.hash);
     }
-    this.#size--;
     return true;
   }
 
   clear(): void {
     this.#buckets.clear();
-    this.#size = 0;
   }
 }

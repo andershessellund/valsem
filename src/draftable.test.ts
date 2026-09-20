@@ -5,7 +5,7 @@
 // guide shows.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import { produce, produceWithPatches, type Draft } from './produce.js';
+import { produce, produceWithPatches, applyPatches, type Draft } from './produce.js';
 import { current, original } from './current.js';
 import {
   toDraft,
@@ -259,5 +259,25 @@ describe('a third-party draftable', () => {
     expectTypeOf<Draft<Interval>>().toEqualTypeOf<IntervalDraft>();
     expectTypeOf<Draft<{ range: Interval }>>().toEqualTypeOf<{ range: IntervalDraft }>();
     expectTypeOf<Draft<ValueList<Interval>>['get']>().returns.toEqualTypeOf<IntervalDraft>(); // drafts all the way down, and get() names an element, so no undefined
+  });
+});
+
+describe('patches against a third-party draftable', () => {
+  const state = intern({ range: Interval.of(0, 10, { label: 'a' }) });
+
+  it('a path goes where its childAt leads, and nowhere else', () => {
+    const relabelled = applyPatches(state, [{ kind: 'record.set', path: ['range', 'meta'], key: 'label', value: 'b' }]);
+    expect(relabelled).toBe(intern({ range: Interval.of(0, 10, { label: 'b' }) }));
+    for (const path of [['range', 'lo'], ['range', 'nope'], ['range', 'meta', 'label', 'deeper']]) {
+      expect(() => applyPatches(state, [{ kind: 'record.set', path, key: 'k', value: 1 }])).toThrow(/^valsem: (patch path segment|cannot apply a 'record\.set' patch to a value that is not there)/);
+    }
+  });
+
+  it('a replace below it is refused unless the type says how (replaceChild): produce cannot write into a type it does not know', () => {
+    expect(() => applyPatches(state, [{ kind: 'replace', path: ['range', 'meta'], value: { label: 'z' } }])).toThrow(
+      /cannot apply a 'replace' patch inside a interval draft/,
+    );
+    // The slot the interval itself sits in is the record's, and can be replaced.
+    expect(applyPatches(state, [{ kind: 'replace', path: ['range'], value: Interval.of(1, 2) }])).toBe(intern({ range: Interval.of(1, 2) }));
   });
 });

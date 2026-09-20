@@ -233,6 +233,36 @@ describe('applyPatches says what is wrong with a malformed patch list', () => {
     expect(base).toBe(intern({ a: 1 }));
   });
 
+  it('a path that ends at what is no record: refused by valsem, not by the engine', () => {
+    // A stale path is the ordinary way to get here: the map key is gone, the
+    // list is shorter, the slot now holds a number. record.set and
+    // record.delete were the two kinds that did not look before they wrote,
+    // and the caller got "Cannot set properties of undefined".
+    const holders: [string, unknown, PropertyKey, PropertyKey][] = [
+      ['record', intern({ rec: { x: 1 }, n: 5 }), 'n', 'gone'],
+      ['array', intern([{ x: 1 }, 5]), 1, 9],
+      ['ValueMap', ValueMap.from<string, unknown>([['rec', { x: 1 }], ['n', 5]]), 'n', 'gone'],
+      ['OrderedMap', OrderedMap.from<string, unknown>([['rec', { x: 1 }], ['n', 5]]), 'n', 'gone'],
+      ['ValueList', ValueList.of<unknown>({ x: 1 }, 5), 1, 9],
+    ];
+    for (const [name, holder, atPrimitive, atNothing] of holders) {
+      for (const at of [atPrimitive, atNothing]) {
+        for (const patch of [
+          { kind: 'record.set', path: [at], key: 'k', value: 1 },
+          { kind: 'record.delete', path: [at], key: 'k' },
+        ]) {
+          expect(() => applyPatches(holder, [patch as Patch]), `${name} ${String(at)} ${patch.kind}`).toThrow(
+            /^valsem: (cannot apply a 'record\.(set|delete)' patch to a |patch path segment )/,
+          );
+        }
+      }
+    }
+    // A null slot likewise, and a stored undefined (a value, in a map) is still no record.
+    expect(() => applyPatches(intern({ slot: null }), [{ kind: 'record.set', path: ['slot'], key: 'k', value: 1 }])).toThrow(/patch to a null/);
+    const holdsUndefined = ValueMap.from<string, unknown>([['u', undefined]]);
+    expect(() => applyPatches(holdsUndefined, [{ kind: 'record.set', path: ['u'], key: 'k', value: 1 }])).toThrow(/value that is not there/);
+  });
+
   it('any iterable of patches will do', () => {
     const patches = new Set([{ kind: 'record.set', path: [], key: 'a', value: 2 }]);
     expect(apply(patches)).toBe(intern({ a: 2 }));

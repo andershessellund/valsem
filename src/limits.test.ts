@@ -4,6 +4,7 @@ import { deepHash } from './deep-hash.js';
 import { intern } from './intern.js';
 import { configureLimits } from './limits.js';
 import { produce } from './produce.js';
+import { current } from './current.js';
 
 /** A nested array `depth` levels deep: [[[...[leaf]...]]]. */
 function nested(depth: number, leaf: unknown = 1): unknown {
@@ -92,5 +93,31 @@ describe('decode-boundary depth limits', () => {
     expect(() => configureLimits({ maxDepth: 0 })).toThrow(/positive integer/);
     expect(() => configureLimits({ maxDepth: 1.5 })).toThrow(/positive integer/);
     expect(() => configureLimits({})).not.toThrow();
+  });
+});
+
+describe('current() walks raw material a recipe assigned, under the same cap', () => {
+  it('too deep, or cyclic, is the teaching error and not a stack overflow; the recipe can carry on', () => {
+    try {
+      configureLimits({ maxDepth: 20 });
+      const cyc: unknown[] = [];
+      cyc.push(cyc);
+      const next = produce(intern({ a: 1 }) as Record<string, unknown>, (d) => {
+        d['x'] = nested(19);
+        expect(() => current(d)).not.toThrow();
+        for (let i = 0; i < 25; i++) {
+          d['x'] = nested(30);
+          expect(() => current(d)).toThrow(/nesting depth/);
+          d['x'] = cyc;
+          expect(() => current(d)).toThrow(/nesting depth|cyclic/);
+        }
+        d['x'] = nested(19); // the guard reset each time: the edge is still admissible
+        expect(() => current(d)).not.toThrow();
+        d['x'] = 2;
+      });
+      expect(next).toBe(intern({ a: 1, x: 2 }));
+    } finally {
+      configureLimits({ maxDepth: 512 });
+    }
   });
 });
