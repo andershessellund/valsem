@@ -61,7 +61,7 @@ describe('draftOf() — attaching', () => {
       d.seen.add(c);
     });
     expect(next.byId.get('y')).toBe(edited);
-    expect(next.list.get(1)).toBe(edited);
+    expect(next.list.at(1)).toBe(edited);
     expect(next.seen.has(edited)).toBe(true);
     expect(next.tags).toEqual(['a', 'b']);
   });
@@ -104,7 +104,7 @@ describe('draftOf() — attaching', () => {
       d.list.push(c);
     });
     expect(next.config).toBe(next.byId.get('z'));
-    expect(next.config).toBe(next.list.get(1));
+    expect(next.config).toBe(next.list.at(1));
     expect(next.config).toBe(intern({ enabled: false, level: 3 }));
   });
 

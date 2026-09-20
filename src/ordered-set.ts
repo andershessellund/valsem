@@ -18,7 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
+import { insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -123,23 +123,17 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     return ValueList._indexOf(this.#list, intern(value), (k) => this.#anchor(k));
   }
 
-  /** The member at `index` as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. {@link valueAt} is the strict one. */
+  /** The member at `index`, as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. */
   at(index: number): T | undefined {
-    const i = atIndex(index, this.#list.length, 'OrderedSet.at');
-    return i === -1 ? undefined : this.#list.get(i);
-  }
-  /** The member at `index`, which must name one: an integer in `[0, size)`, or a `RangeError`. As `OrderedMap.valueAt`. */
-  valueAt(index: number): T {
-    return this.#list.get(elementIndex(index, this.#list.length, 'OrderedSet.valueAt'));
+    return this.#list.at(index);
   }
   /** The first member, or `undefined` when empty. */
   first(): T | undefined {
-    return this.#list.length === 0 ? undefined : this.#list.get(0);
+    return this.#list.at(0);
   }
   /** The last member, or `undefined` when empty. */
   last(): T | undefined {
-    const n = this.#list.length;
-    return n === 0 ? undefined : this.#list.get(n - 1);
+    return this.#list.at(-1);
   }
 
   /** Append `value` (interned on entry). Returns `this` if a structural equal is present. */

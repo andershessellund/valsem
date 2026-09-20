@@ -27,7 +27,7 @@ place; what does not (`slice`, `concat`, the set algebra) answers about the
 value the draft would be right now, as `current(draft)` would, and returns a
 value, not a draft (`toArray` included). Iterating a `DraftList`, a `DraftMap`
 or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
-out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
+out drafts, as `at` and a map's `get` do, so `for (const t of d.todos) t.done = true` edits,
 the same as on a plain array; keys, and the members of a set, come as the
 values they are. A draft costs about 0.3 µs, so a loop that only reads a
 large collection is cheaper over `current(d.todos)` or `d.todos.slice()`,
@@ -138,9 +138,9 @@ is not a value, and is rejected with a teaching error. Await your data first,
 then produce.
 
 **Positions are checked.** The collection drafts follow their values:
-`d.list.get(i)`, `set(i, v)` and the ordered drafts' `keyAt(i)`/`valueAt(i)`
-name an element that must exist (`at(i)` is `Array`'s: from the end when
-negative, `undefined` for no element, and a draft where `get` gives one), `d.list.splice(start, count)` takes a `start` in
+`d.list.set(i, v)` names an element that must exist (the read, `at(i)`, is
+`Array`'s: from the end when negative, `undefined` for no element, and it
+hands out a draft, so `d.list.at(-1)!.done = true` edits), `d.list.splice(start, count)` takes a `start` in
 `[0, length]` and a count that means "up to", and anything else is a
 `RangeError` (see [the collections guide](./collections)). A plain array in
 a recipe is an `Array`, and its reads and its bounds are the native ones;

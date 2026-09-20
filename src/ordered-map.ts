@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, atIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -136,18 +136,15 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     return this.#indexOf(k);
   }
 
-  /** The key at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */
-  keyAt(index: number): K {
-    return this.#keys.get(elementIndex(index, this.#keys.length, 'OrderedMap.keyAt'));
-  }
-  /** The value at `index`, which must name an entry: an integer in `[0, size)`, or a `RangeError`. */
-  valueAt(index: number): V {
-    return this.#vals.get(elementIndex(index, this.#keys.length, 'OrderedMap.valueAt'));
-  }
-  /** The `[key, value]` entry at `index` as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. {@link keyAt} and {@link valueAt} are the strict ones. */
+  /**
+   * The `[key, value]` entry at `index`, as `Array.prototype.at` reads it: a
+   * negative index counts from the end, and one that names nothing gives
+   * `undefined`. The positional read: the key alone is `at(i)?.[0]`, or
+   * `keyList.at(i)`.
+   */
   at(index: number): [K, V] | undefined {
     const i = atIndex(index, this.#keys.length, 'OrderedMap.at');
-    return i === -1 ? undefined : [this.#keys.get(i), this.#vals.get(i)];
+    return i === -1 ? undefined : [this.#keys._get(i), this.#vals._get(i)];
   }
   /** The first entry, or `undefined` when empty. */
   first(): [K, V] | undefined {
@@ -233,7 +230,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   /** Call `fn` for each entry in order, as `ReadonlyMap.forEach` does. */
   forEach(fn: (value: V, key: K, map: OrderedMap<K, V>) => void, thisArg?: unknown): void {
     const vals = this.#vals;
-    this.#keys.forEach((k, i) => fn.call(thisArg, vals.get(i) as V, k, this));
+    this.#keys.forEach((k, i) => fn.call(thisArg, vals._get(i) as V, k, this));
   }
 
   /**

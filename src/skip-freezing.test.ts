@@ -57,13 +57,13 @@ describe('after skipFreezing()', () => {
     expect(next.b).toBe(base.b);
 
     const list = ValueList.of({ n: 1 });
-    const item = list.get(0)!;
+    const item = list.at(0)!;
     const bumped = produce(ValueList.of({ n: 9 }), (d) => {
       d.set(0, item); // canonical from another list
-      d.get(0)!.n = 5;
+      d.at(0)!.n = 5;
     });
     expect(item.n).toBe(1);
-    expect(bumped.get(0)!.n).toBe(5);
+    expect(bumped.at(0)!.n).toBe(5);
 
     const map = ValueMap.from([['k', { n: 1 }]]);
     const v = map.get('k')!;

@@ -84,11 +84,6 @@ export class DraftOrderedSet<T> implements Iterable<T> {
     return this.#state.work.at(index) as T | undefined;
   }
 
-  /** The member at `index`, which must name one: an integer in `[0, size)`, or a `RangeError`. */
-  valueAt(index: number): T {
-    return this.#state.work.valueAt(index) as T;
-  }
-
   first(): T | undefined {
     return this.#state.work.first() as T | undefined;
   }

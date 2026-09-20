@@ -430,10 +430,9 @@ and does not pretend to be (D29).
   unchanged write returns `this`.
 - **Checked positions.** A positional argument is checked by what it names,
   and fails with a `RangeError` before anything is touched. An *element*
-  (`get`, `keyAt`, `valueAt`, `set`, `remove`) is an integer in
-  `[0, length)`, so those reads return `T`, never `undefined` for "not
-  there". `at` is the exception with a namesake: `Array.prototype.at`'s
-  bounds, a negative index from the end and `undefined` for no element (D56). An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
+  being edited (`set`, `remove`) is an integer in `[0, length)`. The
+  positional read is `at`, and it is `Array.prototype.at`: a negative index
+  from the end, `undefined` for no element, and no throwing twin (D56). An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
   an integer in `[0, length]`, not counted from the end. A *range*
   has an answer wherever it points, the part that exists: `slice`'s bounds
   keep `Array`'s clamping whole, and `splice`'s count is an amount, an
@@ -540,11 +539,11 @@ path copy when no boundary flips, else a local re-chunk. `setMany` applies
 a batch of point edits in one bottom-up pass. The bounds are expected on
 the seeded hash, with no amortised rebuild anywhere.
 
-**Reads.** `get(i)` walks size tables, with the last leaf cached so
+**Reads.** `at(i)` walks size tables, with the last leaf cached so
 sequential reads stay in one leaf; `length` is `root.n + tail.length`;
 iteration streams leaves. `toArray()` is the **interned** flat array,
 weakly memoised per instance (`WeakMap<list, WeakRef<array>>`), with
-`toArray()[i] === get(i)` and `list.toArray() === intern([...sameContents])`
+`toArray()[i] === at(i)` and `list.toArray() === intern([...sameContents])`
 (D33). `ValueList.diff(a, b)` returns the changed regions (`Hunk`s) between
 any two lists by descending both trees and skipping shared nodes by
 pointer.
@@ -576,7 +575,7 @@ lists alone (`OrderedMap`: hash of the two list hashes; hit when both lists
 are `===`). `keyList` and `valueList` are public: two maps with the same
 keys in the same order share one key list whatever their values did.
 
-Operations: `get`, `has`, `indexOf`, `at`, `keyAt`, `valueAt`, `first`,
+Operations: `get`, `has`, `indexOf`, `at`, `first`,
 `last`, `set` (a present key keeps its position; a new key appends),
 `delete`, `insertAt`, all O(log n) expected. A structural edit runs the
 list operation under `_record`, sets or removes the trie entry (a new key
@@ -616,7 +615,7 @@ way, rejects an invalid date, and pools on epoch milliseconds. `epochMs`,
 subtraction work), `toJSON()` (the ISO string, as with a `Date`).
 
 `RawArray.from(rawArray)` holds a raw array and admits elements on demand:
-`get(i)` returns one canonical element, `slice(a, b)` the canonical array
+`at(i)` returns one canonical element, `slice(a, b)` the canonical array
 of a range, each element interned once and memoised per slot; raw slots
 are released as they are admitted. It has no iteration. Its value is its
 identity: an identity `[hashCode]`, `[equals]` is `===`, marked

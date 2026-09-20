@@ -47,8 +47,8 @@ describe('ValueList: the functional reads are Array’s', () => {
     const list = ValueList.of({ id: 1 }, { id: 2 });
     expect(list.filter(() => true)).toBe(list);
     const mapped = list.map((t) => ({ ...t, done: false }));
-    expect(isCanonical(mapped.get(0))).toBe(true);
-    expect(mapped.get(0)).toBe(intern({ id: 1, done: false }));
+    expect(isCanonical(mapped.at(0))).toBe(true);
+    expect(mapped.at(0)).toBe(intern({ id: 1, done: false }));
   });
 
   it('reduce: an initial value that is passed is one, undefined included; none, on an empty list, throws', () => {
@@ -118,7 +118,7 @@ describe('on a draft the functional reads do not draft', () => {
 
   it('callbacks see values, as they are right now, and the draft as the third argument', () => {
     const next = produce(base, (d) => {
-      d.todos.get(7).done = true; // a drafted, edited child
+      d.todos.at(7)!.done = true; // a drafted, edited child
       d.todos.push({ id: 50, done: true });
       const self = {};
       const seen: unknown[] = [];
@@ -132,7 +132,7 @@ describe('on a draft the functional reads do not draft', () => {
       }, self);
       expect(ids).toBe(ValueList.from(todos(51).map((t) => t.id)));
       expect(seen[7]).toBe(intern({ id: 7, done: true }));
-      expect(seen[8]).toBe(base.todos.get(8));
+      expect(seen[8]).toBe(base.todos.at(8));
       expect(d.todos.filter((t) => t.done)).toBe(ValueList.of({ id: 7, done: true }, { id: 50, done: true }));
       expect(d.todos.reduce((n, t) => n + (t.done ? 1 : 0), 0)).toBe(2);
       expect(d.todos.some((t, _, list) => list === d.todos && !isDraft(t) && t.done)).toBe(true);
@@ -163,13 +163,13 @@ describe('on a draft the functional reads do not draft', () => {
     const next = produce(base, (d) => {
       const hit = d.todos.find((t, i) => { expect(isDraft(t)).toBe(false); return t.id === 9 && i === 9; })!;
       expect(isDraft(hit)).toBe(true);
-      expect(hit).toBe(d.todos.get(9));
+      expect(hit).toBe(d.todos.at(9));
       hit.done = true;
       expect(d.todos.find((t) => t.id === -1)).toBeUndefined();
       expect(d.todos.find((t) => t.done)).toBe(hit); // the predicate sees the edit
     });
-    expect(next.todos.get(9)).toBe(intern({ id: 9, done: true }));
-    expect(next.todos.get(8)).toBe(base.todos.get(8));
+    expect(next.todos.at(9)).toBe(intern({ id: 9, done: true }));
+    expect(next.todos.at(8)).toBe(base.todos.at(8));
   });
 
   it('the set drafts answer about the set as it is right now, with values', () => {

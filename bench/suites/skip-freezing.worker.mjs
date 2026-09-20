@@ -43,7 +43,7 @@ const best = async (measure) => {
 }
 {
   const base = intern({ list: ValueList.from(records()) });
-  out['produce: the same edit, in a ValueList'] = await best(() => time((i) => keep(produce(base, (d) => { d.list.get(N >> 1).v = -i; })), 3000));
+  out['produce: the same edit, in a ValueList'] = await best(() => time((i) => keep(produce(base, (d) => { d.list.at(N >> 1).v = -i; })), 3000));
 }
 {
   const base = intern({ a: 1, b: 2, c: 3 });

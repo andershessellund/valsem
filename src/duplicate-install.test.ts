@@ -78,7 +78,7 @@ describe('duplicate install — two module graphs', () => {
     const holdingForeign = A.ValueList.of(lb);
     const holdingLocal = A.ValueList.of(A.ValueList.of(1));
     expect(holdingForeign).not.toBe(holdingLocal);
-    expect(holdingForeign.get(0)).toBe(lb);
+    expect(holdingForeign.at(0)).toBe(lb);
     expect(A.deepEqual(holdingForeign, holdingLocal)).toBe(false);
   });
 

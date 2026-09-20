@@ -228,26 +228,30 @@ describe('ValueList: an edit names a place that exists', () => {
   });
 });
 
-describe('ValueList: a read names an element', () => {
-  it('get answers for [0, length) and throws for anything else; so do set and setMany', () => {
+describe('ValueList: an edit names an element; a read is Array.prototype.at', () => {
+  it('set and setMany answer for [0, length) and throw for anything else; at reads what is there, or undefined', () => {
     for (const n of [5, 300]) {
       const list = ValueList.from(range(n));
       for (const i of [NaN, 0.5, 1.5, -1, -0.5, Infinity, -Infinity, n, n + 0.5]) {
-        expect(() => list.get(i)).toThrow(RangeError);
         expect(() => list.set(i, 9)).toThrow(RangeError);
         expect(() => list.setMany([[i, 9]])).toThrow(RangeError);
       }
-      expect(list.get(-0)).toBe(0);
-      expect(list.get(n - 1)).toBe(n - 1);
-      expect(list.set(-0, 9).get(0)).toBe(9);
+      for (const i of [NaN, 0.5, 1.5, -0.5, n + 0.5]) expect(() => list.at(i)).toThrow(RangeError);
+      for (const i of [Infinity, -Infinity, n, -n - 1]) expect(list.at(i)).toBeUndefined();
+      expect(list.at(-0)).toBe(0);
+      expect(list.at(n - 1)).toBe(n - 1);
+      expect(list.at(-1)).toBe(n - 1);
+      expect(list.at(-n)).toBe(0);
+      expect(list.set(-0, 9).at(0)).toBe(9);
     }
-    expect(() => ValueList.empty().get(0)).toThrow('ValueList.get: index 0 out of range [0, 0)');
+    expect(ValueList.empty().at(0)).toBeUndefined();
+    expect(ValueList.empty().at(-1)).toBeUndefined();
   });
 
-  it('so the midpoint of an odd list is a loud mistake, not a quiet undefined', () => {
+  it('the midpoint of an odd list is still a loud mistake: a non-integer is not an index', () => {
     const list = ValueList.from(range(5));
-    expect(() => list.get(list.length / 2)).toThrow('ValueList.get: index must be an integer, got 2.5');
-    expect(list.get(list.length >> 1)).toBe(2);
+    expect(() => list.at(list.length / 2)).toThrow('ValueList.at: index must be an integer, got 2.5');
+    expect(list.at(list.length >> 1)).toBe(2);
   });
 });
 
@@ -283,7 +287,7 @@ describe('at is Array.prototype.at, for whole arguments', () => {
 
   it('hands out a draft on a draft, as get does', () => {
     const next = produce({ l: ValueList.of({ v: 1 }, { v: 2 }), m: OrderedMap.from([['a', { v: 1 }]]) }, (d) => {
-      expect(d.l.at(-1)).toBe(d.l.get(1));
+      expect(d.l.at(-1)).toBe(d.l.at(1));
       d.l.at(-1)!.v = 20;
       d.m.at(-1)![1].v = 10;
       expect(d.l.at(2)).toBeUndefined();
@@ -306,7 +310,7 @@ describe('at is Array.prototype.at, for whole arguments', () => {
 });
 
 describe('the other index-taking entry points', () => {
-  it('RawArray: slice is a range (Array’s, and the window past the last row is the rows there are); get names an element', () => {
+  it('RawArray: slice is a range (Array’s, and the window past the last row is the rows there are); at is Array’s too', () => {
     fc.assert(
       fc.property(whole, whole, (a, b) => {
         const arr = range(12);
@@ -319,24 +323,19 @@ describe('the other index-taking entry points', () => {
     for (const bad of JUNK) {
       expect(() => raw.slice!(bad)).toThrow(RangeError);
       expect(() => raw.slice!(0, bad)).toThrow(RangeError);
-      expect(() => raw.get!(bad)).toThrow(RangeError);
+      expect(() => raw.at!(bad)).toThrow(RangeError);
     }
     expect(raw.slice!()).toEqual([1, 2, 3]); // both optional: the whole content
     expect(raw.slice!(0, 100)).toEqual([1, 2, 3]);
-    expect(raw.get!(2)).toBe(3);
-    for (const i of [3, -1, Infinity]) expect(() => raw.get!(i)).toThrow(RangeError);
+    expect(raw.at!(2)).toBe(3);
+    expect(raw.at!(-1)).toBe(3);
+    expect(raw.at!(3)).toBeUndefined();
+    for (const i of [-4, Infinity, -Infinity]) expect(raw.at!(i)).toBeUndefined();
   });
 
-  it('OrderedSet and OrderedMap: keyAt and valueAt name an entry; first and last have no index to get wrong', () => {
+  it('OrderedSet and OrderedMap: first and last have no index to get wrong; insertAt names a place', () => {
     const s = OrderedSet.from([1, 2, 3]);
     const m = OrderedMap.from([['a', 1], ['b', 2]]);
-    for (const i of [NaN, 0.5, -1, Infinity, 3.5, 3]) {
-      expect(() => s.valueAt(i)).toThrow(RangeError);
-      expect(() => m.keyAt(i)).toThrow(RangeError);
-      expect(() => m.valueAt(i)).toThrow(RangeError);
-    }
-    expect(s.valueAt(1)).toBe(2);
-    expect(m.valueAt(1)).toBe(2);
     expect(OrderedSet.empty().first()).toBeUndefined();
     expect(OrderedSet.empty().last()).toBeUndefined();
     expect(OrderedMap.empty().first()).toBeUndefined();
@@ -351,12 +350,11 @@ describe('the other index-taking entry points', () => {
     produce({ s: OrderedSet.from([1, 2]), m: OrderedMap.from([['a', { v: 1 }]]) }, (d) => {
       d.s.add(3);
       expect(d.s.at(2)).toBe(3);
-      expect(d.m.keyAt(0)).toBe('a');
-      d.m.valueAt(0).v = 2; // an entry that exists is never undefined
-      for (const i of [NaN, 0.5, -1, 3]) expect(() => d.s.valueAt(i)).toThrow(RangeError);
-      for (const i of [NaN, 0.5, -1, 1]) {
-        expect(() => d.m.valueAt(i)).toThrow(RangeError);
-        expect(() => d.m.keyAt(i)).toThrow(RangeError);
+      expect(d.m.at(0)![0]).toBe('a');
+      d.m.at(0)![1].v = 2;
+      for (const i of [NaN, 0.5]) {
+        expect(() => d.s.at(i)).toThrow(RangeError);
+        expect(() => d.m.at(i)).toThrow(RangeError);
       }
       d.s.clear();
       d.m.clear();
@@ -416,11 +414,11 @@ describe('the other index-taking entry points', () => {
     expect([...produce(base, (d) => void d.splice(2, undefined))]).toEqual(range(2)); // with no items it is the default
     produce(base, (d) => {
       d.push(8);
-      expect(d.get(8)).toBe(8); // the tail counts
-      for (const i of [9, -1, 1.5, NaN]) {
-        expect(() => d.get(i)).toThrow(RangeError);
-        expect(() => d.set(i, 0)).toThrow(RangeError);
-      }
+      expect(d.at(8)).toBe(8); // the tail counts
+      expect(d.at(-1)).toBe(8);
+      expect(d.at(9)).toBeUndefined();
+      for (const i of [1.5, NaN]) expect(() => d.at(i)).toThrow(RangeError);
+      for (const i of [9, -1, 1.5, NaN]) expect(() => d.set(i, 0)).toThrow(RangeError);
     });
   });
 });

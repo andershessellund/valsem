@@ -165,7 +165,7 @@ describe('coincidences that are there without being looked for', () => {
     for (let i = 0; i < M; i++) {
       const one = ones[i]!;
       const two = twos[i]!;
-      if (one.length !== 1 || one.get(0) !== i || two.length !== 2 || two.get(0) !== i || two.get(1) !== 0) throw new Error(`list ${i}`);
+      if (one.length !== 1 || one.at(0) !== i || two.length !== 2 || two.at(0) !== i || two.at(1) !== 0) throw new Error(`list ${i}`);
     }
     expect(new Set(ones).size).toBe(M);
     expect(new Set(twos).size).toBe(M);

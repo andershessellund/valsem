@@ -97,12 +97,23 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
 
   #read(s: ListState, index: number): unknown {
     const e = this.#entry(s, index);
-    return e !== undefined ? e.v : s.work.get(index);
+    return e !== undefined ? e.v : s.work._get(index);
   }
 
   /**
-   * The element at `index` (drafted, if it can be), which must name one: an
-   * integer in `[0, length)`, or a `RangeError`.
+   * The element at `index` (drafted, if it can be), as `ValueList.at` and
+   * `Array.prototype.at` read it: a negative index counts from the end, and
+   * one that names nothing gives `undefined`. `d.todos.at(-1)!.done = true`
+   * edits.
+   */
+  at(index: number): Draft<T> | undefined {
+    const i = atIndex(index, this.length, 'DraftList.at');
+    return i === -1 ? undefined : this._get(i);
+  }
+
+  /**
+   * The element at `index`, an integer in `[0, length)`, drafted if it can
+   * be: what `at`, iteration, `find` and patch application read through.
    *
    * The return type is `Draft<T>`, spelled so that TypeScript can still see
    * the class as covariant: `T & undefined` is `never` unless the list holds
@@ -110,11 +121,11 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
    * conditional type here is opaque to the variance check, and
    * `ValueList<number>` stopped being a `ValueList<unknown>`.
    */
-  get(index: number): Draft<T> | (T & undefined) {
+  _get(index: number): Draft<T> | (T & undefined) {
     const s = this.#state;
-    elementIndex(index, s.work.length + s.tail.length, 'DraftList.get');
+    elementIndex(index, s.work.length + s.tail.length, 'DraftList._get');
     const e = this.#entry(s, index);
-    const value = e !== undefined ? e.v : s.work.get(index);
+    const value = e !== undefined ? e.v : s.work._get(index);
     if (
       isDraftable(value) &&
       !s.finalized &&
@@ -128,16 +139,6 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
       return child as Draft<T>;
     }
     return value as Draft<T>;
-  }
-
-  /**
-   * The element at `index` (drafted, if it can be) as `Array.prototype.at`
-   * reads it: a negative index counts from the end, and one that names nothing
-   * gives `undefined`. `get` is the strict one.
-   */
-  at(index: number): Draft<T> | undefined {
-    const i = atIndex(index, this.length, 'DraftList.at');
-    return i === -1 ? undefined : this.get(i);
   }
 
   set(index: number, value: T): this {
@@ -246,7 +247,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   }
 
   // What does not edit answers about the VALUE this draft would be right now
-  // (its snapshot, `current(draft)`), and gives back values, not drafts: `get`
+  // (its snapshot, `current(draft)`), and gives back values, not drafts: `at`
   // and iteration hand out drafts. Assign the result into a slot to keep it.
 
   /** Elements `[start, end)` of the list as it is right now, as `ValueList.slice`: a value, not a draft. */
@@ -263,7 +264,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   // child as the value it would be right now, `current(child)`) and the draft
   // as the third argument, and `map` and `filter` give back a `ValueList`.
   // `find` is the exception that is the point of it: the hit comes back as
-  // `get` would hand it out, so `d.todos.find((t) => t.id === id)!.done = true`
+  // `at` would hand it out, so `d.todos.find((t) => t.id === id)!.done = true`
   // edits, and drafts one element.
 
   /** The elements as values, nothing drafted: what the functional reads walk. */
@@ -300,10 +301,10 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return findIndexIn(this.#values(), this, true, fn as never, thisArg, false) === -1;
   }
 
-  /** The first element `fn` accepts, DRAFTED if it can be, as `get` hands it out; `undefined` when there is none. `fn` sees values. */
+  /** The first element `fn` accepts, DRAFTED if it can be, as `at` hands it out; `undefined` when there is none. `fn` sees values. */
   find(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): Draft<T> | undefined {
     const i = findIndexIn(this.#values(), this, true, fn as never, thisArg);
-    return i === -1 ? undefined : this.get(i);
+    return i === -1 ? undefined : this._get(i);
   }
 
   /** The index of the first element `fn` accepts, or -1. */
@@ -311,21 +312,21 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return findIndexIn(this.#values(), this, true, fn as never, thisArg);
   }
 
-  /** Visit every element in index order, each drafted if it can be, as `get` hands it out: `d.todos.forEach((t) => { t.done = true; })` edits. */
+  /** Visit every element in index order, each drafted if it can be, as `at` hands it out: `d.todos.forEach((t) => { t.done = true; })` edits. */
   forEach(fn: (value: Draft<T> | (T & undefined), index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
     let i = 0;
     for (const v of this) fn.call(thisArg, v, i++, this);
   }
 
   /**
-   * The elements in index order, each drafted if it can be, as `get` hands it
+   * The elements in index order, each drafted if it can be, as `at` hands it
    * out: `for (const t of d.todos) t.done = true` edits. By index and live, as
    * an `Array`'s iterator is, so it sees what the loop body pushes or removes.
    * A walk that only reads is cheaper over `current(d.todos)` or `slice()`,
    * which draft nothing.
    */
   *[Symbol.iterator](): IterableIterator<Draft<T> | (T & undefined)> {
-    for (let i = 0; i < this.length; i++) yield this.get(i);
+    for (let i = 0; i < this.length; i++) yield this._get(i);
   }
 
   /** The elements as they are held, nothing drafted: what inspection walks. */
@@ -383,7 +384,7 @@ export function createListDraft<T>(
     childAt: (state, segment) => {
       const s = state as ListState;
       const ok = Number.isInteger(segment) && (segment as number) >= 0 && (segment as number) < s.work.length + s.tail.length;
-      return ok ? s.draft.get(segment as number) : undefined;
+      return ok ? s.draft._get(segment as number) : undefined;
     },
     replaceChild: (state, segment, value) => void (state as ListState).draft.set(segment as number, value),
   });
@@ -431,8 +432,8 @@ function finalizeList(
   if (emitting) emitSeqOps(state.ops, path!, recorder);
   const edits: [number, unknown][] = [];
   // An assigned slot is described by the ops above — unless it holds a child
-  // draft of THIS list: the op captured the value as assigned, and `get` then
-  // drafted it (`l.set(0, c); l.get(0).y = 2`), so the edits are in no op.
+  // draft of THIS list: the op captured the value as assigned, and `at` then
+  // drafted it (`l.set(0, c); l.at(0).y = 2`), so the edits are in no op.
   // The child says them itself, after the ops: its own patches, or a
   // `replace` if an alias finalized it first (see `resolve`).
   const slotPath = (e: Entry, i: number): PatchPath | null => {

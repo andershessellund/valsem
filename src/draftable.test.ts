@@ -182,7 +182,7 @@ describe('a third-party draftable', () => {
 
     const list = ValueList.of(Interval.of(1, 2), Interval.of(3, 4));
     const bumped = produce(list, (d) => {
-      d.get(1)!.hi = 40; // DraftList child-drafts a custom draftable like any other
+      d.at(1)!.hi = 40; // DraftList child-drafts a custom draftable like any other
     });
     expect(bumped).toBe(ValueList.of(Interval.of(1, 2), Interval.of(3, 40)));
   });
@@ -258,7 +258,7 @@ describe('a third-party draftable', () => {
   it('Draft<T> infers the draft type from [toDraft]', () => {
     expectTypeOf<Draft<Interval>>().toEqualTypeOf<IntervalDraft>();
     expectTypeOf<Draft<{ range: Interval }>>().toEqualTypeOf<{ range: IntervalDraft }>();
-    expectTypeOf<Draft<ValueList<Interval>>['get']>().returns.toEqualTypeOf<IntervalDraft>(); // drafts all the way down, and get() names an element, so no undefined
+    expectTypeOf<Draft<ValueList<Interval>>['at']>().returns.toEqualTypeOf<IntervalDraft | undefined>(); // drafts all the way down; at() may name nothing
   });
 });
 

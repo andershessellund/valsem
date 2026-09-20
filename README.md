@@ -148,7 +148,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Iterating a `Map` or `Set` draft | yields drafts | a `DraftMap`'s values (and a `DraftList`'s elements) come as drafts too, so `for (const [, v] of d.m) v.x = 1` edits; keys and set members come as the **values** they are, since a set member's content is its identity. A loop that only reads is cheaper over `current(d.m)`, which drafts nothing |
 | `castDraft()` | for a `readonly` value headed into a mutable slot | the same, and also for every whole collection assigned into a slot: `d.todos = castDraft(ValueList.of(a, b))`, since a `ValueList` slot is typed as a `DraftList` |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draftOf(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
-| Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.remove(-1)` throw, `get` returns `T`), while ranges clamp (`slice(0, 10)`) |
+| Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an edit must also name a place that exists (`list.set(99, x)` and `list.remove(-1)` throw), while reads and ranges are `Array`'s: `list.at(-1)` is the last element, `list.at(99)` is `undefined`, `slice(0, 10)` clamps |
 | `produce(draft, recipe)` inside a recipe | a new value; the outer draft is untouched, so use the result | the same, for every kind of draft: the draft stands for `current(draft)` |
 | Async recipes | silently wrong | rejected with an error |
 

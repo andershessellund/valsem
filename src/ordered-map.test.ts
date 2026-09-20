@@ -85,15 +85,13 @@ describe('OrderedMap — reads', () => {
     expect(m.indexOf('a')).toBe(0);
     expect(m.indexOf('c')).toBe(2);
     expect(m.indexOf('z')).toBe(-1);
-    expect(m.keyAt(1)).toBe('b');
-    expect(m.valueAt(1)).toBe(2);
+    expect(m.at(1)).toEqual(['b', 2]);
+    expect(m.keyList.at(1)).toBe('b');
+    expect(m.valueList.at(1)).toBe(2);
     expect(m.at(2)).toEqual(['c', 3]);
-    expect(m.at(3)).toBeUndefined(); // as Array.prototype.at: keyAt and valueAt are the strict ones
+    expect(m.at(3)).toBeUndefined(); // as Array.prototype.at
     expect(m.at(-1)).toEqual(['c', 3]);
     expect(m.at(-4)).toBeUndefined();
-    expect(() => m.valueAt(3)).toThrow(RangeError);
-    expect(() => m.keyAt(3)).toThrow(RangeError);
-    expect(() => m.valueAt(3)).toThrow(RangeError);
     expect(m.first()).toEqual(['a', 1]);
     expect(m.last()).toEqual(['c', 3]);
     expect(OrderedMap.empty().first()).toBeUndefined();
@@ -239,7 +237,7 @@ describe('OrderedMap — writes', () => {
       const inc = OrderedMap.from(base).insertAt(at, undefined, -1);
       expect(inc).toBe(m);
       const next = inc.delete(entries[Math.min(at + 1, N)]![0]).set('z', 0);
-      for (let i = 0; i < next.size; i += 5) expect(next.indexOf(next.keyAt(i)!)).toBe(i);
+      for (let i = 0; i < next.size; i += 5) expect(next.indexOf(next.at(i)![0])).toBe(i);
       expect(next.delete(undefined).has(undefined)).toBe(false);
     }
   });
@@ -262,7 +260,7 @@ describe('OrderedMap — sizes across tree levels', () => {
       expect(m.size).toBe(model.length);
       for (let i = 0; i < model.length; i += 7) {
         expect(m.indexOf(model[i]![0])).toBe(i);
-        expect(m.keyAt(i)).toBe(model[i]![0]);
+        expect(m.at(i)![0]).toBe(model[i]![0]);
       }
       expect([...m.keys()]).toEqual(model.map(([k]) => k));
     };

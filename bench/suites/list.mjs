@@ -28,8 +28,8 @@ list with three changed records, which shares nothing by lineage with the origin
     const op = (name, v) => rows.push(row(name, { ValueList: v, 'pointer scan': null }));
     op('from, raw records (admission dominates)', await timeSettled(() => ValueList.from(raw), 5));
     op('from, canonical records', await timeSettled(() => ValueList.from(canon), 5));
-    op('get, sequential', await timeSettled((i) => vl.get(i % N), 300_000));
-    op('get, random', await timeSettled((i) => vl.get((i * 7919) % N), 300_000));
+    op('get, sequential', await timeSettled((i) => vl.at(i % N), 300_000));
+    op('get, random', await timeSettled((i) => vl.at((i * 7919) % N), 300_000));
     op('iterate for…of', await timeSettled(() => { let s = 0; for (const x of vl) s += x.id; return s; }, 20));
     op('toArray (memoized)', await timeSettled(() => vl.toArray().length, 20));
     op('push', await timeSettled((i) => vl.push({ id: -i }), 3000));

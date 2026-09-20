@@ -155,6 +155,6 @@ describe('ValueList iteration', () => {
     const list = ValueList.from(Array.from({ length: 1_500 }, (_, i) => ({ n: i })));
     const viaIter = [...list];
     expect(viaIter).toEqual([...list.toArray()]);
-    viaIter.forEach((v, i) => expect(list.get(i)).toBe(v)); // canonical element identity
+    viaIter.forEach((v, i) => expect(list.at(i)).toBe(v)); // canonical element identity
   });
 });

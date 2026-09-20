@@ -149,7 +149,7 @@ describe('it is a view, and lossy like all JSON', () => {
     out.length = 0;
     expect(list.length).toBe(2);
     expect(out).not.toBe(list.toArray());
-    expect(list.toJSON()[0]).toBe(list.get(0)); // the elements are the canonical ones
+    expect(list.toJSON()[0]).toBe(list.at(0)); // the elements are the canonical ones
     const pairs = OrderedMap.from([['k', { v: 1 }]]).toJSON();
     pairs[0]![1] = { v: 2 };
     expect(OrderedMap.from([['k', { v: 1 }]]).get('k')).toEqual({ v: 1 });
@@ -188,7 +188,7 @@ describe('inside a recipe, the drafts stringify as what they hold right now', ()
     let seen: Record<string, unknown> = {};
     const next = produce(base, (d) => {
       d.list.push({ n: 3 });
-      d.list.get(0)!.n = 10;
+      d.list.at(0)!.n = 10;
       d.map.get('k')!.v = 11;
       d.set.add('b');
       d.set.delete('a');
@@ -228,7 +228,7 @@ describe('inside a recipe, the drafts stringify as what they hold right now', ()
     expect(JSON.stringify({ list, map })).toBe('{"list":["1..2"],"map":[["k","1..2"]]}');
     let seen = '';
     const next = produce({ list, map }, (d) => {
-      d.list.get(0)!.hi = 9;
+      d.list.at(0)!.hi = 9;
       d.map.get('k')!.hi = 9;
       seen = JSON.stringify(d);
     });

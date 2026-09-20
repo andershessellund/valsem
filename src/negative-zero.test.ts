@@ -47,11 +47,11 @@ describe('-0 is stored as +0', () => {
   });
 
   it('ValueList: of, push, set, splice, setMany, toArray', () => {
-    expect(isPlusZero(ValueList.of(-0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.empty<number>().push(-0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1).set(0, -0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1).splice(0, 0, -0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1, 2).setMany([[0, -0], [1, -0]]).get(1))).toBe(true);
+    expect(isPlusZero(ValueList.of(-0).at(0))).toBe(true);
+    expect(isPlusZero(ValueList.empty<number>().push(-0).at(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1).set(0, -0).at(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1).splice(0, 0, -0).at(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1, 2).setMany([[0, -0], [1, -0]]).at(1))).toBe(true);
     expect(isPlusZero(ValueList.of(-0).toArray()[0])).toBe(true);
     expect(ValueList.of(-0)).toBe(ValueList.of(0));
     expect(ValueList.of(0).set(0, -0)).toBe(ValueList.of(0));
@@ -91,8 +91,8 @@ describe('-0 is stored as +0', () => {
     expect(isPlusZero(next.m.get('a'))).toBe(true);
     expect(isPlusZero(next.m.get('b'))).toBe(true);
     expect(isPlusZero([...next.s].find((v) => v === 0))).toBe(true);
-    expect(isPlusZero(next.l.get(0))).toBe(true);
-    expect(isPlusZero(next.l.get(1))).toBe(true);
+    expect(isPlusZero(next.l.at(0))).toBe(true);
+    expect(isPlusZero(next.l.at(1))).toBe(true);
   });
 
   it('current(): the snapshot is canonical, so it holds +0', () => {
@@ -103,7 +103,7 @@ describe('-0 is stored as +0', () => {
   });
 
   it('RawArray admission and HashMap keys', () => {
-    expect(isPlusZero(RawArray.from([-0]).get(0))).toBe(true);
+    expect(isPlusZero(RawArray.from([-0]).at(0))).toBe(true);
     expect(isPlusZero(RawArray.from([{ v: -0 }]).slice()[0]!.v)).toBe(true);
     const h = new HashMap<number, string>();
     h.set(-0, 'zero');

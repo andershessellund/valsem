@@ -68,7 +68,7 @@ describe('intern on entry — structural convergence for raw inputs', () => {
 
   it('nested raw data is canonicalized recursively', () => {
     const l = ValueList.of({ user: { id: 7 } });
-    const stored = l.get(0)!;
+    const stored = l.at(0)!;
     expect(stored).toBe(intern({ user: { id: 7 } }));
     expect((stored as { user: object }).user).toBe(intern({ id: 7 }));
   });
@@ -78,7 +78,7 @@ describe('intern on entry — the mutation hazard is closed', () => {
   it('raw plain data is frozen at the door', () => {
     const raw: { a: number } = { a: 1 };
     const l = ValueList.of(raw);
-    const stored = l.get(0)!;
+    const stored = l.at(0)!;
     expect(Object.isFrozen(stored)).toBe(true);
     // Strict mode: writing to a frozen object throws instead of silently
     // corrupting the cached hashes.
@@ -118,7 +118,7 @@ describe('toArray() — the interned flat and cross-representation unity', () =>
   it('toArray()[i] === get(i), always', () => {
     const l = ValueList.of<unknown>({ a: 1 }, 2, 'three');
     const snap = l.toArray();
-    for (let i = 0; i < l.length; i++) expect(snap[i]).toBe(l.get(i));
+    for (let i = 0; i < l.length; i++) expect(snap[i]).toBe(l.at(i));
   });
 
   it('toArray() === intern of the equal plain array', () => {

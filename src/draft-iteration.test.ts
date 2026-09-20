@@ -24,7 +24,7 @@ describe('DraftList iteration', () => {
       const seen: number[] = [];
       d.todos.forEach(function (this: unknown, t, i, list) {
         expect(isDraft(t)).toBe(true);
-        expect(t).toBe(d.todos.get(i)); // the one draft of that slot
+        expect(t).toBe(d.todos.at(i)); // the one draft of that slot
         expect(list).toBe(d.todos);
         expect(this).toBe(seen);
         seen.push(i);
@@ -35,11 +35,11 @@ describe('DraftList iteration', () => {
 
   it('a walk that edits one element shares every other with the base, and records what get(i) would', () => {
     const viaWalk = produceWithPatches(base, (d) => { for (const t of d.todos) if (t.id === 150) t.done = true; });
-    const viaGet = produceWithPatches(base, (d) => { d.todos.get(150).done = true; });
+    const viaGet = produceWithPatches(base, (d) => { d.todos.at(150)!.done = true; });
     expect(viaWalk[0]).toBe(viaGet[0]);
     expect(viaWalk[1]).toEqual(viaGet[1]);
     expect(viaWalk[2]).toEqual(viaGet[2]);
-    expect(viaWalk[0].todos.get(149)).toBe(base.todos.get(149));
+    expect(viaWalk[0].todos.at(149)).toBe(base.todos.at(149));
     expectPatchRoundTrip(base, ...viaWalk);
   });
 
@@ -70,7 +70,7 @@ describe('DraftList iteration', () => {
       d.xs.push(assigned); // a canonical placed in the draft: drafted on the way out, copy-on-write
       for (const x of d.xs) if (isDraft(x)) (x as Todo).done = true;
     });
-    expect(next.xs.get(4)).toBe(intern({ id: 9, done: true }));
+    expect(next.xs.at(4)).toBe(intern({ id: 9, done: true }));
     expect(assigned.done).toBe(false);
   });
 
@@ -81,7 +81,7 @@ describe('DraftList iteration', () => {
       expect(arr.some((t) => isDraft(t))).toBe(false);
       expect(Object.isFrozen(arr)).toBe(true);
       expect(arr[0]).toBe(intern({ id: 0, done: true }));
-      expect(arr[5]).toBe(base.todos.get(5));
+      expect(arr[5]).toBe(base.todos.at(5));
       expect(d.todos.slice(0, 1)).toBe(ValueList.of({ id: 0, done: true })); // and so is every other snapshot read
     });
   });
