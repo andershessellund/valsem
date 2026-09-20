@@ -31,7 +31,12 @@ out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
 the same as on a plain array; keys, and the members of a set, come as the
 values they are. A draft costs about 0.3 µs, so a loop that only reads a
 large collection is cheaper over `current(d.todos)` or `d.todos.slice()`,
-which draft nothing. Raw material assigned into a draft is **adopted**: interned on the way
+which draft nothing, and so are the functional reads: `map`, `filter`,
+`reduce`, `some`, `every` and `findIndex` on a draft show their callback
+values (a drafted child as it is right now) and give back values. `find` is
+the one that hands out a draft, the hit, so
+`d.todos.find((t) => t.id === id)!.done = true` edits and drafts one element.
+Raw material assigned into a draft is **adopted**: interned on the way
 into the result, exactly like the collections' intern-on-entry. Drafts are
 revoked when `produce` returns — using a leaked draft throws.
 

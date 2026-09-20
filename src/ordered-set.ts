@@ -18,7 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
@@ -196,6 +196,36 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   /** Call `fn` for each member in order, as `ReadonlySet.forEach` does. */
   forEach(fn: (value: T, value2: T, set: OrderedSet<T>) => void, thisArg?: unknown): void {
     this.#list.forEach((v) => fn.call(thisArg, v, v, this));
+  }
+
+  // The functional reads. A callback gets what `forEach` passes: `(value, value, set)`.
+
+  /** The set of `fn`'s results: equal results are one member. */
+  map<U>(fn: (value: T, value2: T, set: OrderedSet<T>) => U, thisArg?: unknown): OrderedSet<U> {
+    return OrderedSet.from(mapIn(this, this, false, fn as never, thisArg) as U[]);
+  }
+
+  /** The members `fn` accepts; `this` when it accepts them all. */
+  filter<S extends T>(fn: (value: T, value2: T, set: OrderedSet<T>) => value is S, thisArg?: unknown): OrderedSet<S>;
+  filter(fn: (value: T, value2: T, set: OrderedSet<T>) => unknown, thisArg?: unknown): OrderedSet<T>;
+  filter(fn: (value: T, value2: T, set: OrderedSet<T>) => unknown, thisArg?: unknown): OrderedSet<T> {
+    const kept = filterIn(this, this, false, fn as never, thisArg) as T[];
+    return kept.length === this.size ? this : OrderedSet.from(kept);
+  }
+
+  /** A fold over the members, from `initial`. */
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: OrderedSet<T>) => U, initial: U): U {
+    return reduceIn(this, this, false, 'OrderedSet.reduce', [fn, initial]) as U;
+  }
+
+  /** Whether `fn` accepts any member. */
+  some(fn: (value: T, value2: T, set: OrderedSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this, this, false, fn as never, thisArg) !== -1;
+  }
+
+  /** Whether `fn` accepts every member. */
+  every(fn: (value: T, value2: T, set: OrderedSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this, this, false, fn as never, thisArg, false) === -1;
   }
 
   /** What `JSON.stringify` sees: the members in order, as a fresh plain array; the order is the value's, so the string is stable (D46). */

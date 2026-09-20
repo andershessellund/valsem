@@ -142,6 +142,75 @@ export function inspectAs(name: string, size: number, body: () => unknown, depth
   return `${name}(${size}) ${inner.replace(/^(?:Map|Set)\(\d+\) /, '')}`;
 }
 
+// ---------------------------------------------------------------------------
+// The functional reads (`map`, `filter`, `reduce`, `some`, `every`, `find`,
+// `findIndex`), once, for every collection that has them. A callback gets
+// what that collection's `forEach` passes: `(value, index, list)` for a
+// sequence, `(value, value, set)` for a set.
+// ---------------------------------------------------------------------------
+
+type Visitor = (this: unknown, value: unknown, second: unknown, self: unknown) => unknown;
+
+/** The position of the first item `fn` accepts (`want`) or refuses (`!want`), or -1. */
+export function findIndexIn(items: Iterable<unknown>, self: unknown, indexed: boolean, fn: Visitor, thisArg: unknown, want = true): number {
+  let i = 0;
+  for (const v of items) {
+    if (!!fn.call(thisArg, v, indexed ? i : v, self) === want) return i;
+    i++;
+  }
+  return -1;
+}
+
+/** `fn`'s results, in order. */
+export function mapIn(items: Iterable<unknown>, self: unknown, indexed: boolean, fn: Visitor, thisArg: unknown): unknown[] {
+  const out: unknown[] = [];
+  let i = 0;
+  for (const v of items) {
+    out.push(fn.call(thisArg, v, indexed ? i : v, self));
+    i++;
+  }
+  return out;
+}
+
+/** The items `fn` accepts, in order. */
+export function filterIn(items: Iterable<unknown>, self: unknown, indexed: boolean, fn: Visitor, thisArg: unknown): unknown[] {
+  const out: unknown[] = [];
+  let i = 0;
+  for (const v of items) {
+    if (fn.call(thisArg, v, indexed ? i : v, self)) out.push(v);
+    i++;
+  }
+  return out;
+}
+
+/**
+ * A left fold. `args` is the caller's own argument list: as on `Array`, an
+ * initial value that was passed is one, `undefined` included, and with none
+ * the first item starts the fold and an empty collection is a `TypeError`.
+ */
+export function reduceIn(
+  items: Iterable<unknown>,
+  self: unknown,
+  indexed: boolean,
+  operation: string,
+  args: ArrayLike<unknown>,
+): unknown {
+  const fn = args[0] as (acc: unknown, value: unknown, second: unknown, self: unknown) => unknown;
+  let seeded = args.length >= 2;
+  let acc = args[1];
+  let i = 0;
+  for (const v of items) {
+    if (seeded) acc = fn(acc, v, indexed ? i : v, self);
+    else {
+      acc = v;
+      seeded = true;
+    }
+    i++;
+  }
+  if (!seeded) throw new TypeError(`${operation}: reduce of an empty collection with no initial value`);
+  return acc;
+}
+
 /**
  * The property through which a draft object exposes its state. Defined in
  * this leaf module, not in draft-core, so that the lowest layer can tell a

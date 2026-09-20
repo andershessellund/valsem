@@ -8,7 +8,8 @@
 // caught it: every method of a value class is on its draft, no exceptions.
 // What edits, edits the draft. What does not (`slice`, `concat`, the set
 // algebra, `keyList`) answers about the value the draft would be right now,
-// its snapshot, and gives back values: only `get` hands out a draft.
+// its snapshot, and gives back values: `get`, iteration and `find` hand out
+// drafts.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { castDraft, produce, produceWithPatches } from './produce.js';

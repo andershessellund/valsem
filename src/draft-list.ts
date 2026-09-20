@@ -34,9 +34,10 @@ import {
   type SeqOp,
   inspectDraft,
 } from './draft-core.js';
+import { intern } from './intern.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { extentArg, spliceCount, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -246,6 +247,58 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   /** The list as it is right now, followed by `other`, as `ValueList.concat`: a value, not a draft. */
   concat(other: ValueList<T>): ValueList<T> {
     return (snapshotOf(this) as ValueList<T>).concat(other);
+  }
+
+  // The functional reads do not draft: their callbacks get values (a drafted
+  // child as the value it would be right now, `current(child)`) and the draft
+  // as the third argument, and `map` and `filter` give back a `ValueList`.
+  // `find` is the exception that is the point of it: the hit comes back as
+  // `get` would hand it out, so `d.todos.find((t) => t.id === id)!.done = true`
+  // edits, and drafts one element.
+
+  /** The elements as values, nothing drafted: what the functional reads walk. */
+  *#values(): IterableIterator<T> {
+    for (const x of this.#peek()) yield (stateOf(x) === undefined ? x : intern(snapshotOf(x))) as T;
+  }
+
+  /** A `ValueList` of `fn`'s results over the list as it is right now, as `ValueList.map`. */
+  map<U>(fn: (value: T, index: number, list: DraftList<T>) => U, thisArg?: unknown): ValueList<U> {
+    return (snapshotOf(this) as ValueList<T>).map((v, i) => fn.call(thisArg, v, i, this));
+  }
+
+  /** A `ValueList` of the elements `fn` accepts, as `ValueList.filter`. */
+  filter<S extends T>(fn: (value: T, index: number, list: DraftList<T>) => value is S, thisArg?: unknown): ValueList<S>;
+  filter(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): ValueList<T>;
+  filter(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).filter((v, i) => fn.call(thisArg, v, i, this));
+  }
+
+  /** A left fold over the elements as they are right now, as `ValueList.reduce`. */
+  reduce(fn: (acc: T, value: T, index: number, list: DraftList<T>) => T): T;
+  reduce<U>(fn: (acc: U, value: T, index: number, list: DraftList<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    return reduceIn(this.#values(), this, true, 'DraftList.reduce', args);
+  }
+
+  /** Whether `fn` accepts any element. */
+  some(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this.#values(), this, true, fn as never, thisArg) !== -1;
+  }
+
+  /** Whether `fn` accepts every element. */
+  every(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this.#values(), this, true, fn as never, thisArg, false) === -1;
+  }
+
+  /** The first element `fn` accepts, DRAFTED if it can be, as `get` hands it out; `undefined` when there is none. `fn` sees values. */
+  find(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): Draft<T> | undefined {
+    const i = findIndexIn(this.#values(), this, true, fn as never, thisArg);
+    return i === -1 ? undefined : this.get(i);
+  }
+
+  /** The index of the first element `fn` accepts, or -1. */
+  findIndex(fn: (value: T, index: number, list: DraftList<T>) => unknown, thisArg?: unknown): number {
+    return findIndexIn(this.#values(), this, true, fn as never, thisArg);
   }
 
   /** Visit every element in index order, each drafted if it can be, as `get` hands it out: `d.todos.forEach((t) => { t.done = true; })` edits. */

@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, indexArg, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -662,6 +662,51 @@ export class ValueList<T> implements Iterable<T> {
     if (this.#root !== null) walk(this.#root);
     const tail = this.#tail;
     for (let i = 0; i < tail.length; i++) fn.call(thisArg, tail[i] as T, index++, this);
+  }
+
+  // The functional reads, as on `Array.prototype`, with lists for arrays.
+
+  /** A list of `fn`'s results, in order (interned on entry, like any element). */
+  map<U>(fn: (value: T, index: number, list: ValueList<T>) => U, thisArg?: unknown): ValueList<U> {
+    return ValueList.from(mapIn(this, this, true, fn as never, thisArg) as U[]);
+  }
+
+  /** The elements `fn` accepts, in order; `this` when it accepts them all. */
+  filter<S extends T>(fn: (value: T, index: number, list: ValueList<T>) => value is S, thisArg?: unknown): ValueList<S>;
+  filter(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): ValueList<T>;
+  filter(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): ValueList<T> {
+    const kept = filterIn(this, this, true, fn as never, thisArg) as T[];
+    return kept.length === this.length ? this : ValueList.from(kept);
+  }
+
+  /** A left fold. With no initial value the first element starts it, and an empty list is a `TypeError`, as on `Array`. */
+  reduce(fn: (acc: T, value: T, index: number, list: ValueList<T>) => T): T;
+  reduce<U>(fn: (acc: U, value: T, index: number, list: ValueList<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    return reduceIn(this, this, true, 'ValueList.reduce', args);
+  }
+
+  /** Whether `fn` accepts any element. */
+  some(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this, this, true, fn as never, thisArg) !== -1;
+  }
+
+  /** Whether `fn` accepts every element. */
+  every(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this, this, true, fn as never, thisArg, false) === -1;
+  }
+
+  /** The first element `fn` accepts, or `undefined`. */
+  find<S extends T>(fn: (value: T, index: number, list: ValueList<T>) => value is S, thisArg?: unknown): S | undefined;
+  find(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): T | undefined;
+  find(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): T | undefined {
+    const i = findIndexIn(this, this, true, fn as never, thisArg);
+    return i === -1 ? undefined : this.get(i);
+  }
+
+  /** The index of the first element `fn` accepts, or -1. */
+  findIndex(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): number {
+    return findIndexIn(this, this, true, fn as never, thisArg);
   }
 
   /**

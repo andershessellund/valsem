@@ -22,7 +22,7 @@ import {
   snapshotOf,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn } from './shared.js';
 import type { OrderedSet } from './ordered-set.js';
 import type { ValueList } from './value-list.js';
 
@@ -152,6 +152,36 @@ export class DraftOrderedSet<T> implements Iterable<T> {
   /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
   [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
     return inspectDraft('DraftOrderedSet', this, () => this.size, () => new Set(this), depth, options, inspect);
+  }
+
+  // The functional reads, over the set as it is right now. Members are values
+  // already; `map` and `filter` give back a `OrderedSet`, as the algebra does.
+
+  /** The `OrderedSet` of `fn`'s results, as `OrderedSet.map`. */
+  map<U>(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => U, thisArg?: unknown): OrderedSet<U> {
+    return (snapshotOf(this) as OrderedSet<T>).map((v) => fn.call(thisArg, v, v, this));
+  }
+
+  /** The `OrderedSet` of the members `fn` accepts, as `OrderedSet.filter`. */
+  filter<S extends T>(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => value is S, thisArg?: unknown): OrderedSet<S>;
+  filter(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => unknown, thisArg?: unknown): OrderedSet<T>;
+  filter(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => unknown, thisArg?: unknown): OrderedSet<T> {
+    return (snapshotOf(this) as OrderedSet<T>).filter((v) => fn.call(thisArg, v, v, this));
+  }
+
+  /** A fold over the members, from `initial`. */
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftOrderedSet<T>) => U, initial: U): U {
+    return reduceIn(this.values(), this, false, 'DraftOrderedSet.reduce', [fn, initial]) as U;
+  }
+
+  /** Whether `fn` accepts any member. */
+  some(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this.values(), this, false, fn as never, thisArg) !== -1;
+  }
+
+  /** Whether `fn` accepts every member. */
+  every(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this.values(), this, false, fn as never, thisArg, false) === -1;
   }
 
   forEach(fn: (value: T, value2: T, set: DraftOrderedSet<T>) => void, thisArg?: unknown): void {
