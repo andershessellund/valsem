@@ -32,7 +32,7 @@ import {
   _mutableBuiltinReason,
   _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord, _isForeignObjectPrototype } from './deep-equal.js';
 import { createInternPool, _poolStats } from './intern-pool.js';
-import { same } from './shared.js';
+import { same, _undraft } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _checking, _freeze } from './checks.js';
 
@@ -187,6 +187,13 @@ export function intern<T>(value: T): T {
 
   // Already interned via the legacy WeakMap path — fast path.
   if (_metaOf(obj) !== undefined) return value;
+
+  // A draft stands for the value it holds right now. After the fast paths, so
+  // a canonical value pays nothing; and before the walk, which would read a
+  // record draft through its proxy, hand out drafts of its children, and
+  // refuse the first collection among them.
+  const undrafted = _undraft(obj);
+  if (undrafted !== obj) return intern(undrafted) as T;
 
   // Array — internalize elements first. (Depth-capped: this recursion is
   // the decode boundary where hostile or cyclic input would otherwise

@@ -501,11 +501,12 @@ export function _protocolEquals(obj: object): ((this: unknown, o: unknown) => bo
 export function _missingValueSemantics(obj: object): string | undefined {
   const ctor = _ctorOf(obj);
   const name = ctor?.name || 'an anonymous class';
-  // A collection draft (a DraftList handed to intern, a HashMap, memoize) is
-  // a class without a hash too, and "implement [equals] and [hashCode]" is
-  // the wrong advice for it.
+  // A collection draft is a class without a hash too, and "implement [equals]
+  // and [hashCode]" is the wrong advice for it. Inside a recipe a draft never
+  // gets here: it stands for the value it holds (`_undraft`). So this one has
+  // outlived its recipe.
   if ((obj as Record<symbol, unknown>)[DRAFT_STATE] !== undefined) {
-    return `this ${name} is a draft, not a value — pass current(draft) for what it holds now`;
+    return `this ${name} is a draft, and this draft escaped its produce() call: drafts are only valid inside the recipe`;
   }
   const eq = _protocolEquals(obj);
   const hc = (obj as Record<symbol, unknown>)[hashCode];

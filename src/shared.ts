@@ -218,3 +218,35 @@ export function reduceIn(
  * importing the draft machinery. A per-copy symbol, like every internal one.
  */
 export const DRAFT_STATE: unique symbol = Symbol('valsem.draftState') as any;
+
+let draftValue: ((draft: object) => unknown) | undefined;
+let recipes = 0;
+
+/** @internal The draft core registers `snapshotOf` here when it loads: where there is a draft, it has. */
+export function _setDraftValue(fn: (draft: object) => unknown): void {
+  draftValue = fn;
+}
+
+/** @internal A recipe starts (+1) or ends (-1). A live draft exists only between the two. */
+export function _recipes(delta: 1 | -1): void {
+  recipes += delta;
+}
+
+/**
+ * What `obj` stands for where a VALUE is required (a set member, a map key, an
+ * argument to `intern`, `deepHash` or `memoize`): a draft is the value it
+ * holds right now, its snapshot, which is `current(draft)` before interning;
+ * anything else is itself. A set member and a key have no location to follow
+ * a draft from (D36), so "right now" is the only reading there is. Here, in
+ * the leaf module, so that the lowest layer can ask without importing the
+ * draft machinery.
+ */
+export function _undraft(obj: object): unknown {
+  // Asked of every raw object `intern` and `deepHash` walk, so outside a recipe,
+  // where no live draft can exist, it is one integer test and no property read
+  // (measured: the read alone cost raw `deepHash` about 5%). A draft met out there
+  // has escaped its recipe, and fails as it always did: a revoked proxy throws
+  // on the first read, a collection draft in `_missingValueSemantics`.
+  if (recipes === 0) return obj;
+  return (obj as Record<symbol, unknown>)[DRAFT_STATE] !== undefined ? draftValue!(obj) : obj;
+}

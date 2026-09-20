@@ -1312,9 +1312,10 @@ careless call work (`step(d.sub)` with the result dropped), and it makes
 what-if asked twice applies twice, a result kept past the recipe is a revoked
 proxy, and `produceWithPatches` has no value to be relative to. With the
 snapshot rule the one way to go wrong is to drop the result, which is how
-every operation on a value goes wrong. A draft is still not a value anywhere
-else (`intern`, a `HashMap` key, a `memoize` argument), and the error there
-now says so. **Cost.** The snapshot of the two core draft kinds no longer
+every operation on a value goes wrong. Everywhere else a value is required
+(`intern`, a set member, a map key, a `memoize` argument) a draft was at
+first refused, with an error that said to pass `current(draft)`; since D57 it
+stands for its current value there too. **Cost.** The snapshot of the two core draft kinds no longer
 tree-shakes away with `current()`: a bundle importing `produce` alone grows
 by 1.2 KB minified (330 B gzipped); one that already imports `current` by
 0.2 KB. DESIGN.md §7.1.
@@ -1361,14 +1362,29 @@ values they are, the one exception to D53. A member is edited by saying what
 that is: for every member, `d.tags = castDraft(d.tags.map((t) => ({ ...t, n:
 0 })))`; for one, `d.s.delete(m); d.s.add({ ...m, n: 0 })`, over a copy when
 in a loop, since a member added to a set being walked is visited too, as on
-a native `Set`. Going in, `add(x)` takes the value `x` has at that moment
-(D36: a set member has no location), a draft of a plain record or array
-included; later edits to that draft do not reach the set, where a list slot
-holding the same draft follows it to the end of the recipe. A map key is
-the same. A collection draft is refused there instead (`intern` takes it
-for a class without a hash, and says to pass `current(draft)`), which asks
-the caller for the snapshot a plain draft gets without asking: uneven, and
-left so, since both answers are safe and neither loses an edit.
+a native `Set`.
+
+Going in, it is the same rule from the other side: **where a value is
+required, a draft stands for the value it holds right now.** `add(x)`, a map
+key, and an argument to `intern`, `deepHash`, `HashMap` or `memoize` take a
+draft as its snapshot, which is `current(draft)`. A set member and a key have
+no location to follow a draft from (D36), so "right now" is the only reading
+there is, and later edits to that draft do not reach the set, where a list
+slot holding the same draft follows it to the end of the recipe. This was
+half true by accident before: a draft of a plain record is a Proxy, `intern`
+walked it as raw data, and the content it had was admitted; but the walk
+read children through the proxy, which hands out drafts, and the first
+collection among them was refused ("this DraftList is a draft, not a value"),
+as was any collection draft given directly. So `d.seen.add(d.todo)` worked
+until a todo held a list. Now every draft is resolved before the walk, through
+a registration the draft core makes in the leaf module, since `intern` cannot
+import it; an untouched draft is its base, in O(1). No collection can hold a
+draft as a key or a member, which a recipe's end would have revoked inside
+it. The check is gated on a recipe being in progress, outside of which no
+live draft exists: ungated, the property read cost raw `deepHash` about 5%
+(1.04 to 1.06 times `main`, interleaved in one process); gated, it is inside
+the noise (0.97 to 1.05). A draft that has outlived its recipe is refused as before, and
+the error says that.
 
 **Why.** A set holds its members by content, so there is no editing one in
 place: changing a member is removing it and adding another, and the other
