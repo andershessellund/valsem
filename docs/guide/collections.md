@@ -118,7 +118,10 @@ mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 `map`, `filter`, `reduce`, `some` and `every`, whose callbacks get what their
 `forEach` passes, `(value, value, set)`. What they build is canonical like
 any other collection (`list.filter(() => true) === list`), and a set's `map`
-merges equal results.
+merges equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s
+too (a stable sort, `undefined` last, by string with no comparator), and a
+list already in order comes back as itself. There is no `toSpliced` or
+`with`: on a list `splice` and `set` are those already.
 
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
 read with `get(i)` (a size-table walk; sequential reads stay in one leaf),

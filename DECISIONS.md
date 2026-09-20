@@ -1506,6 +1506,31 @@ everywhere since D45: `at(0.5)` and `at(NaN)` throw, where `Array` reads
 index 0. **Cost.** Breaking on the ordered collections: `at` returns
 `T | undefined` where it threw, and `keyAt` / `valueAt` are removed.
 
+### D58. `toSorted` and `toReversed`, and no `toSpliced` or `with`
+
+`ValueList` has `Array`'s ES2023 copying reorders, `toSorted(compare?)` and
+`toReversed()`, with `Array`'s contract whole: a stable sort, `undefined`
+last, and by string when there is no comparator. `DraftList` has them as
+reads: they answer about the list as it is right now and return a
+`ValueList`.
+
+**Why.** A list could not be sorted or reversed at all short of
+`ValueList.from([...list].sort(compare))`. The names are the ones `Array`
+gave the copying versions, and on a value they are the honest ones:
+`list.toSorted()` cannot be read as sorting in place, where a `sort()` whose
+result is dropped would do nothing and say nothing. The default comparator is
+`Array`'s wart and comes with the name (D52): `[10, 9, 1]` sorts to
+`[1, 10, 9]`. Both are `Array`'s own `sort` and `reverse` on a copy, so there
+is no second implementation to disagree with the first, and a list already in
+order comes back as itself, since equal content is the same instance.
+**Rejected:** `toSpliced` and `with`. `Array` needed those names because
+`splice` and `arr[i] = x` mutate; a list's `splice` and `set` are the copying
+versions already, and an alias is surface with no capability behind it (the
+argument of D56 about `get` and `at`, from the other side). **Left for
+later,** all additive: `findLast` / `findLastIndex`, `indexOf` / `includes` by
+value, `flatMap`, and `sort` / `reverse` in place on `DraftList`, where a
+recipe for now assigns: `d.todos = castDraft(d.todos.toSorted(byId))`.
+
 ## Non-goals
 
 Permanently out of scope: mutable built-ins as values; cycle support; wire
