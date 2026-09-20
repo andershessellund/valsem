@@ -306,7 +306,8 @@ so `produce` can edit your type in place, with patches.
   hash-flooding), nesting is depth-capped, `__proto__` keys are handled as
   data.
 - **No leaks.** Pools hold values weakly; what you stop referencing is
-  collected, and the bookkeeping is cleaned up in idle time.
+  collected, and the bookkeeping is dropped as interning goes on — no
+  finalizers, no timers.
 
 ## Gotchas
 

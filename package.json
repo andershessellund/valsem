@@ -61,6 +61,7 @@
     "bench:report": "node bench/report.mjs",
     "bench:pool": "node --expose-gc scripts/experiments/pool-gc-bench.mjs",
     "bench:soak": "pnpm build && node scripts/experiments/soak.mjs",
+    "bench:mix": "pnpm build && node scripts/experiments/mix-bench.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.tests.json",
     "check:package": "publint --strict && attw --pack . --profile esm-only",

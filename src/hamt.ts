@@ -33,7 +33,7 @@
 //     content means the same instances).
 //
 // Node pools are ordinary intern pools (intern-pool.ts): every consed node is
-// a weakly-held pool member, reclaimed in idle time once unreferenced.
+// a weakly-held pool member, dropped from its pool once unreferenced.
 // ---------------------------------------------------------------------------
 
 import { createInternPool, type InternPool } from './intern-pool.js';

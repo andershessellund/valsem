@@ -23,8 +23,8 @@ const noSkipsInCI: Reporter = {
 
 export default defineConfig({
   test: {
-    // The intern-pool suite exercises real GC reclamation (WeakRef death
-    // reported through FinalizationRegistry, then the deferred drain);
+    // The intern-pool suite exercises real GC reclamation (WeakRefs cleared
+    // by a collection, then dropped from the index as registration goes on);
     // those tests skip themselves when globalThis.gc is unavailable.
     // --allow-natives-syntax lets fast-properties.test.ts ask V8 whether a
     // canonical record is in fast (not dictionary) mode.

@@ -55,8 +55,8 @@ not part of the model.
 | `valsem/draft` | the toolkit for making a type draftable (§7.1); semver-covered |
 | `valsem/binding` | the two helpers a wire or storage binding needs (§10.1); semver-covered |
 
-Ships as ES modules with declarations, dependency-free. Requires `WeakRef`,
-`FinalizationRegistry` and `globalThis.crypto`; uses the global `Iterator`
+Ships as ES modules with declarations, dependency-free. Requires `WeakRef`
+and `globalThis.crypto`; uses the global `Iterator`
 as an iterator base class where the runtime has it. The declared floor is a
 list of language features, not of runtimes: ES2022, plus symbols as `WeakMap`
 keys for values that hold a unique symbol. It is stated with engine versions
@@ -295,24 +295,30 @@ their own configuration); `ValueList`'s node pool and its list pool; one
 each for `OrderedMap`, `OrderedSet`, `InternedString` and `ValueDate`; and
 any number created by `createInternPool`. (`ValueMap` and `ValueSet`
 wrappers need no pool: each root node holds its wrapper, §6.3.) A pool
-is a `Map` from a 30-bit key (`hash & 0x3fffffff`, so it is always a Smi)
-to a bucket: one `Slot`, or an array of slots when two keys collide. The
-index is in fact 64 such Maps, a shard chosen from the hash and created on
-first use, so that growing the index rehashes a 64th of it and no single
-Map approaches the engine's size limit. A
-`Slot` *is* the `WeakRef` to the pooled object (a subclass), carrying the
-full 32-bit hash and its pool; `lookup(hash, predicate)` pre-checks
-`slot.hash` before dereferencing. `register(value, hash)` prunes dead
-members of the bucket in passing. Why: D3, D48.
+is 64 open-addressed tables (linear probing), a shard chosen from the hash
+and created on first use. A slot is one int32 in an `Int32Array` — 26 bits
+of the hash, multiplied by an odd constant, above a 6-bit epoch stamp —
+beside a plain `WeakRef` in a parallel array. The top 6 bits of the product
+choose the shard and the other 26 are the slot's tag, so a tag match is
+full-hash equality: `lookup(hash, predicate)` offers the predicate exactly
+what was registered under that hash, and a miss reads the `Int32Array`
+alone. Why: D3, D48.
 
-Cleanup: one global `FinalizationRegistry` reports each death after the
-major GC that clears its `WeakRef`. The callback pushes the slot on a
-LIFO stack and schedules a drain: `requestIdleCallback` where it exists
-(deadline-bounded slices, at least 64 per call), else `setImmediate`
-(4096 per turn), else inline. The stack is bounded at 100k; beyond it,
-deaths are reclaimed inline. The registry is held from a module binding.
-The pool holds nothing alive; a dropped pool is retained only as long as
-its last live member. Why: D2.
+Cleanup is the index's own growth. Nothing is deleted from a table; a
+table is replaced, incrementally: registrations go to the current table,
+each also moves one live entry across from the old one, and a dead entry
+is not moved. A lookup probes the current table, then the old. Whether an
+entry is dead can only be asked (`deref()`), and two things keep the
+asking rare. A canary — a `WeakRef` to an object nothing holds, looked at
+every 64th registration — advances an epoch each time it is found
+collected; a slot stamped with the current epoch (registered, found or
+verified since) is moved unasked. And a collection is ignored unless a
+64-slot sample of the shard finds half of it dead; below that, growth is a
+plain copy. So the dead number about the living at most, and cleanup rides
+on registration: a pool that stops registering keeps its husks (a cleared
+`WeakRef` and eight bytes of table each) until it resumes or is dropped.
+There are no finalization callbacks, timers or idle callbacks, and the
+pool holds nothing alive. Why: D2.
 
 `pool.intern(object)` is the high-level entry: returns `object` if marked,
 otherwise looks up by its `[hashCode]` and `[equals]`, and on a miss marks

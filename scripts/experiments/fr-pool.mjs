@@ -1,0 +1,315 @@
+// ---------------------------------------------------------------------------
+// fr-pool — the InternPool that the semispace index replaced (D2, D3), kept as a
+// contender for mix-bench.mjs: 64 Map shards keyed by a 30-bit hash, a Slot
+// that IS the WeakRef, one global FinalizationRegistry, idle-time reclaim.
+// This is the compiled output of src/intern-pool.ts as of 4c938b5, unchanged
+// but for the import path below.
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// intern-pool — weak pools; the engine reports deaths, idle time buries them.
+//
+// A pool is a Map from a 30-bit key to a bucket (64 Maps in fact, sharded by
+// hash: see SHARDS): one Slot (the overwhelmingly
+// common case) or an array when two slots share a key. A Slot IS the WeakRef
+// to the pooled object, carrying its full 32-bit hash and its pool — one
+// allocation per registration, and the registry's holdings are the slot
+// itself.
+//
+// The key is `hash & 0x3fffffff`, not the full uint32: V8's Smi range under
+// pointer compression is 31-bit signed, so three quarters of full hashes
+// would be boxed HeapNumber keys, and Map hits at scale cost ~2× more that
+// way (measured); on JavaScriptCore the masking is neutral. Slots of
+// different full hashes can therefore share a bucket, so every candidate is
+// pre-checked on `slot.hash` before it is dereferenced. A hand-rolled open
+// hash table was measured against this and rejected: equal on V8 in every
+// realistic regime, ~10 % slower where pools grow unboundedly (JS rebuilds
+// against a native rehash), and clearly slower on JavaScriptCore.
+//
+// Cleanup is driven by ONE global FinalizationRegistry: a pooled object's
+// death is reported once, by the engine, after the major GC that clears
+// its WeakRef (the only time anything can be dead — scavenges never clear
+// WeakRefs). The callback does the minimum — push the slot on a stack —
+// and the actual bucket surgery runs when the thread is otherwise idle:
+//
+//   * requestIdleCallback where it exists (browser windows): the work lands
+//     in time the host has declared worthless, in deadline-bounded slices;
+//   * else setImmediate (Node, Bun): bounded slices, one per event-loop
+//     turn, so a large post-GC batch never becomes one long task;
+//   * else no deferral — the slot is reclaimed inside the callback.
+//
+// The stack is bounded (MAX_PENDING); past the bound, deaths are reclaimed
+// inline until idle time drains it. Order is irrelevant — every reclaim is
+// independent — so LIFO push/pop is the cheapest correct structure.
+//
+// What this replaced: an incremental sweeper that walked every pool's
+// buckets in bounded slices on a registration-driven schedule. Measured end
+// to end (frame-loop, pool churn, and collection benchmarks, on V8 and JSC),
+// that schedule did nothing between major GCs — nothing was ever dead — and
+// its per-registration tax was the only thing it reliably delivered.
+//
+// Requires WeakRef and FinalizationRegistry (ES2021; every supported
+// runtime ships both).
+// ---------------------------------------------------------------------------
+import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from '../../dist/deep-equal.js';
+/**
+ * A pooled member: the WeakRef itself, plus what reclaiming it needs — the
+ * full hash and the pool. The pool reference is strong on purpose: the
+ * registry retains a slot only until its target dies, so a dropped pool is
+ * retained exactly as long as its last live member — the members' own
+ * lifetime, not a leak. Subclassing WeakRef (rather than wrapping one) was
+ * measured: zero deoptimizations, identical deref/construction cost, and one
+ * object header less per slot.
+ */
+class Slot extends WeakRef {
+    hash;
+    pool;
+    constructor(target, hash, pool) {
+        super(target);
+        this.hash = hash;
+        this.pool = pool;
+    }
+}
+/** Map key for a full 32-bit hash: the low 30 bits, always a Smi. */
+const KEY_MASK = 0x3fffffff;
+/**
+ * The index is SHARDS Maps, not one. Two reasons, both about size: an engine
+ * grows a hash table by rehashing all of it inside the one `set` that tipped
+ * it over (20 ms for a Map of a million entries on V8, and every canonical
+ * object is an entry), and V8 refuses a Map more than 2^24 entries, which one
+ * index reached at 16.7M live canonical objects with a RangeError out of
+ * `intern`. With 64 shards a rehash touches a 64th of the pool and the
+ * ceiling is a billion. Shards are created on first use: most pools are small.
+ */
+const SHARD_BITS = 6;
+const SHARDS = 1 << SHARD_BITS;
+/**
+ * Shard of a hash. Multiplied first (Fibonacci hashing), so that a hash with
+ * all its entropy in the low bits — a consumer's `x + 31 * y` — still spreads.
+ */
+function shardOf(hash) {
+    return Math.imul(hash, 0x9e3779b1) >>> (32 - SHARD_BITS);
+}
+/** Remove a dead slot from its pool. Idempotent: tolerates "already pruned". */
+function reclaim(slot) {
+    slot.pool._reclaim(slot);
+}
+// ---------------------------------------------------------------------------
+// Deferred reclamation
+// ---------------------------------------------------------------------------
+const MAX_PENDING = 100_000; // slots parked for idle time before deaths are reclaimed inline
+const IMMEDIATE_SLICE = 4096; // slots per setImmediate turn (~0.5 ms)
+const IDLE_MIN_SLICE = 64; // always make progress, even on a zero-remaining deadline
+/** Dead slots awaiting idle time. LIFO — reclaims are independent, order is free. */
+const pending = [];
+let scheduled = false;
+const _g = globalThis;
+function canDefer() {
+    return typeof _g.requestIdleCallback === 'function' || typeof _g.setImmediate === 'function';
+}
+function schedule() {
+    if (scheduled)
+        return;
+    if (typeof _g.requestIdleCallback === 'function') {
+        scheduled = true;
+        _g.requestIdleCallback(drainIdle);
+    }
+    else if (typeof _g.setImmediate === 'function') {
+        scheduled = true;
+        _g.setImmediate(drainImmediate);
+    }
+}
+function drainIdle(deadline) {
+    scheduled = false;
+    let n = 0;
+    while (pending.length > 0 && (n < IDLE_MIN_SLICE || deadline.timeRemaining() > 1)) {
+        reclaim(pending.pop());
+        n++;
+    }
+    if (pending.length > 0)
+        schedule();
+}
+function drainImmediate() {
+    scheduled = false;
+    for (let n = 0; n < IMMEDIATE_SLICE && pending.length > 0; n++)
+        reclaim(pending.pop());
+    if (pending.length > 0)
+        schedule();
+}
+// The registry must be reachable from a module-level binding: an
+// unreferenced FinalizationRegistry is itself collected and its callbacks
+// silently stop (measured, not theorized).
+const registry = new FinalizationRegistry((slot) => {
+    if (pending.length >= MAX_PENDING || !canDefer()) {
+        reclaim(slot);
+        return;
+    }
+    pending.push(slot);
+    schedule();
+});
+class InternPoolImpl {
+    #shards = new Array(SHARDS).fill(undefined);
+    lookup(hash, predicate) {
+        const b = this.#shards[shardOf(hash)]?.get(hash & KEY_MASK);
+        if (b === undefined)
+            return undefined;
+        if (Array.isArray(b)) {
+            for (let i = 0; i < b.length; i++) {
+                const slot = b[i];
+                // Shares the 30-bit key without sharing the hash: not a candidate. (The
+                // shard function happens to separate such pairs today; this does not rely on it.)
+                if (slot.hash !== hash)
+                    continue;
+                const candidate = slot.deref();
+                if (candidate !== undefined && predicate(candidate))
+                    return candidate;
+            }
+            return undefined;
+        }
+        if (b.hash !== hash)
+            return undefined;
+        const candidate = b.deref();
+        return candidate !== undefined && predicate(candidate) ? candidate : undefined;
+    }
+    register(value, hash) {
+        const slot = new Slot(value, hash, this);
+        registry.register(value, slot);
+        const key = hash & KEY_MASK;
+        const buckets = (this.#shards[shardOf(hash)] ??= new Map());
+        const b = buckets.get(key);
+        if (b === undefined) {
+            buckets.set(key, slot);
+        }
+        else if (Array.isArray(b)) {
+            // Prune dead members in passing (their reclaim may still be pending), then append.
+            let w = 0;
+            for (let r = 0; r < b.length; r++)
+                if (b[r].deref() !== undefined)
+                    b[w++] = b[r];
+            b.length = w;
+            b.push(slot);
+        }
+        else if (b.deref() === undefined) {
+            buckets.set(key, slot); // replace the dead singleton in place
+        }
+        else {
+            buckets.set(key, [b, slot]);
+        }
+        return value;
+    }
+    /** @internal Remove `slot` if it is still in its bucket. Idempotent. */
+    _reclaim(slot) {
+        const key = slot.hash & KEY_MASK;
+        const buckets = this.#shards[shardOf(slot.hash)];
+        if (buckets === undefined)
+            return;
+        const b = buckets.get(key);
+        if (b === slot) {
+            buckets.delete(key);
+        }
+        else if (Array.isArray(b)) {
+            const k = b.indexOf(slot);
+            if (k < 0)
+                return; // already pruned in passing
+            b.splice(k, 1);
+            if (b.length === 1)
+                buckets.set(key, b[0]);
+        }
+        // else: replaced in place by a live member — nothing to do
+    }
+    intern(object) {
+        if (object[internedSym] === true)
+            return object;
+        const hash = object[hashCodeSym];
+        const eq = object[equalsSym];
+        const found = this.lookup(hash, (c) => typeof eq === 'function' && !!eq.call(object, c));
+        if (found !== undefined)
+            return found;
+        object[internedSym] = true;
+        Object.freeze(object);
+        return this.register(object, hash);
+    }
+    size() {
+        let n = 0;
+        for (const buckets of this.#shards) {
+            if (buckets === undefined)
+                continue;
+            for (const b of buckets.values()) {
+                if (Array.isArray(b)) {
+                    for (let k = 0; k < b.length; k++)
+                        if (b[k].deref() !== undefined)
+                            n++;
+                }
+                else if (b.deref() !== undefined) {
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+    /** @internal Test-only: slots stored (live or awaiting reclaim), and bucket count. */
+    _stats() {
+        let slots = 0;
+        let count = 0;
+        for (const buckets of this.#shards) {
+            if (buckets === undefined)
+                continue;
+            count += buckets.size;
+            for (const b of buckets.values())
+                slots += Array.isArray(b) ? b.length : 1;
+        }
+        return { slots, buckets: count };
+    }
+}
+/**
+ * Create an empty {@link InternPool} for a value type `T`.
+ *
+ * Give a class its own pool to make its instances canonical (equal contents ⟹
+ * `===`), the same way the built-in collections are. The pool holds its members
+ * weakly, so canonical instances are reclaimed by GC once unreferenced. Because
+ * a pool only ever holds one type, its hashes need no type tag to avoid
+ * cross-type collisions.
+ *
+ * @typeParam T - The object type of the pooled canonical instances.
+ * @returns A fresh, empty pool.
+ *
+ * @example
+ * ```ts
+ * const pool = createInternPool<Point>();
+ *
+ * class Point {
+ *   declare readonly [hashCode]: number;
+ *   declare readonly [interned]: true;
+ *   private constructor(readonly x: number, readonly y: number) {}
+ *   [equals](o: unknown) { return o instanceof Point && o.x === this.x && o.y === this.y; }
+ *   static of(x: number, y: number): Point {
+ *     const p = new Point(x, y);
+ *     (p as any)[hashCode] = (x * 73856093) ^ (y * 19349663);
+ *     return pool.intern(p); // frozen, marked interned, deduplicated
+ *   }
+ * }
+ * ```
+ */
+export function createInternPool() {
+    return new InternPoolImpl();
+}
+// ---------------------------------------------------------------------------
+// Test-only inspection hooks (not exported from the package barrel)
+// ---------------------------------------------------------------------------
+/** @internal Test-only: dead slots parked for idle time. */
+export function _pendingCount() {
+    return pending.length;
+}
+/** @internal Test-only: reclaim every parked slot now, synchronously, and forget any pending drain (a test's fake scheduler may never fire). */
+export function _drainNow() {
+    const n = pending.length;
+    while (pending.length > 0)
+        reclaim(pending.pop());
+    scheduled = false;
+    return n;
+}
+/** @internal Test-only: slots stored in a pool (live or awaiting reclaim) and its bucket count. */
+export function _poolStats(pool) {
+    return pool._stats();
+}
+/** @internal Test-only: the stack bound. */
+export const _MAX_PENDING = MAX_PENDING;

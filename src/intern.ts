@@ -6,8 +6,8 @@
 //   2. Hash code is precomputed and cached in a WeakMap (O(1) deepHash)
 //   3. The interner does NOT hold strong references — canonical copies may
 //      be garbage-collected when no other references exist; their pool
-//      metadata is then reclaimed in idle time (see intern-pool.ts for the
-//      design and its measured rationale).
+//      metadata is then dropped as interning continues (see intern-pool.ts
+//      for the design and its measured rationale).
 //
 // Supported value types: primitives (returned as-is), plain objects, arrays,
 // the auto-interning types (marked `[interned]`), and any class with both an
@@ -419,8 +419,8 @@ export function _internPoolSize(): number {
   return pool.size();
 }
 
-/** @internal Slots the global pool stores (live, or dead and awaiting reclaim) and its bucket count — for the soak harness. */
-export function _internPoolStats(): { slots: number; buckets: number } {
+/** @internal Entries the global pool stores (live, or dead and not yet dropped) and the slots of all its tables — for the soak harness. */
+export function _internPoolStats(): { slots: number; capacity: number; migrating: number } {
   return _poolStats(pool);
 }
 

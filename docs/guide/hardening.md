@@ -64,21 +64,23 @@ Size limits are deliberately absent: admission is O(n) with no amplification,
 and byte budgets belong to the transport layer (a JSON body limit), not the
 value layer.
 
-## Weak pools, idle-time cleanup
+## Weak pools, cleanup without finalizers
 
 The global pool holds canonical instances via `WeakRef` — values are reclaimed
 by GC the moment your program stops referencing them, so interning cannot grow
-memory without bound. Pool bookkeeping is reclaimed in idle time: one global
-`FinalizationRegistry` reports each death after the major GC that collects it
-(the only moment anything can be dead — scavenges never clear a `WeakRef`),
-the callback merely parks the dead slot, and the bucket cleanup runs under
-`requestIdleCallback` (browser windows) or `setImmediate` (Node, Bun) in
-bounded slices — so a large post-GC batch never becomes one long task on the
-main thread. Where neither exists, cleanup runs inside the callback. The
-parked stack is bounded (100k); past that, deaths are reclaimed inline until
-idle time catches up. The measurements behind this choice — frame-loop,
-pool-churn and collection benchmarks on V8 and JavaScriptCore — are in the
-repository's `BENCHMARKS.md`.
+memory without bound. The pool's own bookkeeping is dropped as interning goes
+on: its index is never edited in place but replaced, one entry per
+registration, and an entry whose value has been collected is simply not
+carried over — so neither growing the index nor cleaning it is ever one long
+task on the main thread. The pool notices a collection through a canary (a
+`WeakRef` to an object nothing holds), and ignores one that left more than
+half of a shard alive, so the dead number about the living at most. There is
+no `FinalizationRegistry`, no timer and no idle callback, which matters on
+hosts that run finalizers without an I/O context or not at all. The cost: a
+pool that stops interning stops cleaning — what it keeps is a cleared
+`WeakRef` and eight bytes of index per dead value, never the values — until
+interning resumes. The measurements behind this choice are in the repository's
+`DECISIONS.md` (D2) and reproducible with `pnpm bench:mix`.
 What the pool and its bookkeeping cost when a state gets large is on the
 [Performance and scale](/guide/performance#large-states-memory-and-pauses) page.
 

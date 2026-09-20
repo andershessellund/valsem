@@ -4,8 +4,8 @@
 //
 // The benchmarks in bench/ measure operations against a working set of tens
 // of thousands of values. This asks the other question: with MILLIONS of
-// canonical values alive, each behind a WeakRef, a pool slot, a WeakMap entry
-// and a FinalizationRegistry cell, what do tail latency, the garbage
+// canonical values alive, each behind a WeakRef, a pool slot and a WeakMap
+// entry, what do tail latency, the garbage
 // collector and the heap look like at the load a server actually runs at?
 //
 // Each run is one process (soak.worker.mjs) living one server's life:
