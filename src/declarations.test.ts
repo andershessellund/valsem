@@ -99,6 +99,58 @@ describe('the published declarations, as a consumer compiles them', () => {
     expect(diagnostics).toEqual([]);
   });
 
+  // `stripInternal` keeps what is tagged `@internal` out of the declarations. A
+  // tag on something they still need (a re-export, a helper type a public type
+  // is spelled with) breaks every consumer's build and none of ours, so all
+  // four entry points are compiled here, not only the one the suites above use.
+  it('all four entry points compile without what was stripped', () => {
+    const diagnostics = compileConsumer(
+      declarations,
+      `
+      import * as valsem from '/published/index.js';
+      import { registerTemporal } from '/published/temporal.js';
+      import { defineRecordField, mutableBuiltinReason } from '/published/binding.js';
+      import { DRAFT_STATE, stateOf, createDraftState, snapshotOf, type DraftState, type Scope } from '/published/draft.js';
+
+      export const all = [valsem, registerTemporal, defineRecordField, mutableBuiltinReason, DRAFT_STATE, stateOf, createDraftState, snapshotOf];
+      export type Kit = [DraftState, Scope, valsem.Draft<{ a: number[] }>, valsem.Undraft<unknown>];
+      export const curried = valsem.produce((d: { n: number }) => void d.n++);
+      `,
+    );
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('a consumer sees no internal member: the test hooks and the plumbing are gone', () => {
+    // An unused @ts-expect-error is itself a diagnostic, so each line below
+    // fails the day its member comes back.
+    const diagnostics = compileConsumer(
+      declarations,
+      `
+      import { ValueList, ValueMap, OrderedMap, OrderedSet } from '/published/index.js';
+      // @ts-expect-error
+      ValueList._record(() => 0);
+      // @ts-expect-error
+      ValueList.of(1)._structure();
+      // @ts-expect-error
+      ValueList.of(1)._spliceItems(0, 0, []);
+      // @ts-expect-error
+      ValueMap._nodeStats();
+      // @ts-expect-error
+      OrderedMap.empty()._anchorOf(1);
+      // @ts-expect-error
+      OrderedSet.empty()._anchorOf(1);
+      `,
+    );
+    expect(diagnostics).toEqual([]);
+    // What is left with a leading underscore is what public types and
+    // valsem/binding are spelled with, and nothing else.
+    const left = new Set<string>();
+    for (const [file, text] of declarations) {
+      if (file.endsWith('.d.ts')) for (const m of text.matchAll(/\b_[A-Za-z]\w*/g)) left.add(m[0]);
+    }
+    expect([...left].sort()).toEqual(['_CurriedFromRecipe', '_Frozen', '_HasFunctionMember', '_IsPlainArray', '_defineRecordField', '_mutableBuiltinReason']);
+  });
+
   it('the harness can fail: a wrong assignment is reported', () => {
     const diagnostics = compileConsumer(
       declarations,

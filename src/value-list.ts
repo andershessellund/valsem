@@ -301,10 +301,13 @@ export interface Hunk {
 /**
  * Anchor sentinels for the ordered collections (see {@link ValueList._indexOf}):
  * the anchor of the list's first element, and of every element in the open tail.
+ *
+ * @internal
  */
 export const _ANCHOR_ROOT: unique symbol = Symbol('valsem.anchor.root');
+/** @internal */
 export const _ANCHOR_TAIL: unique symbol = Symbol('valsem.anchor.tail');
-/** What an `anchorOf` callback returns for a key the collection does not hold (`undefined` is a legitimate key). */
+/** @internal What an `anchorOf` callback returns for a key the collection does not hold (`undefined` is a legitimate key). */
 export const _ANCHOR_NONE: unique symbol = Symbol('valsem.anchor.none');
 
 /** Is a leaf holding `items` closed — does its run end on its own, not merely at the list end? */
@@ -522,7 +525,7 @@ export class ValueList<T> implements Iterable<T> {
     return this._spliceItems(start, spliceCount(deleteCount, items.length, 'ValueList.splice'), items);
   }
 
-  /** `splice` with the items as an array: what the drafts and `push` call, with no argument limit. */
+  /** @internal `splice` with the items as an array: what the drafts and `push` call, with no argument limit. */
   _spliceItems(start: number, deleteCount: number | undefined, items: readonly T[]): ValueList<T> {
     const n = this.length;
     start = insertionIndex(start, n, 'ValueList.splice', 'start');
