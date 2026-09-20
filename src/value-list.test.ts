@@ -442,8 +442,22 @@ describe('ValueList.from — anything iterable or array-like', () => {
   });
 
   it('a list short enough to be all tail has no tree, and says so to the structure inspectors', () => {
-    expect(ValueList.of(1, 2)._structure()).toEqual({ tree: null, tail: [1, 2] });
+    // Which elements end a run is the hash seed's choice, drawn per process
+    // (1 in 32): with `1` and `2` written in, that is a failure about one run
+    // in 16. So ask the seed. An element that is a list on its own and leaves no tree
+    // does not end a run; one that does, builds one.
+    const open: number[] = [];
+    let closing: number | undefined;
+    for (let x = 1; open.length < 2 || closing === undefined; x++) {
+      if (ValueList.of(x)._structure().tree === null) open.push(x);
+      else closing ??= x;
+    }
+    const [a, b] = open as [number, number];
+    expect(ValueList.of(a, b)._structure()).toEqual({ tree: null, tail: [a, b] });
+    expect(ValueList.of(a, b)._height).toBe(0);
     expect(ValueList.empty()._structure()).toEqual({ tree: null, tail: [] });
-    expect(ValueList.of(1, 2)._height).toBe(0);
+    // The run `closing` ends becomes a leaf, and what follows is the new tail.
+    expect(ValueList.of(a, closing, b)._structure().tail).toEqual([b]);
+    expect(ValueList.of(a, closing, b)._height).toBe(1);
   });
 });
