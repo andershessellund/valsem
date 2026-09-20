@@ -16,6 +16,30 @@
 //                    +hits  a lookup hit in `old` moves the entry to `cur`
 //                    bN     spend the migration credit once every N inserts
 //                  "semi 1 gate.5" is the shipped configuration.
+//   chain [opts]   a chained alternative: a Slot subclass of WeakRef carrying its
+//                  hash and a next pointer; segmented LINEAR HASHING (one bucket
+//                  splits per insert, in place, and a lookup has one place to
+//                  look); cleanup is an adaptive sweep that unlinks the dead —
+//                  checks per insert = 4 x (the fraction of the last 16 checks
+//                  that found a dead slot), between a floor and a cap. No
+//                  canary, no epochs, no second table, no shards. Options:
+//                    capN   at most N checks per insert (default 2)
+//                    gainG  checks per insert = G x that fraction (default 4);
+//                           steady churn settles at a dead fraction of 1/sqrt(G)
+//                    +reads lookups advance the sweep too
+//   sweep [capN]   the open table of `shipped` (one int32 tag per slot, 64 shards)
+//                  with `chain`'s cleanup: an adaptive sweep, in place, deleting
+//                  by backward shift. Growth (and shrinking) is an incremental
+//                  PLAIN copy, 4 entries per insert, sized exactly — so nothing
+//                  is allocated because of a collection. No canary, no epochs,
+//                  no survivor sample, no overflow path.
+//   gsweep [gateF] `shipped`'s policy on `sweep`'s mechanism: the canary, the epoch
+//                  stamps and the once-per-pool dead-fraction gate decide WHEN a
+//                  shard is verified; the verification is a pass IN PLACE (stamped
+//                  entries skipped untouched, the living restamped, the dead
+//                  removed by backward shift), so a collection allocates nothing.
+//                  Tables are replaced only to grow or shrink: an incremental
+//                  copy sized exactly, which verifies as it goes if a pass is due.
 //   null, wr       ablations: the harness alone, and the harness plus one
 //                  retained WeakRef per insert
 //
@@ -30,7 +54,8 @@
 // inserts over a million live entries is more often than V8 would choose —
 // compare columns, do not read them as production latencies.
 //
-// Env: BATCH (inserts per job, default 5000), HOT (hits go to the first HOT
+// Env: ONLY (comma-separated substrings: run just the scenarios that match),
+// BATCH (inserts per job, default 5000), HOT (hits go to the first HOT
 // live members, default all), PROF=<file> (CPU profile of the timed phase),
 // RUNTIME=<binary> (run the measuring processes under it instead of this node:
 // the pinned Bun, for JavaScriptCore — see bench/fetch-engines.mjs).
@@ -49,10 +74,18 @@ const SCENARIOS = {
   'churn 50k, no hits': { prefill: 50_000, gcEvery: 200_000, phases: [{ inserts: 2_000_000, hits: 0, w: 50_000 }] },
   'churn 50k, 4 hits/ins': { prefill: 50_000, gcEvery: 200_000, phases: [{ inserts: 1_000_000, hits: 4, w: 50_000 }] },
   'churn 1M, no hits': { prefill: 1_000_000, gcEvery: 200_000, phases: [{ inserts: 2_000_000, hits: 0, w: 1_000_000 }] },
+  // Thirty epochs: long enough for a high dead-fraction threshold to be reached, and reached again.
+  'long churn 1M, no hits': { prefill: 1_000_000, gcEvery: 200_000, phases: [{ inserts: 6_000_000, hits: 0, w: 1_000_000 }] },
   'churn 1M, 4 hits/ins': { prefill: 1_000_000, gcEvery: 200_000, phases: [{ inserts: 1_000_000, hits: 4, w: 1_000_000 }] },
   'read-mostly 1M, 16 hits/ins': { prefill: 1_000_000, gcEvery: 50_000, phases: [{ inserts: 250_000, hits: 16, w: 1_000_000 }] },
   'grow to 2M, no deaths': { prefill: 0, gcEvery: 200_000, phases: [{ inserts: 2_000_000, hits: 0, w: 2_000_000 }] },
   'collapse 1M→50k, then churn': { prefill: 1_000_000, gcEvery: 200_000, phases: [{ inserts: 1_000_000, hits: 1, w: 50_000 }] },
+  // A mass death followed by mass creation: is giving the space back worth it?
+  'collapse 1M→50k, churn a little, regrow to 1M': { prefill: 1_000_000, gcEvery: 200_000, phases: [{ inserts: 400_000, hits: 1, w: 50_000 }, { inserts: 1_000_000, hits: 1, w: 1_000_000 }] },
+  // What `pnpm bench` sees: churn (untimed), settle as bench/lib.mjs does (forced
+  // collections and idle turns, where a registry-driven pool cleans up), then
+  // time a short burst. ns/op is the burst alone.
+  'burst of 200 after churn + settle': { prefill: 10_000, burst: { rounds: 40, churn: 20_000, timed: 200, w: 10_000 } },
 };
 
 const POOLS = process.argv[3] && process.argv[2] !== 'child' ? process.argv[3].split(',') : ['fr', 'shipped'];
@@ -297,6 +330,446 @@ function makeSemiPool(K, hitMigrates, theta = 0, batch = 1) {
   };
 }
 
+// --- the chained pool ---------------------------------------------------------
+
+function makeChainPool(cap, onReads, gain = 4, presize = false) {
+  class Slot extends WeakRef {
+    constructor(target, hash) {
+      super(target);
+      this.hash = hash;
+      this.next = undefined;
+    }
+  }
+  const SEG_BITS = 12;
+  const SEG = 1 << SEG_BITS;
+  const FLOOR = 1 / 32;
+  const segs = [new Array(SEG).fill(undefined)];
+  if (presize) for (let k = 1; k < 1024; k++) segs.push(new Array(SEG).fill(undefined));
+  let n = presize ? 1 << 22 : 64; // buckets at the start of this round of splitting
+  let p = 0; // next bucket to split; buckets below it use the wider mask
+  let count = 0;
+  let cursor = 0;
+  let hist = 0; // the last 16 checks, one bit each: found dead?
+  let dead16 = 0;
+  let credit = 0;
+  const st = { splits: 0, checks: 0, unlinked: 0, checkedLive: 0 };
+  const mix = (hash) => { const m = Math.imul(hash, 0x9e3779b1); return m ^ (m >>> 15); };
+  const bucketOf = (x) => { const i = x & (n - 1); return i < p ? x & (2 * n - 1) : i; };
+
+  function record(dead) {
+    dead16 += dead - ((hist >>> 15) & 1);
+    hist = ((hist << 1) | dead) & 0xffff;
+  }
+  /** Walk one bucket, unlinking the dead. Returns the checks it cost. */
+  function sweepBucket(i) {
+    const seg = segs[i >>> SEG_BITS];
+    const k = i & (SEG - 1);
+    let prev;
+    let cost = 0.25; // an empty bucket is a head load
+    for (let sl = seg[k]; sl !== undefined; sl = sl.next) {
+      cost++;
+      st.checks++;
+      if (sl.deref() === undefined) {
+        if (prev === undefined) seg[k] = sl.next; else prev.next = sl.next;
+        count--;
+        st.unlinked++;
+        record(1);
+      } else {
+        prev = sl;
+        st.checkedLive++;
+        record(0);
+      }
+    }
+    return cost;
+  }
+  function sweep() {
+    if (cap === 0) return;
+    credit += Math.min(cap, Math.max(FLOOR, (dead16 * gain) / 16));
+    while (credit >= 1) {
+      credit -= sweepBucket(cursor);
+      if (++cursor >= n + p) cursor = 0;
+    }
+  }
+  function split() {
+    const to = n + p;
+    if ((to & (SEG - 1)) === 0 && segs.length <= to >>> SEG_BITS) segs.push(new Array(SEG).fill(undefined));
+    const seg = segs[p >>> SEG_BITS];
+    const k = p & (SEG - 1);
+    const hi = segs[to >>> SEG_BITS];
+    const hk = to & (SEG - 1);
+    let keep;
+    let move;
+    for (let sl = seg[k], next; sl !== undefined; sl = next) {
+      next = sl.next;
+      if ((mix(sl.hash) & n) === 0) { sl.next = keep; keep = sl; } else { sl.next = move; move = sl; }
+    }
+    seg[k] = keep;
+    hi[hk] = move;
+    st.splits++;
+    if (++p === n) { n *= 2; p = 0; }
+  }
+  return {
+    lookup(hash, predicate) {
+      const i = bucketOf(mix(hash));
+      for (let sl = segs[i >>> SEG_BITS][i & (SEG - 1)]; sl !== undefined; sl = sl.next) {
+        if (sl.hash !== hash) continue;
+        const v = sl.deref();
+        if (v !== undefined && predicate(v)) { if (onReads) sweep(); return v; }
+      }
+      if (onReads) sweep();
+      return undefined;
+    },
+    register(value, hash) {
+      if (count >= n + p && !presize) split(); // one entry per bucket, on average
+      sweep();
+      const i = bucketOf(mix(hash));
+      const seg = segs[i >>> SEG_BITS];
+      const sl = new Slot(value, hash);
+      sl.next = seg[i & (SEG - 1)];
+      seg[i & (SEG - 1)] = sl;
+      count++;
+      return value;
+    },
+    stats: () => ({ stored: count, slots: n + p, epochs: 0, cycles: st.splits, forced: 0, byHit: 0, skipped: 0, derefLive: st.checkedLive, derefDead: st.unlinked }),
+  };
+}
+
+// --- the swept open table -----------------------------------------------------
+
+function makeSweepPool(cap, gain = 4, batch = 1, noDelete = false) {
+  const MIN_BITS = 6;
+  const FLOOR = 1 / 32;
+  const shards = new Array(64).fill(undefined);
+  let hist = 0;
+  let dead16 = 0;
+  let credit = 0;
+  const st = { cycles: 0, checkedLive: 0, removed: 0 };
+  const newShard = () => ({ bits: MIN_BITS, words: new Int32Array(1 << MIN_BITS), refs: new Array(1 << MIN_BITS).fill(undefined), used: 0, oldBits: 0, oldWords: null, oldRefs: null, cursor: 0, sweepAt: 0 });
+  function record(dead) {
+    dead16 += dead - ((hist >>> 15) & 1);
+    hist = ((hist << 1) | dead) & 0xffff;
+  }
+  function place(t, word, ref) {
+    const words = t.words;
+    const mask = words.length - 1;
+    let i = word >>> (32 - t.bits);
+    while (words[i] !== 0) i = (i + 1) & mask;
+    words[i] = word;
+    t.refs[i] = ref;
+    t.used++;
+  }
+  /** Linear probing's deletion without tombstones: close the gap with whatever may legally move back. */
+  function removeAt(t, i) {
+    const words = t.words;
+    const refs = t.refs;
+    const mask = words.length - 1;
+    const shift = 32 - t.bits;
+    let j = i;
+    for (;;) {
+      j = (j + 1) & mask;
+      const w = words[j];
+      if (w === 0) break;
+      const home = w >>> shift;
+      if (i <= j ? i < home && home <= j : i < home || home <= j) continue;
+      words[i] = w;
+      refs[i] = refs[j];
+      i = j;
+    }
+    words[i] = 0;
+    refs[i] = undefined;
+    t.used--;
+  }
+  function sweep(t) {
+    if (cap === 0) return;
+    credit += Math.min(cap, Math.max(FLOOR, (dead16 * gain) / 16));
+    if (credit < batch) return; // spend the checks together: independent loads overlap
+    const words = t.words;
+    const mask = words.length - 1;
+    let at = t.sweepAt & mask;
+    while (credit >= 1) {
+      if (words[at] === 0) {
+        credit -= 1 / 16;
+        at = (at + 1) & mask;
+      } else if (t.refs[at].deref() === undefined) {
+        if (noDelete) at = (at + 1) & mask; // ablation: pay the check, skip the backward shift
+        else removeAt(t, at); // stay: what shifted back into this slot is unchecked
+        st.removed++;
+        record(1);
+        credit -= 1;
+      } else {
+        st.checkedLive++;
+        record(0);
+        credit -= 1;
+        at = (at + 1) & mask;
+      }
+    }
+    t.sweepAt = at;
+  }
+  function beginCopy(t, bits) {
+    t.oldBits = t.bits;
+    t.oldWords = t.words;
+    t.oldRefs = t.refs;
+    t.cursor = 0;
+    t.bits = bits;
+    t.words = new Int32Array(1 << bits);
+    t.refs = new Array(1 << bits).fill(undefined);
+    t.used = 0;
+    t.sweepAt = 0;
+    st.cycles++;
+  }
+  function copy(t, entries, slots) {
+    const oldWords = t.oldWords;
+    const end = oldWords.length;
+    const checking = dead16 >= 4; // the sweep is finding the dead: do not carry them over
+    let c = t.cursor;
+    while (entries > 0 && slots-- > 0 && c < end) {
+      const w = oldWords[c];
+      if (w !== 0) {
+        const ref = t.oldRefs[c];
+        if (checking && ref.deref() === undefined) { st.removed++; record(1); }
+        else { place(t, w, ref); entries--; }
+      }
+      c++;
+    }
+    t.cursor = c;
+    if (c >= end) { t.oldWords = null; t.oldRefs = null; }
+  }
+  return {
+    lookup(hash, predicate) {
+      const m = Math.imul(hash, 0x9e3779b1);
+      const t = shards[m >>> 26];
+      if (t === undefined) return undefined;
+      const tag = (m << 6) | 1; // low bits spare; never zero
+      let words = t.words;
+      let mask = words.length - 1;
+      let i = tag >>> (32 - t.bits);
+      for (let w = words[i]; w !== 0; i = (i + 1) & mask, w = words[i]) {
+        if (w !== tag) continue;
+        const v = t.refs[i].deref();
+        if (v !== undefined && predicate(v)) return v;
+      }
+      words = t.oldWords;
+      if (words === null) return undefined;
+      mask = words.length - 1;
+      i = tag >>> (32 - t.oldBits);
+      for (let w = words[i]; w !== 0; i = (i + 1) & mask, w = words[i]) {
+        if (w !== tag) continue;
+        const v = t.oldRefs[i].deref();
+        if (v !== undefined && predicate(v)) return v;
+      }
+      return undefined;
+    },
+    register(value, hash) {
+      const m = Math.imul(hash, 0x9e3779b1);
+      const t = (shards[m >>> 26] ??= newShard());
+      if (t.oldWords !== null) copy(t, 4, 64);
+      else {
+        const size = t.words.length;
+        if (t.used >= size >> 1 || (t.used < size >> 4 && t.bits > MIN_BITS)) {
+          // sized exactly: what is there, plus what arrives while it is copied
+          const arriving = Math.max(t.used / 4, size / 64);
+          let bits = MIN_BITS;
+          while ((1 << bits) * 0.45 < t.used + arriving + 16) bits++;
+          if (bits !== t.bits) beginCopy(t, bits);
+          else sweep(t);
+        } else sweep(t);
+      }
+      place(t, (m << 6) | 1, new WeakRef(value));
+      return value;
+    },
+    stats() {
+      let stored = 0;
+      let slots = 0;
+      for (const t of shards) if (t !== undefined) { stored += t.used; slots += t.words.length + (t.oldWords !== null ? t.oldWords.length : 0); }
+      return { stored, slots, epochs: 0, cycles: st.cycles, forced: 0, byHit: 0, skipped: 0, derefLive: st.checkedLive, derefDead: st.removed };
+    },
+  };
+}
+
+// --- gated passes, in place ---------------------------------------------------
+
+function makeGatedSweepPool(theta, LIVE = 2, shrink = true) {
+  const MIN_BITS = 6;
+  const STAMP = 63;
+  const SLOTS = 16; // slots a registration may pass
+  // LIVE: …or living entries it may dereference, whichever comes first
+  const shards = new Array(64).fill(undefined);
+  let canary = new WeakRef({});
+  let epoch = 1;
+  let stamp = 1;
+  let tick = 0;
+  let sampled = 0;
+  let survivors = 1;
+  const st = { copies: 0, passes: 0, skipped: 0, checkedLive: 0, removed: 0, shiftCalls: 0, shiftScanned: 0, shiftMoved: 0 };
+  const newShard = () => ({ bits: MIN_BITS, words: new Int32Array(1 << MIN_BITS), refs: new Array(1 << MIN_BITS).fill(undefined), used: 0, oldBits: 0, oldWords: null, oldRefs: null, cursor: 0, verify: false, answered: epoch, passAt: 0, passLeft: 0 });
+  function place(t, word, ref) {
+    const words = t.words;
+    const mask = words.length - 1;
+    let i = (word & ~STAMP) >>> (32 - t.bits);
+    while (words[i] !== 0) i = (i + 1) & mask;
+    words[i] = word;
+    t.refs[i] = ref;
+    t.used++;
+  }
+  function removeAt(t, i) {
+    const words = t.words;
+    const refs = t.refs;
+    const mask = words.length - 1;
+    const shift = 32 - t.bits;
+    let j = i;
+    st.shiftCalls++;
+    for (;;) {
+      j = (j + 1) & mask;
+      const w = words[j];
+      if (w === 0) break;
+      st.shiftScanned++;
+      const home = (w & ~STAMP) >>> shift;
+      if (i <= j ? i < home && home <= j : i < home || home <= j) continue;
+      words[i] = w;
+      refs[i] = refs[j];
+      i = j;
+      st.shiftMoved++;
+    }
+    words[i] = 0;
+    refs[i] = undefined;
+    t.used--;
+  }
+  function sample(t) {
+    const words = t.words;
+    const mask = words.length - 1;
+    let live = 0;
+    let seen = 0;
+    let i = (Math.random() * words.length) | 0;
+    for (let passed = 0; seen < 64 && passed <= mask; passed++, i = (i + 1) & mask) {
+      const w = words[i];
+      if (w === 0) continue;
+      seen++;
+      if ((w & STAMP) === stamp || t.refs[i].deref() !== undefined) live++;
+    }
+    return live / seen;
+  }
+  function beginCopy(t, verify) {
+    const size = t.words.length;
+    let bits = MIN_BITS;
+    while ((1 << bits) * 0.45 < t.used + Math.max(t.used / 4, size / SLOTS) + 16) bits++;
+    if (bits === t.bits && !verify) return false;
+    t.oldBits = t.bits;
+    t.oldWords = t.words;
+    t.oldRefs = t.refs;
+    t.cursor = 0;
+    t.verify = verify;
+    t.passLeft = 0;
+    t.bits = bits;
+    t.words = new Int32Array(1 << bits);
+    t.refs = new Array(1 << bits).fill(undefined);
+    t.used = 0;
+    t.passAt = 0;
+    st.copies++;
+    return true;
+  }
+  function copy(t) {
+    const oldWords = t.oldWords;
+    const end = oldWords.length;
+    let c = t.cursor;
+    let entries = 4;
+    let slots = SLOTS;
+    while (entries > 0 && slots-- > 0 && c < end) {
+      const w = oldWords[c];
+      if (w !== 0) {
+        const ref = t.oldRefs[c];
+        if (!t.verify || (w & STAMP) === stamp) { place(t, w, ref); entries--; }
+        else if (ref.deref() !== undefined) { place(t, (w & ~STAMP) | stamp, ref); entries -= 2; st.checkedLive++; }
+        else st.removed++;
+      }
+      c++;
+    }
+    t.cursor = c;
+    if (c >= end) { t.oldWords = null; t.oldRefs = null; }
+  }
+  function pass(t) {
+    const words = t.words;
+    const mask = words.length - 1;
+    let at = t.passAt & mask;
+    let slots = SLOTS;
+    let live = LIVE;
+    while (slots-- > 0 && live > 0 && t.passLeft > 0) {
+      const w = words[at];
+      if (w === 0 || (w & STAMP) === stamp) {
+        if (w !== 0) st.skipped++;
+        at = (at + 1) & mask;
+        t.passLeft--;
+      } else if (t.refs[at].deref() === undefined) {
+        removeAt(t, at); // stay: what shifted back into this slot has not been looked at
+        st.removed++;
+      } else {
+        words[at] = (w & ~STAMP) | stamp;
+        st.checkedLive++;
+        live--;
+        at = (at + 1) & mask;
+        t.passLeft--;
+      }
+    }
+    t.passAt = at;
+    // a pass that emptied the table leaves it to be replaced by a smaller one
+    if (shrink && t.passLeft <= 0 && t.used < words.length >> 3 && t.bits > MIN_BITS) beginCopy(t, false);
+  }
+  return {
+    lookup(hash, predicate) {
+      const m = Math.imul(hash, 0x9e3779b1);
+      const t = shards[m >>> 26];
+      if (t === undefined) return undefined;
+      const tag = m << 6;
+      let words = t.words;
+      let mask = words.length - 1;
+      let i = tag >>> (32 - t.bits);
+      for (let w = words[i]; w !== 0; i = (i + 1) & mask, w = words[i]) {
+        if ((w & ~STAMP) !== tag) continue;
+        const v = t.refs[i].deref();
+        if (v !== undefined && predicate(v)) { if ((w & STAMP) !== stamp) words[i] = tag | stamp; return v; }
+      }
+      words = t.oldWords;
+      if (words === null) return undefined;
+      mask = words.length - 1;
+      i = tag >>> (32 - t.oldBits);
+      for (let w = words[i]; w !== 0; i = (i + 1) & mask, w = words[i]) {
+        if ((w & ~STAMP) !== tag) continue;
+        const v = t.oldRefs[i].deref();
+        if (v !== undefined && predicate(v)) { if ((w & STAMP) !== stamp) words[i] = tag | stamp; return v; }
+      }
+      return undefined;
+    },
+    register(value, hash) {
+      if ((++tick & 63) === 0 && canary.deref() === undefined) { canary = new WeakRef({}); epoch++; stamp = ((epoch - 1) % STAMP) + 1; }
+      const m = Math.imul(hash, 0x9e3779b1);
+      const t = (shards[m >>> 26] ??= newShard());
+      if (t.oldWords !== null) copy(t);
+      else {
+        const full = t.used >= t.words.length >> 1;
+        if (t.answered !== epoch && (full || t.used > 32)) {
+          t.answered = epoch;
+          if (sampled !== epoch) { sampled = epoch; survivors = sample(t); }
+          if (1 - survivors >= theta) { st.passes++; t.passLeft = t.words.length; }
+        }
+        if (full) beginCopy(t, t.passLeft > 0); // growing anyway: let the copy do the verifying
+        else if (t.passLeft > 0) pass(t);
+      }
+      place(t, (m << 6) | stamp, new WeakRef(value));
+      return value;
+    },
+    stats() {
+      let stored = 0;
+      let slots = 0;
+      for (const t of shards) {
+        if (t === undefined) continue;
+        stored += t.used;
+        slots += t.words.length;
+        if (t.oldWords !== null) { slots += t.oldWords.length; for (let c = t.cursor; c < t.oldWords.length; c++) if (t.oldWords[c] !== 0) stored++; }
+      }
+      return { shift: st.shiftCalls ? `${st.shiftCalls} removals, ${(st.shiftScanned / st.shiftCalls).toFixed(2)} slots scanned and ${(st.shiftMoved / st.shiftCalls).toFixed(2)} entries moved per removal` : '', stored, slots, epochs: epoch - 1, cycles: st.copies, forced: st.passes, byHit: 0, skipped: st.skipped, derefLive: st.checkedLive, derefDead: st.removed };
+    },
+  };
+}
+
 // --- child: one pool, one scenario --------------------------------------------
 
 function fmix(k) {
@@ -315,6 +788,20 @@ async function child(poolName, scenarioName) {
     const mod = await import(poolName === 'fr' ? './fr-pool.mjs' : '../../dist/intern-pool.js');
     pool = mod.createInternPool();
     shippedStats = () => mod._poolStats(pool);
+  } else if (poolName.startsWith('chain')) {
+    const opts = poolName.split(' ').slice(1);
+    const c = opts.find((o) => o.startsWith('cap'));
+    const g = opts.find((o) => o.startsWith('gain'));
+    pool = makeChainPool(c ? Number(c.slice(3)) : 2, opts.includes('+reads'), g ? Number(g.slice(4)) : 4, opts.includes('presize'));
+  } else if (poolName.startsWith('gsweep')) {
+    const g = poolName.split(' ').find((o) => o.startsWith('gate'));
+    const l = poolName.split(' ').find((o) => o.startsWith('live'));
+    pool = makeGatedSweepPool(g ? Number(g.slice(4)) : 0.5, l ? Number(l.slice(4)) : 2, !poolName.includes('noshrink'));
+  } else if (poolName.startsWith('sweep')) {
+    const c = poolName.split(' ').find((o) => o.startsWith('cap'));
+    const g = poolName.split(' ').find((o) => o.startsWith('gain'));
+    const b = poolName.split(' ').find((o) => /^b\d+$/.test(o));
+    pool = makeSweepPool(c ? Number(c.slice(3)) : 2, g ? Number(g.slice(4)) : 4, b ? Number(b.slice(1)) : 1, poolName.includes('nodelete'));
   } else if (poolName === 'null') {
     // harness only: key, hash, the {k} object, the live-array store, the hit's random read
     pool = { lookup: () => undefined, register: (v) => v };
@@ -384,7 +871,26 @@ async function child(poolName, scenarioName) {
   let maxBatch = 0;
   let ops = 0;
   let sinceGc = 0;
-  for (const ph of sc.phases) {
+  if (sc.burst) {
+    const b = sc.burst;
+    for (let round = 0; round < b.rounds; round++) {
+      for (let i = 0; i < b.churn; i++) insert(b.w);
+      const t1 = performance.now();
+      for (let k = 0; k < 3; k++) {
+        globalThis.gc();
+        for (let i = 0; i < 100; i++) await yieldTask();
+      }
+      globalThis.gc();
+      turnMs += performance.now() - t1;
+      const t0 = performance.now();
+      for (let i = 0; i < b.timed; i++) insert(b.w);
+      const dt = performance.now() - t0;
+      opsMs += dt;
+      if (dt > maxBatch) maxBatch = dt;
+      ops += b.timed;
+    }
+  }
+  for (const ph of sc.phases ?? []) {
     if (live.length > ph.w) live.length = ph.w; // mass death
     for (let done = 0; done < ph.inserts; done += BATCH) {
       const t0 = performance.now();
@@ -442,7 +948,9 @@ if (process.argv[2] === 'child') {
   const rounds = Number(process.argv[2] ?? 3);
   const self = fileURLToPath(import.meta.url);
   console.log(`${process.env.RUNTIME ?? `node ${process.version}`}, ${rounds} rounds, median (min–max for ns/op)\n`);
+  const only = process.env.ONLY?.split(',');
   for (const scenario of Object.keys(SCENARIOS)) {
+    if (only && !only.some((o) => scenario.includes(o))) continue;
     console.log(`## ${scenario}`);
     console.log('pool            ns/op (min–max)      gc ms   turns ms   max batch   stored    mem MB   | migrated: by hit / no deref / →dead / →live');
     for (const pool of POOLS) {

@@ -1,5 +1,5 @@
-// The weak-pool machinery: sharded open tables, and dropping the dead by not
-// moving them when a table is replaced.
+// The weak-pool machinery: sharded open tables, swept in place after a
+// collection, and replaced incrementally to grow or shrink.
 //
 // Placement, exact-hash matching and growth are deterministic. Reclamation
 // needs real GC — a WeakRef is cleared only by a collection, and the pool
@@ -163,7 +163,7 @@ describe('InternPool — canonicality', () => {
 
 describe('InternPool — growth is incremental', () => {
   it('every member stays findable while tables are being replaced', () => {
-    // A table is replaced one entry per registration, so for much of this loop
+    // A table is replaced a few entries per registration, so for part of this loop
     // a shard has two tables and a member may be in either.
     const pool = createInternPool<{ v: number }>();
     const hashOf = (i: number): number => Math.imul(i + 1, 0x85ebca6b) >>> 0;
@@ -193,43 +193,50 @@ describe('InternPool — growth is incremental', () => {
 });
 
 describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => {
-  it('the dead are dropped as registration continues, and not before', async () => {
+  it('the dead are swept out, in place, as registration continues — and not before', async () => {
     const pool = createInternPool<{ v: number }>();
-    // Register in a callee so nothing on this frame retains the values.
+    // Register in a callee so nothing on this frame retains the values. About
+    // 400 to a shard: its table of 1024 slots is settled (see the next test).
     (function registerDoomed() {
-      for (let i = 0; i < 20_000; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
+      for (let i = 0; i < 25_600; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
     })();
     expect(await collectUntil(() => pool.size() === 0)).toBe(true);
-    expect(_poolStats(pool).slots).toBe(20_000); // cleared, and still stored: cleanup rides on registration
+    expect(_poolStats(pool)).toMatchObject({ slots: 25_600, migrating: 0, sweeping: 0 }); // cleared, and still stored
 
     await nextEpoch();
     const held: object[] = [];
-    for (let i = 0; i < 8_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-    // Every shard found itself all dead, and replaced its table without them.
-    expect(_poolStats(pool).slots).toBe(8_000);
-    expect(pool.size()).toBe(8_000);
-    expect(held.length).toBe(8_000);
+    const capacity = _poolStats(pool).capacity;
+    for (let i = 0; i < 2_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
+    // Under way in every shard, and in place: no table has been replaced, none allocated.
+    const during = _poolStats(pool);
+    expect(during.sweeping).toBe(64);
+    expect(during).toMatchObject({ migrating: 0, capacity });
+    expect(during.slots).toBeLessThan(22_000);
+
+    for (let i = 2_000; i < 14_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
+    expect(_poolStats(pool)).toMatchObject({ slots: 14_000, sweeping: 0 });
+    expect(pool.size()).toBe(14_000);
+    expect(held.length).toBe(14_000);
   });
 
-  it('a collection that took less than half of a shard is ignored', async () => {
-    // About 400 to a shard: past the replacement that began at 128 (one entry
-    // moves per registration, so it ended at 256) and short of the next at 512.
-    // A shard whose table is still draining answers a collection afterwards.
+  it('a collection that took less than two thirds of the pool is ignored', async () => {
+    // About 400 to a shard: past the copy that began at 256 and short of the
+    // next at 512. A shard whose table is being copied answers a collection afterwards.
     const pool = createInternPool<{ v: number }>();
     const held: object[] = [];
     (function registerSome() {
       for (let i = 0; i < 25_600; i++) {
         const member = pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
-        if (i % 6 !== 0) held.push(member); // one in six is doomed
+        if (i % 2 !== 0) held.push(member); // half are doomed
       }
     })();
     expect(_poolStats(pool).migrating).toBe(0);
-    expect(await collectUntil(() => pool.size() === 21_333)).toBe(true);
+    expect(await collectUntil(() => pool.size() === 12_800)).toBe(true);
     await nextEpoch();
     for (let i = 0; i < 2_000; i++) held.push(pool.register({ v: -i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-    // A sixth dead is not worth a lap of dereferencing the other five sixths.
-    expect(_poolStats(pool)).toMatchObject({ slots: 27_600, migrating: 0 });
-    expect(pool.size()).toBe(23_333);
+    // Half dead is not worth dereferencing the other half.
+    expect(_poolStats(pool)).toMatchObject({ slots: 27_600, migrating: 0, sweeping: 0 });
+    expect(pool.size()).toBe(14_800);
   });
 
   it('survivors stay canonical across reclamation', async () => {
@@ -240,40 +247,79 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     })();
     expect(await collectUntil(() => pool.size() === 1)).toBe(true);
     await nextEpoch();
-    expect(pool.intern(new Point(9, 9))).toBe(keep); // found since the collection: the lap will not ask again
+    expect(pool.intern(new Point(9, 9))).toBe(keep); // found since the collection: the sweep will not ask again
     const held: Point[] = [];
-    for (let i = 0; i < 3_000; i++) held.push(pool.intern(new Point(i, 2000)));
+    for (let i = 0; i < 6_000; i++) held.push(pool.intern(new Point(i, 2000)));
     expect(pool.intern(new Point(9, 9))).toBe(keep);
-    expect(pool.size()).toBe(3_001);
-    expect(_poolStats(pool).slots).toBe(3_001);
+    expect(pool.size()).toBe(6_001);
+    for (let i = 0; i < 6_000; i += 97) expect(pool.intern(new Point(i, 2000))).toBe(held[i]);
   });
 
-  it('a shard whose survivors were underestimated is finished at once, and loses nothing', async () => {
-    // One shard (products below 2^26), members in slot order: 64 doomed, then
-    // 400 held. The survivor sample reads 64 occupied slots from a random
-    // place; from slot 0 it meets only the doomed and sizes the next table for
-    // almost nothing. The 400 then fill it before the old table has drained.
-    const pool = createInternPool<{ v: number }>();
-    const held: { v: number }[] = [];
-    (function registerInSlotOrder() {
-      for (let j = 0; j < 464; j++) {
-        const member = pool.register({ v: j }, hashWithProduct((j + 1) << 16));
-        if (j >= 64) held.push(member);
-      }
+  // The next three build ONE shard (products below 2^26) and choose where its
+  // members sit: a member's home slot is the top bits of its product.
+  const inShardZero = async (doomed: number[], heldProducts: number[]) => {
+    const pool = createInternPool<{ m: number }>();
+    const held = new Map<number, { m: number }>();
+    (function registerAll() {
+      for (const m of doomed) pool.register({ m }, hashWithProduct(m));
+      for (const m of heldProducts) held.set(m, pool.register({ m }, hashWithProduct(m)));
     })();
-    expect(await collectUntil(() => pool.size() === 400)).toBe(true);
+    expect(await collectUntil(() => pool.size() === heldProducts.length)).toBe(true);
     await nextEpoch();
+    return { pool, held };
+  };
+  const expectAllFound = (pool: ReturnType<typeof createInternPool<{ m: number }>>, held: Map<number, { m: number }>) => {
+    for (const [m, member] of held) expect(pool.lookup(hashWithProduct(m), (c) => c.m === m)).toBe(member);
+  };
 
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-    for (let k = 0; k < 300; k++) held.push(pool.register({ v: 1000 + k }, hashWithProduct(0x2000000 + k)));
+  it('removing the dead from a probe cluster leaves the rest of it findable', async () => {
+    // Six members share a home slot (they differ below the bits that choose it),
+    // so they sit in a run: the first and third die, the others must move back.
+    const cluster = [1, 2, 3, 4, 5, 6].map((k) => (5 << 20) | k);
+    const fillers = Array.from({ length: 120 }, (_, j) => (j + 10) << 16);
+    const { pool, held } = await inShardZero([cluster[0]!, cluster[2]!, ...fillers], [cluster[1]!, cluster[3]!, cluster[4]!, cluster[5]!]);
+    for (let k = 0; k < 80; k++) held.set(0x2000000 + k, pool.register({ m: 0x2000000 + k }, hashWithProduct(0x2000000 + k)));
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0 });
+    expectAllFound(pool, held);
+    expect(pool.lookup(hashWithProduct(cluster[0]!), () => true)).toBeUndefined();
+  });
 
-    expect(_poolStats(pool).slots).toBe(700);
-    expect(pool.size()).toBe(700);
-    for (let j = 64; j < 464; j++) {
-      expect(pool.lookup(hashWithProduct((j + 1) << 16), (c) => c.v === j)).toBe(held[j - 64]);
-    }
-    for (let k = 0; k < 300; k++) {
-      expect(pool.lookup(hashWithProduct(0x2000000 + k), (c) => c.v === 1000 + k)).toBe(held[400 + k]);
-    }
+  it('…also when the cluster wraps around the end of the table', async () => {
+    // Home is the LAST slot, so the run continues at slot 0.
+    const cluster = [1, 2, 3, 4, 5].map((k) => 0x3ffff00 | k);
+    const fillers = Array.from({ length: 120 }, (_, j) => (j + 10) << 16);
+    const { pool, held } = await inShardZero([cluster[0]!, cluster[1]!, ...fillers], [cluster[2]!, cluster[3]!, cluster[4]!]);
+    for (let k = 0; k < 80; k++) held.set(0x2000000 + k, pool.register({ m: 0x2000000 + k }, hashWithProduct(0x2000000 + k)));
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0 });
+    expectAllFound(pool, held);
+  });
+
+  it('a table that fills while a sweep is due is copied at the size it has, the copy doing the sweep', async () => {
+    // 256 members in 512 slots: exactly at the brink, so the first registration
+    // after the collection both answers it and finds the table full.
+    const doomed = Array.from({ length: 250 }, (_, j) => (j + 1) << 16);
+    const heldProducts = Array.from({ length: 6 }, (_, j) => (j + 300) << 16);
+    const { pool, held } = await inShardZero(doomed, heldProducts);
+    expect(_poolStats(pool)).toMatchObject({ slots: 256, capacity: 512, migrating: 0 });
+    held.set(0x2000000, pool.register({ m: 0x2000000 }, hashWithProduct(0x2000000)));
+    expect(_poolStats(pool)).toMatchObject({ capacity: 1024, migrating: 1, sweeping: 0 }); // two tables of 512
+    for (let k = 1; k < 200; k++) held.set(0x2000000 + k, pool.register({ m: 0x2000000 + k }, hashWithProduct(0x2000000 + k)));
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, capacity: 512, migrating: 0 });
+    expectAllFound(pool, held);
+  });
+
+  it('a sweep that leaves a table nearly empty lets it shrink', async () => {
+    const pool = createInternPool<{ v: number }>();
+    (function registerDoomed() {
+      for (let i = 0; i < 50_000; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
+    })();
+    const before = _poolStats(pool).capacity;
+    expect(await collectUntil(() => pool.size() === 0)).toBe(true);
+    await nextEpoch();
+    const held: object[] = [];
+    for (let i = 0; i < 20_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
+    expect(_poolStats(pool).slots).toBe(20_000);
+    expect(_poolStats(pool).capacity).toBeLessThan(before);
+    for (let i = 0; i < 20_000; i += 101) expect(pool.lookup(Math.imul(i + 1, 0xc2b2ae35) >>> 0, (c) => c === held[i])).toBe(held[i]);
   });
 });
