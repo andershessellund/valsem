@@ -8,6 +8,18 @@ describe('ValueSet', () => {
     expect(ValueSet.from<number>([])).toBe(ValueSet.empty<number>());
   });
 
+  it('of: the members are the arguments, as ValueList.of and OrderedSet.of', () => {
+    expect(ValueSet.of(1, 2, 3)).toBe(ValueSet.from([1, 2, 3]));
+    expect(ValueSet.of(3, 1, 2, 1)).toBe(ValueSet.from([1, 2, 3])); // order and repeats are not part of a set
+    expect(ValueSet.of({ a: 1 }, { a: 1 }).size).toBe(1); // equal values are one member
+    expect(ValueSet.of()).toBe(ValueSet.empty());
+    const one = ValueSet.of([1, 2]); // of is not from: one member, an array
+    expect(one.size).toBe(1);
+    expect(one.has([1, 2])).toBe(true);
+    const typed: ValueSet<string> = ValueSet.of('a', 'b');
+    expect(typed.size).toBe(2);
+  });
+
   it('equal sets are reference-identical (order-independent)', () => {
     expect(ValueSet.from([1, 2, 3])).toBe(ValueSet.from([3, 2, 1]));
   });

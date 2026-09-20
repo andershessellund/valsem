@@ -53,6 +53,15 @@ describe('HashSet', () => {
     expect([...s]).toEqual([]);
   });
 
+  it('new HashSet(values) takes what new Set takes: values, nothing, null or undefined', () => {
+    const s = new HashSet([{ k: 1 }, { k: 2 }, { k: 1 }]);
+    expect(s.size).toBe(2);
+    expect(s.has({ k: 2 })).toBe(true);
+    for (const nothing of [undefined, null]) expect(new HashSet(nothing).size).toBe(new Set(nothing).size);
+    expect(new HashSet().size).toBe(0);
+    expect([...new HashSet('ab')]).toEqual([...new Set('ab')]); // any iterable
+  });
+
   it('from(iterable), and non-value rejection', () => {
     const s = HashSet.from([{ k: 1 }, { k: 2 }, { k: 1 }]);
     expect(s.size).toBe(2);

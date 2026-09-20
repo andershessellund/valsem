@@ -284,6 +284,15 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   }
 
   /**
+   * The canonical set of `values` (interned on entry), as `ValueList.of` and
+   * `OrderedSet.of`: the members are the arguments, so `of([1, 2])` has one
+   * member, an array. Equal values are one member. For an iterable, `from`.
+   */
+  static of<T>(...values: T[]): ValueSet<T> {
+    return ValueSet.from(values);
+  }
+
+  /**
    * Canonical ValueSet from an iterable of values (interned on entry). Built
    * in one bottom-up pass — every trie node consed once — not by n adds.
    */

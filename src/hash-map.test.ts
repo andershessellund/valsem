@@ -344,6 +344,20 @@ describe('HashMap — keys interned on entry', () => {
   });
 });
 
+describe('new HashMap(entries)', () => {
+  it('takes what new Map takes: entries, nothing, null or undefined; a later equal key replaces an earlier one', () => {
+    const entries: [{ a: number }, string][] = [[{ a: 1 }, 'x'], [{ a: 2 }, 'z'], [{ a: 1 }, 'y']];
+    const m = new HashMap(entries);
+    expect(m.size).toBe(2);
+    expect(m.get({ a: 1 })).toBe('y');
+    expect([...m.keys()].every(isCanonical)).toBe(true);
+    expect([...new HashMap(new Map([[1, 'a']]))]).toEqual([[1, 'a']]); // any iterable of entries
+    for (const nothing of [undefined, null]) expect(new HashMap(nothing).size).toBe(new Map(nothing).size);
+    expect(new HashMap().size).toBe(0);
+    expect(() => new HashMap([[new Date(), 1]] as never)).toThrow(); // a key is a value here too
+  });
+});
+
 describe('HashMap.from', () => {
   it('builds from entries', () => {
     const m = HashMap.from([[{ a: 1 }, 'x'], [{ a: 1 }, 'y']]);
