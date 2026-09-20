@@ -31,11 +31,14 @@ import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.
 export class HashMap<K, V> {
   readonly #map = new Map<K, V>();
 
-  /** A map holding `entries`. */
+  /** An empty map, or one holding `entries`, as `new Map(entries)`: a later entry with an equal key replaces an earlier one. */
+  constructor(entries?: Iterable<readonly [K, V]> | null) {
+    if (entries !== undefined && entries !== null) for (const [k, v] of entries) this.set(k, v);
+  }
+
+  /** A map holding `entries`: `new HashMap(entries)`. */
   static from<K, V>(entries: Iterable<readonly [K, V]>): HashMap<K, V> {
-    const m = new HashMap<K, V>();
-    for (const [k, v] of entries) m.set(k, v);
-    return m;
+    return new HashMap<K, V>(entries);
   }
 
   /** Number of entries in the map. */

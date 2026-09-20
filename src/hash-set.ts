@@ -22,11 +22,14 @@ import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.
 export class HashSet<T> {
   readonly #set = new Set<T>();
 
-  /** A set holding `values`. */
+  /** An empty set, or one holding `values`, as `new Set(values)`. */
+  constructor(values?: Iterable<T> | null) {
+    if (values !== undefined && values !== null) for (const v of values) this.add(v);
+  }
+
+  /** A set holding `values`: `new HashSet(values)`. */
   static from<T>(values: Iterable<T>): HashSet<T> {
-    const s = new HashSet<T>();
-    for (const v of values) s.add(v);
-    return s;
+    return new HashSet<T>(values);
   }
 
   /** Number of members. */

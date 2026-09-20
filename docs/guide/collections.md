@@ -12,7 +12,7 @@ import { ValueList, ValueMap, ValueSet } from 'valsem';
 
 ValueList.of(1, 2, 3) === ValueList.of(1, 2, 3);                 // true
 ValueMap.fromObject({ a: 1 }) === ValueMap.fromObject({ a: 1 }); // true
-ValueSet.from([1, 2]) === ValueSet.from([2, 1]);                 // true — unordered
+ValueSet.of(1, 2) === ValueSet.from([2, 1]);                     // true — unordered
 ```
 
 Mutators are **persistent**: they return the canonical successor, sharing all
@@ -281,7 +281,7 @@ const row2 = cache.getOrInsertComputed({ table: 'users', id: '2' }, loadRow);
 const seen = new HashSet<{ x: number; y: number }>();
 seen.add({ x: 1, y: 2 });
 seen.has({ y: 2, x: 1 });  // true
-HashSet.from(points).size; // duplicates collapse
+new HashSet(points).size; // duplicates collapse; the constructors take what `new Map` and `new Set` take
 ```
 
 Underneath is a native `Map` (or `Set`) keyed by the canonical key: every
