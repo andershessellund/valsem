@@ -24,6 +24,13 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,
+    // Everything tagged `@internal` stays out of the published declarations:
+    // the `_`-prefixed test hooks and cross-module plumbing, which CONTRIBUTING
+    // already says are not API. A tag on something the declarations still
+    // need (a re-export, a helper type a public type is spelled with) breaks
+    // every consumer's build, not ours: `declarations.test.ts` compiles all four
+    // entry points against the emitted declarations to catch exactly that.
+    "stripInternal": true,
     "declarationMap": true,
     "sourceMap": true,
     "strict": true,

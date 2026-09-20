@@ -34,7 +34,7 @@ import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRe
  */
 export const toDraft: unique symbol = Symbol.for('valsem.toDraft.v1') as any;
 
-/** @internal The property through which a draft object exposes its state. */
+/** The property through which a draft object exposes its state. Part of `valsem/draft`. */
 export { DRAFT_STATE };
 
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ export type SeqOp =
   | { t: 'set'; i: number; value: unknown; old: unknown }
   | { t: 'splice'; i: number; rc: number; inserted: unknown[]; removed: unknown[] };
 
-/** @internal The draft state behind `value`, if it is a draft. */
+/** The draft state behind `value`, if it is a draft. Part of `valsem/draft`. */
 export function stateOf(value: unknown): DraftState | undefined {
   return value !== null && typeof value === 'object'
     ? ((value as Record<symbol, unknown>)[DRAFT_STATE] as DraftState | undefined)

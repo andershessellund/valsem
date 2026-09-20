@@ -156,7 +156,12 @@ Not part of the API, and free to change in any release:
 - **iteration order of the unordered collections**, which follows the hashes;
 - **the text of error messages** (that an operation throws, and the error's
   type, are API; its wording is not);
-- anything prefixed with `_` or marked `@internal`, and the layout of `dist/`;
+- anything prefixed with `_` or marked `@internal`, and the layout of `dist/`.
+  What is tagged `@internal` is also stripped from the published types
+  (`stripInternal`), so tag every `_` member you add, unless the declarations
+  still need it: a re-export (`valsem/binding`), or a helper type a public
+  type is spelled with (`_IsPlainArray` in `Draft<T>`). `declarations.test.ts`
+  fails on a tag that breaks a consumer's build, and lists what is left;
 - performance characteristics, short of a documented complexity guarantee.
 
 A type-only change that can break a build that compiled before is treated as

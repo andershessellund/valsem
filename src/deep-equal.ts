@@ -179,8 +179,9 @@ for (const T of [
 /**
  * Why valsem refuses `ctor` as a value, or `undefined` if it does not.
  *
- * @internal — shared by deepHash, intern, and the codec so one type gives one
- * explanation wherever a user meets it.
+ * Shared by deepHash, intern, and the codec so one type gives one explanation
+ * wherever a user meets it. Published as `mutableBuiltinReason` by
+ * `valsem/binding`, so it stays in the declarations: no `internal` tag.
  */
 export function _mutableBuiltinReason(ctor: Function | undefined): string | undefined {
   // Up the constructor chain: a `class Stamp extends Date` is a Date, with
@@ -538,7 +539,8 @@ export function _missingValueSemantics(obj: object): string | undefined {
  * `JSON.parse` output can legitimately carry such a key, so every record the
  * package builds from external keys goes through this.
  *
- * @internal — shared by intern and the codec layer.
+ * Shared by intern and the codec layer. Published as `defineRecordField` by
+ * `valsem/binding`, so it stays in the declarations: no `internal` tag.
  */
 export function _defineRecordField(
   out: Record<string | symbol, unknown>,
@@ -596,6 +598,8 @@ export function _isPlainRecord(obj: object): boolean {
  * named `Object` that points back at it. Only reached for objects that are
  * not plain in this realm, so it costs plain data nothing; and a canonical
  * record is always rebuilt here, so no foreign prototype enters the pool.
+ *
+ * @internal
  */
 export function _isForeignObjectPrototype(proto: object): boolean {
   if (Object.getPrototypeOf(proto) !== null) return false;

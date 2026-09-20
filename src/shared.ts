@@ -252,6 +252,8 @@ export function _recipes(delta: 1 | -1): void {
  * a draft from (D36), so "right now" is the only reading there is. Here, in
  * the leaf module, so that the lowest layer can ask without importing the
  * draft machinery.
+ *
+ * @internal
  */
 export function _undraft(obj: object): unknown {
   // Asked of every raw object `intern` and `deepHash` walk, so outside a recipe,

@@ -1116,13 +1116,16 @@ function finalizeArray(
 // ---------------------------------------------------------------------------
 
 /**
- * @internal Whether `T` has a function-typed member. A record never does —
+ * Whether `T` has a function-typed member. A record never does —
  * functions are not values — so a type with one is a class instance:
  * something `produce` hands out as itself, never drafted member-wise.
  * Symbol-keyed methods (`[equals]`, `[toDraft]`) count, so every value
  * type written against the protocol is caught. An `any` member is not
  * evidence (it would match `Function`), and an optional or nullable
  * function member counts like a plain one.
+ *
+ * Not API (the `_`), but public types are spelled with it, so it stays in the
+ * published declarations: no `internal` tag.
  */
 export type _HasFunctionMember<T> = {
   [K in keyof T]-?: 0 extends 1 & T[K]
@@ -1164,9 +1167,12 @@ export type Draft<T> = T extends { [toDraft](parent?: DraftState): { draft: infe
       : T;
 
 /**
- * @internal A plain array type (`number[]`, `readonly string[]`) as opposed
+ * A plain array type (`number[]`, `readonly string[]`) as opposed
  * to a tuple, whose element union would not round-trip — tuples map
  * homomorphically instead (immer's rule).
+ *
+ * Not API (the `_`), but public types are spelled with it, so it stays in the
+ * published declarations: no `internal` tag.
  */
 export type _IsPlainArray<T extends readonly unknown[]> = T extends readonly (infer U)[]
   ? U[] extends T
@@ -1195,10 +1201,13 @@ export type Undraft<D> = D extends { readonly [DRAFT_STATE]: DraftState<infer B>
       : D;
 
 /**
- * @internal `T` with every record and array readonly — the shape of a
+ * `T` with every record and array readonly — the shape of a
  * frozen value of `T`. A parameter typed this way accepts a state declared
  * either way (`number[]` or `readonly number[]`), since mutable is
  * assignable to readonly.
+ *
+ * Not API (the `_`), but public types are spelled with it, so it stays in the
+ * published declarations: no `internal` tag.
  */
 export type _Frozen<T> = T extends readonly unknown[]
   ? _IsPlainArray<T> extends true
@@ -1211,11 +1220,14 @@ export type _Frozen<T> = T extends readonly unknown[]
     : T;
 
 /**
- * @internal The producer a curried `produce(recipe)` returns, read off the
+ * The producer a curried `produce(recipe)` returns, read off the
  * recipe's own type: the draft parameter names the draft, {@link Undraft}
  * recovers the state, and the base parameter takes the frozen spelling so a
  * state declared either way is accepted. `never` when the recipe's return
  * is not a valid {@link RecipeReturn} for that state.
+ *
+ * Not API (the `_`), but public types are spelled with it, so it stays in the
+ * published declarations: no `internal` tag.
  */
 export type _CurriedFromRecipe<R> = R extends (draft: infer D, ...args: infer A) => infer Ret
   ? Ret extends RecipeReturn<Undraft<D>>
