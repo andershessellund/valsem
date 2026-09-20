@@ -285,6 +285,16 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return (snapshotOf(this) as ValueList<T>).filter((v, i) => fn.call(thisArg, v, i, this));
   }
 
+  /** A `ValueList` of the list as it is right now, sorted, as `ValueList.toSorted`: a value, and `compare` sees values. To reorder the draft, assign it: `d.todos = castDraft(d.todos.toSorted(byId))`. */
+  toSorted(compare?: (a: T, b: T) => number): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).toSorted(compare);
+  }
+
+  /** A `ValueList` of the list as it is right now, reversed, as `ValueList.toReversed`. */
+  toReversed(): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).toReversed();
+  }
+
   /** A left fold over the elements as they are right now, as `ValueList.reduce`. */
   reduce(fn: (acc: T, value: T, index: number, list: DraftList<T>) => T): T;
   reduce<U>(fn: (acc: U, value: T, index: number, list: DraftList<T>) => U, initial: U): U;

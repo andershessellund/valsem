@@ -725,6 +725,26 @@ export class ValueList<T> implements Iterable<T> {
     return findIndexIn(this, this, true, fn as never, thisArg);
   }
 
+  // `Array`'s copying reorders (ES2023). The list already names its copying
+  // edits `splice` and `set`, where `Array` needed `toSpliced` and `with`
+  // because its short names mutate; a list has no `sort` to confuse these with.
+
+  /**
+   * A list of the elements in the order `compare` gives, as
+   * `Array.prototype.toSorted`: stable, `undefined` last, and with no
+   * comparator by string (`[10, 9, 1]` sorts to `[1, 10, 9]`, as on `Array`).
+   * A list already in that order is returned as it is, since equal content is
+   * the same instance.
+   */
+  toSorted(compare?: (a: T, b: T) => number): ValueList<T> {
+    return ValueList.from(this.toJSON().sort(compare));
+  }
+
+  /** A list of the elements in reverse order, as `Array.prototype.toReversed`. */
+  toReversed(): ValueList<T> {
+    return ValueList.from(this.toJSON().reverse());
+  }
+
   /**
    * The **interned** flat-array snapshot of the elements — O(n) on first
    * call, weakly memoized per instance. Elements are already canonical, so

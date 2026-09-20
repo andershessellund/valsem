@@ -4,7 +4,7 @@
 // the one that hands out a draft, the hit.
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { produce, isDraft } from './produce.js';
+import { produce, isDraft, castDraft } from './produce.js';
 import { intern, isCanonical } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueSet } from './value-set.js';
@@ -111,6 +111,37 @@ describe('OrderedSet.map keeps the order of first results', () => {
   });
 });
 
+describe('ValueList: toSorted and toReversed are Array’s', () => {
+  // Array's own sort on a copy is the oracle, not arr.toSorted: the tests run on Node 22 too.
+  const sorted = <T,>(xs: T[], cmp?: (a: T, b: T) => number): T[] => xs.slice().sort(cmp);
+
+  it('agree with Array for any list and comparator, and the default order is Array’s string order', () => {
+    fc.assert(
+      fc.property(fc.array(fc.oneof(fc.integer({ min: -30, max: 30 }), fc.constant(undefined)), { maxLength: 200 }), (xs) => {
+        const list = ValueList.from(xs);
+        const byValue = (a: number | undefined, b: number | undefined): number => (a ?? 0) - (b ?? 0);
+        expect(list.toSorted(byValue)).toBe(ValueList.from(sorted(xs, byValue)));
+        expect(list.toSorted()).toBe(ValueList.from(sorted(xs))); // by string, undefined last
+        expect(list.toReversed()).toBe(ValueList.from(xs.slice().reverse()));
+        expect(list.toReversed().toReversed()).toBe(list);
+        expect([...list]).toEqual(xs); // neither touched the list
+      }),
+      { numRuns: 200 },
+    );
+    expect([...ValueList.of(10, 9, 1).toSorted()]).toEqual([1, 10, 9]);
+    expect([...ValueList.of(3, undefined, 1).toSorted()]).toEqual([1, 3, undefined]);
+  });
+
+  it('the sort is stable, a sorted list is itself, and a comparator that is not one throws as Array’s does', () => {
+    const rows = ValueList.from([{ k: 1, v: 'a' }, { k: 0, v: 'b' }, { k: 1, v: 'c' }, { k: 0, v: 'd' }]);
+    expect(rows.toSorted((a, b) => a.k - b.k).map((r) => r.v)).toBe(ValueList.of('b', 'd', 'a', 'c'));
+    const asc = ValueList.of(1, 2, 3);
+    expect(asc.toSorted((a, b) => a - b)).toBe(asc);
+    expect(ValueList.empty<number>().toSorted()).toBe(ValueList.empty());
+    expect(() => asc.toSorted('nope' as never)).toThrow(TypeError);
+  });
+});
+
 describe('on a draft the functional reads do not draft', () => {
   type Todo = { id: number; done: boolean };
   const todos = (n: number): Todo[] => Array.from({ length: n }, (_, id) => ({ id, done: false }));
@@ -143,6 +174,22 @@ describe('on a draft the functional reads do not draft', () => {
     expect(next.todos.length).toBe(51);
   });
 
+  it('toSorted and toReversed answer about the list as it is right now, with values, and the way to reorder a draft is to assign', () => {
+    const next = produce(base, (d) => {
+      d.todos.get(7).done = true;
+      const doneFirst = d.todos.toSorted((a, b) => {
+        expect(isDraft(a) || isDraft(b)).toBe(false);
+        return Number(b.done) - Number(a.done);
+      });
+      expect(doneFirst.get(0)).toBe(intern({ id: 7, done: true })); // sees the edit; stable for the rest
+      expect(doneFirst.get(1)).toBe(base.todos.get(0));
+      expect(d.todos.toReversed().get(0)).toBe(base.todos.get(49));
+      expect(d.todos.get(0).id).toBe(0); // the draft itself is not reordered...
+      d.todos = castDraft(d.todos.toReversed()); // ...until it is assigned
+    });
+    expect(next.todos).toBe(ValueList.from(todos(50).map((t) => (t.id === 7 ? { ...t, done: true } : t)).reverse()));
+  });
+
   it('reads alone leave the base', () => {
     expect(
       produce(base, (d) => {
@@ -155,6 +202,8 @@ describe('on a draft the functional reads do not draft', () => {
         d.todos.find((t) => t.id === 3); // drafts one element, edits nothing
         d.tags.map((t) => t + t);
         d.order.filter((x) => x > 1);
+        d.todos.toSorted((a, b) => b.id - a.id);
+        d.todos.toReversed();
       }),
     ).toBe(base);
   });
