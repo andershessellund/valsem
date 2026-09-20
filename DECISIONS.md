@@ -1356,6 +1356,32 @@ compares a draft. `DraftMap` iteration order is the base's, then the keys
 the recipe added (it was: untouched base entries, then everything touched);
 the order of an unordered map was never API.
 
+### D54. The functional reads: `Array`'s on `ValueList`, five of them on the sets, and they do not draft
+
+`ValueList` has `map`, `filter`, `reduce`, `some`, `every`, `find` and
+`findIndex` with `Array`'s callback arguments; `ValueSet` and `OrderedSet`
+have the first five, their callbacks getting what `forEach` passes. On a
+draft they read: callbacks see values (a drafted child as `current(child)`),
+`map` and `filter` return values, and `DraftList.find` returns the hit as
+`get` hands it out.
+
+**Why.** The other half of D53. Once a loop drafts what it walks, the reads
+that say they are reads are how a recipe looks without paying for drafts: a
+scan of a draft is 40 ns an element against 375 for the walk that drafts
+(10 000 records, Node 26), and find-and-edit 0.44 ms against the 4.3 ms of the
+same line on a plain array draft, which drafts every element it passes. They
+are `Array`'s names with `Array`'s arguments for the reason in D52. `find` is the one a recipe calls
+in order to edit (`d.todos.find((t) => t.id === id)!.done = true`, the immer
+idiom), so it scans values and drafts the one element it returns. `filter` returns
+`this` when it keeps everything, which canonical construction would have
+found anyway, later. A set's `reduce` takes its initial value: "the first
+member" of an unordered set is the hash seed's choice. **Rejected:** on the
+maps, for now: `map` over a map has no one meaning (values? entries?), and
+nothing here closes the door. **Rejected:** `find` on the sets, until set
+members can be drafted at all (D53). **Cost.** Seven methods on the list, five on
+each set, and as many on the drafts, over four shared helpers; their size in
+a bundle is not measured here.
+
 ## Non-goals
 
 Permanently out of scope: mutable built-ins as values; cycle support; wire

@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createSetDraft, type SetState } from './draft-set.js';
@@ -139,6 +139,36 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   /** Call `fn` for each element, as `ReadonlySet.forEach` does. */
   forEach(fn: (value: T, value2: T, set: ValueSet<T>) => void, thisArg?: unknown): void {
     trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i] as T, slots[i] as T, this));
+  }
+
+  // The functional reads. A callback gets what `forEach` passes: `(value, value, set)`.
+
+  /** The set of `fn`'s results: equal results are one member. */
+  map<U>(fn: (value: T, value2: T, set: ValueSet<T>) => U, thisArg?: unknown): ValueSet<U> {
+    return ValueSet.from(mapIn(this, this, false, fn as never, thisArg) as U[]);
+  }
+
+  /** The members `fn` accepts; `this` when it accepts them all. */
+  filter<S extends T>(fn: (value: T, value2: T, set: ValueSet<T>) => value is S, thisArg?: unknown): ValueSet<S>;
+  filter(fn: (value: T, value2: T, set: ValueSet<T>) => unknown, thisArg?: unknown): ValueSet<T>;
+  filter(fn: (value: T, value2: T, set: ValueSet<T>) => unknown, thisArg?: unknown): ValueSet<T> {
+    const kept = filterIn(this, this, false, fn as never, thisArg) as T[];
+    return kept.length === this.size ? this : ValueSet.from(kept);
+  }
+
+  /** A fold over the members, from `initial`. */
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: ValueSet<T>) => U, initial: U): U {
+    return reduceIn(this, this, false, 'ValueSet.reduce', [fn, initial]) as U;
+  }
+
+  /** Whether `fn` accepts any member. */
+  some(fn: (value: T, value2: T, set: ValueSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this, this, false, fn as never, thisArg) !== -1;
+  }
+
+  /** Whether `fn` accepts every member. */
+  every(fn: (value: T, value2: T, set: ValueSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this, this, false, fn as never, thisArg, false) === -1;
   }
 
   /**

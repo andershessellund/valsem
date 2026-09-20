@@ -103,6 +103,14 @@ set methods accept as their argument.) Their backing collections are private: Ja
 accidental `set()`/`add()` corrupt the shared canonical instance. Take a
 mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
+`ValueList` has `Array`'s functional reads, `map`, `filter`, `reduce`, `some`,
+`every`, `find` and `findIndex`, with `Array`'s callback arguments and a
+`ValueList` where `Array` gives an array; `ValueSet` and `OrderedSet` have
+`map`, `filter`, `reduce`, `some` and `every`, whose callbacks get what their
+`forEach` passes, `(value, value, set)`. What they build is canonical like
+any other collection (`list.filter(() => true) === list`), and a set's `map`
+merges equal results.
+
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
 read with `get(i)` (a size-table walk; sequential reads stay in one leaf),
 iterate in index order, and take the interned frozen snapshot with

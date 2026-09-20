@@ -19,7 +19,7 @@ import {
   snapshotOf,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn } from './shared.js';
 import type { ValueSet } from './value-set.js';
 
 const INTERNAL = Symbol('valsem.draftInternal');
@@ -148,6 +148,36 @@ export class DraftSet<T> {
   /** `[value, value]` pairs, as `Set.prototype.entries` gives them. */
   *entries(): IterableIterator<[T, T]> {
     for (const v of this.values()) yield [v, v];
+  }
+
+  // The functional reads, over the set as it is right now. Members are values
+  // already; `map` and `filter` give back a `ValueSet`, as the algebra does.
+
+  /** The `ValueSet` of `fn`'s results, as `ValueSet.map`. */
+  map<U>(fn: (value: T, value2: T, set: DraftSet<T>) => U, thisArg?: unknown): ValueSet<U> {
+    return (snapshotOf(this) as ValueSet<T>).map((v) => fn.call(thisArg, v, v, this));
+  }
+
+  /** The `ValueSet` of the members `fn` accepts, as `ValueSet.filter`. */
+  filter<S extends T>(fn: (value: T, value2: T, set: DraftSet<T>) => value is S, thisArg?: unknown): ValueSet<S>;
+  filter(fn: (value: T, value2: T, set: DraftSet<T>) => unknown, thisArg?: unknown): ValueSet<T>;
+  filter(fn: (value: T, value2: T, set: DraftSet<T>) => unknown, thisArg?: unknown): ValueSet<T> {
+    return (snapshotOf(this) as ValueSet<T>).filter((v) => fn.call(thisArg, v, v, this));
+  }
+
+  /** A fold over the members, from `initial`. */
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftSet<T>) => U, initial: U): U {
+    return reduceIn(this.values(), this, false, 'DraftSet.reduce', [fn, initial]) as U;
+  }
+
+  /** Whether `fn` accepts any member. */
+  some(fn: (value: T, value2: T, set: DraftSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this.values(), this, false, fn as never, thisArg) !== -1;
+  }
+
+  /** Whether `fn` accepts every member. */
+  every(fn: (value: T, value2: T, set: DraftSet<T>) => unknown, thisArg?: unknown): boolean {
+    return findIndexIn(this.values(), this, false, fn as never, thisArg, false) === -1;
   }
 
   forEach(fn: (value: T, value2: T, set: DraftSet<T>) => void, thisArg?: unknown): void {
