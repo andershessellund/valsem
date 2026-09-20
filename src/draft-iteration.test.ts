@@ -3,11 +3,13 @@
 // not import `current`, on purpose: the draft reads that go through the
 // snapshot (toArray, slice) must work in a bundle that dropped that module.
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, isDraft } from './produce.js';
+import { produce, produceWithPatches, isDraft, castDraft } from './produce.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { OrderedMap } from './ordered-map.js';
+import { ValueSet } from './value-set.js';
+import { OrderedSet } from './ordered-set.js';
 import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 type Todo = { id: number; done: boolean };
@@ -133,6 +135,49 @@ describe('DraftMap iteration', () => {
     const [next, patches] = produceWithPatches(base, (d) => { for (const [, t] of d.m) void t.id; });
     expect(next).toBe(base);
     expect(patches).toEqual([]);
+  });
+});
+
+describe('set members stay values (D57)', () => {
+  // A set holds its members by content, so editing one is removing it and
+  // adding another, which may already be there. That is said, not drafted.
+  const base = intern({ tags: ValueSet.from([{ name: 'a', n: 1 }, { name: 'a', n: 2 }, { name: 'b', n: 1 }]) });
+
+  it('iteration hands out the canonical members, on both kinds of set', () => {
+    produce(intern({ s: base.tags, o: OrderedSet.from([{ v: 1 }]) }), (d) => {
+      for (const m of d.s) expect(isDraft(m)).toBe(false);
+      for (const m of d.o) expect(isDraft(m)).toBe(false);
+      d.s.forEach((m) => expect(isDraft(m)).toBe(false));
+    });
+  });
+
+  it('the documented ways to change a member: delete and add, or map; members that become equal are one', () => {
+    const one = produce(base, (d) => {
+      // Over a copy: a member added while the set itself is being walked is
+      // visited too, as on a native Set, and this loop would never end.
+      for (const t of [...d.tags]) {
+        if (t.name !== 'b') continue;
+        d.tags.delete(t);
+        d.tags.add({ ...t, n: 9 });
+      }
+    });
+    expect(one.tags).toBe(ValueSet.from([{ name: 'a', n: 1 }, { name: 'a', n: 2 }, { name: 'b', n: 9 }]));
+    const [all, patches, inverse] = produceWithPatches(base, (d) => {
+      d.tags = castDraft(d.tags.map((t) => ({ ...t, n: 0 })));
+    });
+    expect(all.tags).toBe(ValueSet.from([{ name: 'a', n: 0 }, { name: 'b', n: 0 }]));
+    expect(all.tags.size).toBe(2); // three members went in
+    expectPatchRoundTrip(base, all, patches, inverse);
+  });
+
+  it('a set that is a member of a set changes identity with its content, all the way up', () => {
+    const inner = ValueSet.from([1, 2]);
+    const outer = intern({ s: ValueSet.from([inner, ValueSet.from([1, 2, 3])]) });
+    const next = produce(outer, (d) => {
+      d.s.delete(inner);
+      d.s.add(inner.add(3)); // now equal to the other member
+    });
+    expect(next.s).toBe(ValueSet.from([ValueSet.from([1, 2, 3])]));
   });
 });
 

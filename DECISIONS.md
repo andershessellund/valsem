@@ -1347,14 +1347,54 @@ with live drafts in it, where `ValueList.toArray()` is the frozen canonical
 snapshot. Inspection (`console.log`) walks what the draft holds and drafts
 nothing. **Rejected:** a separate draft-yielding iterator (`drafts()`) beside
 a value-yielding default: two walks to choose between, and the default the
-wrong one for a recipe. **Not decided here:** set members. A member's content
-is its identity, so an edited member is a deletion and an addition that may
-collide with a member already there; until that has a rule, sets hand out
-values. **Cost.** Breaking: the element type of the iterators is `Draft<T>`,
+wrong one for a recipe. Set members are the exception, and stay values:
+D57. **Cost.** Breaking: the element type of the iterators is `Draft<T>`,
 and code that compared an iterated element to a base element by `===` now
 compares a draft. `DraftMap` iteration order is the base's, then the keys
 the recipe added (it was: untouched base entries, then everything touched);
 the order of an unordered map was never API.
+
+### D57. Set members are not drafted: a member's content is its identity
+
+Iterating a `DraftSet` or a `DraftOrderedSet` hands out its members as the
+values they are, the one exception to D53. A member is edited by saying what
+that is: for every member, `d.tags = castDraft(d.tags.map((t) => ({ ...t, n:
+0 })))`; for one, `d.s.delete(m); d.s.add({ ...m, n: 0 })`, over a copy when
+in a loop, since a member added to a set being walked is visited too, as on
+a native `Set`.
+
+**Why.** A set holds its members by content, so there is no editing one in
+place: changing a member is removing it and adding another, and the other
+may already be there. Two members edited to the same content are one member,
+and the set has shrunk. Under value semantics that is the right answer, and
+it is what `map` on a set has always given, where nobody is surprised by it.
+Behind a `for…of` it is a member that disappears. Drafting members would
+also need rules that nothing suggests: what `size` and `has` answer between
+the edit and the end of the recipe, when a member's final content is not yet
+known (answer by the original members and they contradict `current(d.s)`;
+answer exactly and the set must track which member drafts changed, which
+`markChanged` does not tell a parent); what becomes of a draft whose
+original is deleted while it is held; which position survives a collision in
+an `OrderedSet`; and an inverse patch that must not delete the member that
+was already there. And it compounds, because a set can be a member of a set:
+an edit to a member of the inner one changes the inner set's identity, which
+is a removal and an addition in the outer one, at every level up. immer
+drafts set members and meets none of this, because a native `Set` holds its
+members by reference: two edited objects with equal content stay two. A data
+model that wants to edit records in place has an identity beside the
+content, an id, and the collection for that is a map keyed by it, whose
+values are drafted on iteration like any other. **Rejected:** drafting
+members with edits that land at finalize while `has` and `size` answer by
+the originals: cheap, and `d.s.has(x)` disagrees with `current(d.s).has(x)`
+inside one recipe. **Rejected:** drafting members with exact reads, through a
+child-changed hook in the draft core: consistent, and all of the above to
+specify, for an operation the set algebra and `map` already express.
+**Cost.** `for (const m of d.s) m.n = 0` throws the engine's read-only
+`TypeError`, which valsem cannot replace with a better one (the member is a
+frozen plain object), and under `skipFreezing()` it writes into the pooled
+member unnoticed. The direction is the reversible one: handing out drafts
+later would change an element type from `T` to `Draft<T>` and break almost
+nobody; taking them back would.
 
 ### D54. The functional reads: `Array`'s on `ValueList`, five of them on the sets, and they do not draft
 
