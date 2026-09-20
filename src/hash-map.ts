@@ -8,7 +8,7 @@
 // a pool lookup (~300 ns for a small record). Keys are stored canonical —
 // frozen, pooled, independent of the caller's object — so a key mutated
 // after insertion changes nothing, and iteration yields values you can hand
-// straight to a native Map or `fastEquals`. Values are stored as-is, so it
+// straight to a native Map or `fastEqual`. Values are stored as-is, so it
 // can index LIVE objects — DOM nodes, connections — by value.
 //
 // For the last few nanoseconds: intern your keys and use a native Map.
@@ -65,19 +65,30 @@ export class HashMap<K, V> {
   }
 
   /**
-   * Get existing value or create and insert a new one.
-   *
-   * Avoids the double-lookup pattern of `if (!has) set(create())`. The
-   * `factory` is only called when the key is not found, and receives the
-   * canonical key. A factory result of `undefined` is stored and cached like
-   * any other value.
+   * The value at `key`, inserting `value` first when the key is absent, as
+   * `Map.prototype.getOrInsert`. A stored `undefined` counts as present.
    */
-  getOrCreate(key: K, factory: (key: K) => V): V {
+  getOrInsert(key: K, value: V): V {
     const k = intern(key);
     const m = this.#map;
     const existing = m.get(k);
     if (existing !== undefined || m.has(k)) return existing as V;
-    const value = factory(k);
+    m.set(k, value);
+    return value;
+  }
+
+  /**
+   * The value at `key`, computing and inserting it first when the key is
+   * absent, as `Map.prototype.getOrInsertComputed`: no has/get/set dance.
+   * `callback` runs only on a miss and receives the canonical key; a result
+   * of `undefined` is stored and cached like any other value.
+   */
+  getOrInsertComputed(key: K, callback: (key: K) => V): V {
+    const k = intern(key);
+    const m = this.#map;
+    const existing = m.get(k);
+    if (existing !== undefined || m.has(k)) return existing as V;
+    const value = callback(k);
     m.set(k, value);
     return value;
   }

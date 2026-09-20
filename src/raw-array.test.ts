@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RawArray } from './raw-array.js';
-import { intern, isCanonical, fastEquals, _internPoolSize } from './intern.js';
+import { intern, isCanonical, fastEqual, _internPoolSize } from './intern.js';
 import { deepEqual } from './deep-equal.js';
 import { produce } from './produce.js';
 import { ValueList } from './value-list.js';
@@ -63,7 +63,7 @@ describe('RawArray', () => {
     const other = RawArray.from(rows(100));
     expect(isCanonical(view)).toBe(true);
     expect(deepEqual(view, other)).toBe(false); // two views are two values
-    expect(fastEquals(view, view)).toBe(true);
+    expect(fastEqual(view, view)).toBe(true);
     const state = intern({ page: 2, rows: view });
     expect(state.rows).toBe(view); // passed through, not materialised
     expect(intern({ rows: view, page: 2 })).toBe(state);

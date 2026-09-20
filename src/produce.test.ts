@@ -6,7 +6,7 @@ import {
   applyPatches,
   nothing,
   isDraft,
-  draft,
+  draftOf,
   type Patch,
 } from './produce.js';
 import { DraftMap } from './draft-map.js';
@@ -248,8 +248,8 @@ describe('produce — grafts and aliasing', () => {
     // and `c` is safe; the docs used to promise this case never throws.
     expect(() => produce(base, (d) => { d.k = { inner: c }; (d.k as { inner: { y: number } }).inner.y = 2; })).toThrow(TypeError);
     expect(c.y).toBe(1);
-    // draft(c) is how such material is opted in.
-    expect(produce(base, (d) => { const e = draft(c); e.y = 2; d.k = { inner: e }; })).toBe(intern({ k: { inner: { y: 2 } } }));
+    // draftOf(c) is how such material is opted in.
+    expect(produce(base, (d) => { const e = draftOf(c); e.y = 2; d.k = { inner: e }; })).toBe(intern({ k: { inner: { y: 2 } } }));
   });
 });
 

@@ -82,14 +82,39 @@ describe('HashMap', () => {
     expect(map.has(1)).toBe(false);
   });
 
-  // --- getOrCreate ---
+  // --- getOrInsert ---
 
-  it('getOrCreate() returns existing value without calling factory', () => {
+  it('getOrInsert() inserts on a miss, returns what is there on a hit, and a stored undefined is a hit', () => {
+    const map = new HashMap<{ id: number }, string | undefined>();
+    expect(map.getOrInsert({ id: 1 }, 'a')).toBe('a');
+    expect(map.getOrInsert({ id: 1 }, 'b')).toBe('a'); // an equal key, another object
+    expect(map.size).toBe(1);
+    map.set({ id: 2 }, undefined);
+    expect(map.getOrInsert({ id: 2 }, 'c')).toBeUndefined();
+    expect(map.get({ id: 2 })).toBeUndefined();
+    expect(map.size).toBe(2);
+  });
+
+  it('getOrInsert() and getOrInsertComputed() answer as Map.prototype’s do, where the runtime has them', () => {
+    type Upsert = Map<number, string> & { getOrInsert?(k: number, v: string): string; getOrInsertComputed?(k: number, f: (k: number) => string): string };
+    const native: Upsert = new Map<number, string>();
+    if (native.getOrInsert === undefined || native.getOrInsertComputed === undefined) return; // Node 22
+    const map = new HashMap<number, string>();
+    for (const k of [1, 2, 1, 3, 2]) {
+      expect(map.getOrInsert(k, `v${k}`)).toBe(native.getOrInsert(k, `v${k}`));
+      expect(map.getOrInsertComputed(k + 1, (x) => `c${x}`)).toBe(native.getOrInsertComputed(k + 1, (x) => `c${x}`));
+    }
+    expect([...map]).toEqual([...native]);
+  });
+
+  // --- getOrInsertComputed ---
+
+  it('getOrInsertComputed() returns existing value without calling factory', () => {
     const map = new HashMap<{ id: number }, string>();
     map.set({ id: 1 }, 'existing');
 
     let factoryCalled = false;
-    const result = map.getOrCreate({ id: 1 }, () => {
+    const result = map.getOrInsertComputed({ id: 1 }, () => {
       factoryCalled = true;
       return 'new';
     });
@@ -99,10 +124,10 @@ describe('HashMap', () => {
     expect(map.size).toBe(1);
   });
 
-  it('getOrCreate() creates, caches, and returns new value', () => {
+  it('getOrInsertComputed() creates, caches, and returns new value', () => {
     const map = new HashMap<{ id: number }, string>();
 
-    const result = map.getOrCreate({ id: 1 }, (key) => `created-${key.id}`);
+    const result = map.getOrInsertComputed({ id: 1 }, (key) => `created-${key.id}`);
 
     expect(result).toBe('created-1');
     expect(map.size).toBe(1);
@@ -111,25 +136,25 @@ describe('HashMap', () => {
 
   // --- Iteration ---
 
-  it('getOrCreate() caches an undefined result — the factory runs once', () => {
+  it('getOrInsertComputed() caches an undefined result — the factory runs once', () => {
     const map = new HashMap<{ id: number }, number | undefined>();
     let calls = 0;
     const factory = (): undefined => {
       calls++;
       return undefined;
     };
-    expect(map.getOrCreate({ id: 1 }, factory)).toBeUndefined();
-    expect(map.getOrCreate({ id: 1 }, factory)).toBeUndefined();
-    expect(map.getOrCreate({ id: 1 }, factory)).toBeUndefined();
+    expect(map.getOrInsertComputed({ id: 1 }, factory)).toBeUndefined();
+    expect(map.getOrInsertComputed({ id: 1 }, factory)).toBeUndefined();
+    expect(map.getOrInsertComputed({ id: 1 }, factory)).toBeUndefined();
     expect(calls).toBe(1);
     expect(map.size).toBe(1);
     expect(map.has({ id: 1 })).toBe(true);
   });
 
-  it('getOrCreate() hands the factory the canonical key', () => {
+  it('getOrInsertComputed() hands the factory the canonical key', () => {
     const map = new HashMap<{ id: number }, object>();
     const raw = { id: 7 };
-    const seen = map.getOrCreate(raw, (k) => k);
+    const seen = map.getOrInsertComputed(raw, (k) => k);
     expect(seen).toBe(intern({ id: 7 }));
     expect(isCanonical(seen)).toBe(true);
     expect(Object.isFrozen(raw)).toBe(false); // the caller's object is untouched
@@ -263,7 +288,7 @@ describe('HashMap — keys interned on entry', () => {
     expect(m.get('s')).toBe('str');
   });
 
-  it('getOrCreate hands the factory the canonical key, caches undefined, and never re-runs', () => {
+  it('getOrInsertComputed hands the factory the canonical key, caches undefined, and never re-runs', () => {
     const m = new HashMap<{ q: string }, number | undefined>();
     let runs = 0;
     const key = { q: 'x' };
@@ -272,8 +297,8 @@ describe('HashMap — keys interned on entry', () => {
       expect(k).toBe(intern({ q: 'x' }));
       return undefined;
     };
-    expect(m.getOrCreate(key, fac)).toBeUndefined();
-    expect(m.getOrCreate({ q: 'x' }, fac)).toBeUndefined();
+    expect(m.getOrInsertComputed(key, fac)).toBeUndefined();
+    expect(m.getOrInsertComputed({ q: 'x' }, fac)).toBeUndefined();
     expect(runs).toBe(1);
     expect(m.has({ q: 'x' })).toBe(true);
   });

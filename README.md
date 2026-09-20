@@ -42,7 +42,7 @@ change:
 - **No refetch for an equal query.** A cache keyed by content (`HashMap` on
   the request parameters) hits when the parameters are equal, however the
   object was built.
-- **"Unsaved changes?" is one compare.** `fastEquals(current, saved)`, at any
+- **"Unsaved changes?" is one compare.** `fastEqual(current, saved)`, at any
   size.
 
 ```ts
@@ -74,13 +74,13 @@ compared by reference. See [Extending](#extending).
 **Fast.** Here is exactly what is fast, and what is not. Comparing two
 canonical values is a pointer check — tens of nanoseconds for a three-key
 record and for a three-million-key state alike — and everything built on
-comparison inherits that: `fastEquals`, `HashMap` and `HashSet` lookups on
+comparison inherits that: `fastEqual`, `HashMap` and `HashSet` lookups on
 canonical keys, `memoize` hits, and hashing, which is a cached property read.
 
 ```ts
-import { fastEquals, HashMap } from 'valsem';
+import { fastEqual, HashMap } from 'valsem';
 
-fastEquals(current, saved);            // a pointer compare, at any size
+fastEqual(current, saved);            // a pointer compare, at any size
 const derived = new HashMap<State, Derived>();
 derived.get(state);                    // a native Map lookup plus one probe — the key is canonical, so === is value equality
 ```
@@ -141,13 +141,13 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | --- | --- | --- |
 | Result | a frozen copy | a frozen **canonical** value — equal content ⟹ `===` |
 | `Map` / `Set` in state | `enableMapSet()` | `ValueMap` / `ValueSet` (drafted as `DraftMap` / `DraftSet`); native `Map`/`Set` are rejected with the replacement named |
-| `Date` in state | allowed | rejected — use `ValueDate.of(date)` (or Temporal via `valsem/temporal`) |
+| `Date` in state | allowed | rejected — use `ValueDate.from(date)` (or Temporal via `valsem/temporal`) |
 | Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — `[equals]` + `[hashCode]`, or one registration, see [Extending](#extending); a value is an opaque leaf in a recipe (`Draft<ValueDate>` is `ValueDate`) unless it implements `[toDraft]` — give a registered class at least one method so the types can tell |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
 | Iterating a `Map` or `Set` draft | yields drafts | a `DraftMap`'s values (and a `DraftList`'s elements) come as drafts too, so `for (const [, v] of d.m) v.x = 1` edits; keys and set members come as the **values** they are, since a set member's content is its identity. A loop that only reads is cheaper over `current(d.m)`, which drafts nothing |
 | `castDraft()` | for a `readonly` value headed into a mutable slot | the same, and also for every whole collection assigned into a slot: `d.todos = castDraft(ValueList.of(a, b))`, since a `ValueList` slot is typed as a `DraftList` |
-| `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draft(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
+| `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draftOf(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
 | Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.remove(-1)` throw, `get` returns `T`), while ranges clamp (`slice(0, 10)`) |
 | `produce(draft, recipe)` inside a recipe | a new value; the outer draft is untouched, so use the result | the same, for every kind of draft: the draft stands for `current(draft)` |
 | Async recipes | silently wrong | rejected with an error |
@@ -206,7 +206,7 @@ rather than guessing:
 intern({ at: new Date() });
 // TypeError: intern: Date cannot be interned — valsem gives value semantics to
 // immutable values only, and a Date can be re-timed with setTime(). Use
-// ValueDate.of(date) instead — an immutable, canonical timestamp …
+// ValueDate.from(date) instead — an immutable, canonical timestamp …
 
 deepEqual(new Date(0), new Date(0)); // false — reference semantics for mutable objects
                                      // (a development-mode warning explains why, once)
@@ -348,9 +348,9 @@ it costs.
 
 | | |
 | --- | --- |
-| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `draft`, `castDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical; `draft()` detaches a second root for material brought in from elsewhere |
+| `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `draftOf`, `castDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical; `draftOf()` detaches a second root for material brought in from elsewhere |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
-| `fastEquals`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
+| `fastEqual`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
 | `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |

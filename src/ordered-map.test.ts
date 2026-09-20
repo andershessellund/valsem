@@ -245,7 +245,7 @@ describe('OrderedMap — writes', () => {
   it('rejects non-value keys and values with the teaching error', () => {
     expect(() => OrderedMap.empty<Date, number>().set(new Date(0), 1)).toThrow(/ValueDate/);
     expect(() => OrderedMap.empty<string, Map<string, string>>().set('a', new Map())).toThrow(/ValueMap/);
-    expect(OrderedMap.empty<string, ValueDate>().set('a', ValueDate.of(0)).get('a')).toBe(ValueDate.of(0));
+    expect(OrderedMap.empty<string, ValueDate>().set('a', ValueDate.from(0)).get('a')).toBe(ValueDate.from(0));
   });
 });
 

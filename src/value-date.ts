@@ -4,7 +4,7 @@
 // `Date` is not a value: it can be re-timed with setTime(), so valsem rejects
 // it. What a Date *means* is one number — epoch milliseconds — and that is
 // all a ValueDate holds. Instances are canonical by construction (private
-// constructor + pool), so `ValueDate.of(t) === ValueDate.of(t)`, they pass
+// constructor + pool), so `ValueDate.from(t) === ValueDate.from(t)`, they pass
 // through `intern`/`produce` untouched, and they key a HashMap/ValueMap in
 // O(1).
 //
@@ -25,17 +25,17 @@ const pool = createInternPool<ValueDate>();
 /**
  * An immutable, canonical timestamp — the value a `Date` stands for.
  *
- * `ValueDate.of(x)` accepts whatever `new Date(x)` accepts (a `Date`, an
+ * `ValueDate.from(x)` accepts whatever `new Date(x)` accepts (a `Date`, an
  * ISO or date string, epoch milliseconds) and parses it by the same rules,
  * so `'2026-09-05'` is UTC midnight and `'2026-09-05T00:00'` is local, just
  * as with `Date`. An invalid date is rejected rather than admitted as a
- * value. Equal instants are the same instance: `ValueDate.of(t) === ValueDate.of(t)`.
+ * value. Equal instants are the same instance: `ValueDate.from(t) === ValueDate.from(t)`.
  *
  * ```ts
- * const at = ValueDate.of('2026-09-05T10:00:00Z');
+ * const at = ValueDate.from('2026-09-05T10:00:00Z');
  * at.epochMs;             // 1788602400000
  * at.toDate();            // a fresh, mutable Date — change it freely
- * at < ValueDate.of(Date.now()); // valueOf() is the epoch, so comparisons work
+ * at < ValueDate.from(Date.now()); // valueOf() is the epoch, so comparisons work
  * JSON.stringify({ at }); // {"at":"2026-09-05T10:00:00.000Z"} — same as with a Date
  * ```
  */
@@ -65,12 +65,12 @@ export class ValueDate {
    *
    * @throws RangeError if `x` is not a valid date.
    */
-  static of(x: ValueDate | Date | string | number): ValueDate {
+  static from(x: ValueDate | Date | string | number): ValueDate {
     if (x instanceof ValueDate) return x;
     const ms = x instanceof Date ? x.getTime() : new Date(x).getTime();
     if (ms !== ms) {
       throw new RangeError(
-        `ValueDate.of: ${typeof x === 'string' ? JSON.stringify(x) : String(x)} is not a valid date`,
+        `ValueDate.from: ${typeof x === 'string' ? JSON.stringify(x) : String(x)} is not a valid date`,
       );
     }
     const normalized = ms === 0 ? 0 : ms; // -0 → +0: one instant, one instance

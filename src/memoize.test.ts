@@ -31,8 +31,8 @@ describe('memoize', () => {
     expect(m(1)).toBe(a);
     expect(a).toBe(intern({ list: [1, 2] }));
     expect(Object.isFrozen(a)).toBe(true);
-    const dateOf = memoize((s: string) => ValueDate.of(s));
-    expect(dateOf('2026-09-06T00:00:00Z')).toBe(ValueDate.of('2026-09-06T00:00:00Z'));
+    const dateOf = memoize((s: string) => ValueDate.from(s));
+    expect(dateOf('2026-09-06T00:00:00Z')).toBe(ValueDate.from('2026-09-06T00:00:00Z'));
   });
 
   it('caches undefined results, and never a throw', () => {

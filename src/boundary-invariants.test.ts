@@ -12,7 +12,7 @@
 //    replacement, a non-draftable base) now do too.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, applyPatches, draft } from './produce.js';
+import { produce, produceWithPatches, applyPatches, draftOf } from './produce.js';
 import { current } from './current.js';
 import { intern, isCanonical } from './intern.js';
 import { ValueMap } from './value-map.js';
@@ -43,7 +43,7 @@ describe('a draft of another recipe is rejected wherever it hides', () => {
     ['ValueList push', (w) => produce(ValueList.of<unknown>(1), (l) => void l.push(w))],
     ['OrderedMap value', (w) => produce(OrderedMap.from<string, unknown>([['k', 1]]), (m) => void m.set('x', w))],
     ['detached draft', (w) => produce(intern({ slot: null as unknown }), (d) => {
-      const free = draft(intern({ inner: null as unknown }));
+      const free = draftOf(intern({ inner: null as unknown }));
       free.inner = w;
       d.slot = free;
     })],
@@ -86,7 +86,7 @@ describe('a draft of another recipe is rejected wherever it hides', () => {
   it('collection drafts and detached drafts of the outer recipe are caught too', () => {
     const result = produce(base, (outer) => {
       const l = outer.list;
-      const free = draft(intern<Child>({ n: 5 }));
+      const free = draftOf(intern<Child>({ n: 5 }));
       expect(() => produce(intern({ s: null as unknown }), (d) => void (d.s = { w: l }))).toThrow(FOREIGN);
       expect(() => produce(intern({ s: null as unknown }), (d) => void (d.s = [free]))).toThrow(FOREIGN);
       l.push({ n: 2 });

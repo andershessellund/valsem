@@ -4,7 +4,7 @@
 // constructor shadowing.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, afterEach } from 'vitest';
-import { intern, isCanonical, fastEquals } from './intern.js';
+import { intern, isCanonical, fastEqual } from './intern.js';
 import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { produce, produceWithPatches, applyPatches, type Patch } from './produce.js';
@@ -160,7 +160,7 @@ describe('protocol symbols are ordinary keys on plain records', () => {
     expect(c[interned]).toBe(true); // it is a key of the value
     expect(intern({ [interned]: true, x: 1 })).toBe(c);
     expect(deepEqual(o, { x: 1 })).toBe(false); // the symbol key is part of the content
-    expect(() => fastEquals(o, o)).toThrow(/raw object/);
+    expect(() => fastEqual(o, o)).toThrow(/raw object/);
   });
   it('an own [hashCode] or [equals] on a record is a key, not the protocol', () => {
     const a = { x: 1, [hashCode]: 42 } as Record<string | symbol, unknown>;

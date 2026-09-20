@@ -266,7 +266,7 @@ export function isDraftable(v: unknown): boolean {
 }
 
 /** The draft state for a draftable `value`, under `parent` (or at the root). */
-export function draftOf(value: unknown, parent?: DraftState): DraftState {
+export function draftStateFor(value: unknown, parent?: DraftState): DraftState {
   if (isPlainObject(value)) return coreObject!(value, parent);
   if (Array.isArray(value)) return coreArray!(value, parent);
   return (value as { [toDraft](parent?: DraftState): DraftState })[toDraft](parent);
@@ -274,7 +274,7 @@ export function draftOf(value: unknown, parent?: DraftState): DraftState {
 
 /** Draft a child value; returns the draft object to hand to the recipe. */
 export function createChildDraft(value: unknown, parent: DraftState): unknown {
-  return draftOf(value, parent).draft;
+  return draftStateFor(value, parent).draft;
 }
 
 /** Mark `state` and every ancestor as changed. */

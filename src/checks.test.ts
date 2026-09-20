@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { intern, isCanonical, fastEquals } from './intern.js';
+import { intern, isCanonical, fastEqual } from './intern.js';
 import { produce } from './produce.js';
 import { ValueList } from './value-list.js';
 import { ValueDate } from './value-date.js';
@@ -17,7 +17,7 @@ describe('isCanonical', () => {
     expect(isCanonical(intern([1, { b: 2 }])[1])).toBe(true);
     expect(isCanonical(produce(intern({ a: 1 }), (d) => void (d.a = 2)))).toBe(true);
     expect(isCanonical(ValueList.of(1))).toBe(true);
-    expect(isCanonical(ValueDate.of(0))).toBe(true);
+    expect(isCanonical(ValueDate.from(0))).toBe(true);
     expect(isCanonical(new Date(0))).toBe(false);
     class Foo {}
     expect(isCanonical(new Foo())).toBe(false);
@@ -31,23 +31,23 @@ describe('the hash lives beside the value, not on it', () => {
   });
 });
 
-describe('fastEquals (checks on)', () => {
+describe('fastEqual (checks on)', () => {
   it('is === on canonical values and primitives', () => {
     const a = intern({ x: [1, 2] });
-    expect(fastEquals(a, intern({ x: [1, 2] }))).toBe(true);
-    expect(fastEquals(a, intern({ x: [1, 3] }))).toBe(false);
-    expect(fastEquals(1, 1)).toBe(true);
-    expect(fastEquals(NaN, NaN)).toBe(false); // ===, by design — deepEqual says true
-    expect(fastEquals(ValueList.of(1), ValueList.of(1))).toBe(true);
-    expect(fastEquals(undefined, null)).toBe(false);
+    expect(fastEqual(a, intern({ x: [1, 2] }))).toBe(true);
+    expect(fastEqual(a, intern({ x: [1, 3] }))).toBe(false);
+    expect(fastEqual(1, 1)).toBe(true);
+    expect(fastEqual(NaN, NaN)).toBe(false); // ===, by design — deepEqual says true
+    expect(fastEqual(ValueList.of(1), ValueList.of(1))).toBe(true);
+    expect(fastEqual(undefined, null)).toBe(false);
   });
   it('rejects raw arguments — the silent false — naming which side and what it was', () => {
     const c = intern({ x: 1 });
-    expect(() => fastEquals({ x: 1 }, c)).toThrow(/first argument is a raw object/);
-    expect(() => fastEquals(c, [1])).toThrow(/second argument is a raw array/);
-    expect(() => fastEquals(c, () => 1)).toThrow(/a function/);
+    expect(() => fastEqual({ x: 1 }, c)).toThrow(/first argument is a raw object/);
+    expect(() => fastEqual(c, [1])).toThrow(/second argument is a raw array/);
+    expect(() => fastEqual(c, () => 1)).toThrow(/a function/);
     class Foo {}
-    expect(() => fastEquals(new Foo(), c)).toThrow(/an instance of Foo/);
-    expect(() => fastEquals(c, { x: 1 })).toThrow(/skipChecks\(\) disables this check/);
+    expect(() => fastEqual(new Foo(), c)).toThrow(/an instance of Foo/);
+    expect(() => fastEqual(c, { x: 1 })).toThrow(/skipChecks\(\) disables this check/);
   });
 });

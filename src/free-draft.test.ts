@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// draft() — detached drafts: a second root inside a recipe's scope.
+// draftOf() — detached drafts: a second root inside a recipe's scope.
 //
 // The recipe brings material in from elsewhere (another store, a signal read
 // inside a computed), edits it before it has a slot, then attaches it. Every
@@ -7,7 +7,7 @@
 // dropped; the lifetime is the scope's, like every other draft.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, draft, isDraft } from './produce.js';
+import { produce, produceWithPatches, draftOf, isDraft } from './produce.js';
 import { current, original } from './current.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
@@ -39,10 +39,10 @@ const base = intern<State>({
   seen: ValueSet.from([config]),
 });
 
-describe('draft() — attaching', () => {
+describe('draftOf() — attaching', () => {
   it('assigned into a record slot', () => {
     const next = produce(base, (d) => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.enabled = true;
       d.config = c;
     });
@@ -53,7 +53,7 @@ describe('draft() — attaching', () => {
   it('pushed into an array, set into a map, a list and a set', () => {
     const edited = intern({ enabled: true, level: 9 });
     const next = produce(base, (d) => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.enabled = true;
       d.tags.push('b');
       d.byId.set('y', c);
@@ -68,7 +68,7 @@ describe('draft() — attaching', () => {
 
   it('embedded in a grafted literal', () => {
     const next = produce(base, (d) => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.level = 2;
       (d as unknown as { extra: unknown }).extra = { wrapped: [c] };
     });
@@ -79,7 +79,7 @@ describe('draft() — attaching', () => {
 
   it('returned as the replacement', () => {
     const next = produce(base.config, () => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.enabled = true;
       return c;
     });
@@ -90,14 +90,14 @@ describe('draft() — attaching', () => {
     expect(() =>
       produce(base, (d) => {
         d.tags.push('b');
-        return draft(other) as unknown as State;
+        return draftOf(other) as unknown as State;
       }),
     ).toThrow(/mutate the draft or return a replacement/);
   });
 
   it('attached at several places resolves to one canonical instance', () => {
     const next = produce(base, (d) => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.level = 3;
       d.config = c;
       d.byId.set('z', c);
@@ -110,7 +110,7 @@ describe('draft() — attaching', () => {
 
   it('a value can be drafted, attached, and edited further through the slot', () => {
     const next = produce(base, (d) => {
-      const c = draft(other);
+      const c = draftOf(other);
       d.config = c;
       d.config.enabled = true; // reads back the same draft
       expect(d.config).toBe(c);
@@ -121,7 +121,7 @@ describe('draft() — attaching', () => {
 
   it.each(COLLECTIONS.map((c) => [c.name, c] as const))('%s drafts detached, and lands canonical where it is attached', (_name, c) => {
     const next = produce(base, (d) => {
-      const detached = draft(c.of('a'));
+      const detached = draftOf(c.of('a'));
       expect(detached).toBeInstanceOf(c.draftType);
       c.draftAdd(detached, { n: 1 });
       (d as unknown as { held: unknown }).held = detached;
@@ -131,10 +131,10 @@ describe('draft() — attaching', () => {
 
   it('collections draft detached too', () => {
     const next = produce(base, (d) => {
-      const m = draft(ValueMap.from<string, number>([['k', 1]]));
+      const m = draftOf(ValueMap.from<string, number>([['k', 1]]));
       m.set('k', 2);
       (d as unknown as { m: unknown }).m = m;
-      const l = draft(ValueList.of(1, 2));
+      const l = draftOf(ValueList.of(1, 2));
       l.push(3);
       (d as unknown as { l: unknown }).l = l;
     });
@@ -144,17 +144,17 @@ describe('draft() — attaching', () => {
   });
 });
 
-describe('draft() — convergence and detachment', () => {
+describe('draftOf() — convergence and detachment', () => {
   it('an unedited draft attached over its own base nets out', () => {
     const next = produce(base, (d) => {
-      d.config = draft(config);
+      d.config = draftOf(config);
     });
     expect(next).toBe(base);
   });
 
   it('edits that net out converge on the base', () => {
     const next = produce(base, (d) => {
-      const c = draft(config);
+      const c = draftOf(config);
       c.enabled = true;
       c.enabled = false;
       d.config = c;
@@ -164,7 +164,7 @@ describe('draft() — convergence and detachment', () => {
 
   it('unattached drafts are dropped', () => {
     const next = produce(base, () => {
-      const c = draft(config);
+      const c = draftOf(config);
       c.enabled = true;
     });
     expect(next).toBe(base);
@@ -172,7 +172,7 @@ describe('draft() — convergence and detachment', () => {
 
   it('is independent of the child draft over the same base', () => {
     const next = produce(base, (d) => {
-      const c = draft(base.config);
+      const c = draftOf(base.config);
       c.level = 5;
       d.config.enabled = true;
       expect(c).not.toBe(d.config);
@@ -183,8 +183,8 @@ describe('draft() — convergence and detachment', () => {
 
   it('two drafts of one base are independent', () => {
     produce(base, () => {
-      const a = draft(config);
-      const b = draft(config);
+      const a = draftOf(config);
+      const b = draftOf(config);
       a.level = 7;
       expect(b.level).toBe(1);
       expect(a).not.toBe(b);
@@ -194,7 +194,7 @@ describe('draft() — convergence and detachment', () => {
   it('does not mutate a foreign (unfrozen) base', () => {
     const raw = { enabled: false, level: 1 };
     const next = produce(base, (d) => {
-      const c = draft(raw);
+      const c = draftOf(raw);
       c.enabled = true;
       d.config = c;
     });
@@ -203,10 +203,10 @@ describe('draft() — convergence and detachment', () => {
   });
 });
 
-describe('draft() — patches and inspectors', () => {
+describe('draftOf() — patches and inspectors', () => {
   it('attaches as a whole-value patch with a restoring inverse', () => {
     const [next, patches, inverse] = produceWithPatches(base, (d) => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.enabled = true;
       d.config = c;
     });
@@ -219,7 +219,7 @@ describe('draft() — patches and inspectors', () => {
 
   it('a returned draft is a root replace patch', () => {
     const [next, patches] = produceWithPatches(base.config, () => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.level = 0;
       return c;
     });
@@ -228,7 +228,7 @@ describe('draft() — patches and inspectors', () => {
 
   it('current() and original() work on a detached draft', () => {
     produce(base, () => {
-      const c = draft(other);
+      const c = draftOf(other);
       expect(original(c)).toBe(other);
       expect(current(c)).toBe(other);
       c.enabled = true;
@@ -238,36 +238,36 @@ describe('draft() — patches and inspectors', () => {
   });
 });
 
-describe('draft() — guards', () => {
+describe('draftOf() — guards', () => {
   it('throws outside a recipe', () => {
-    expect(() => draft(config)).toThrow(/draft\(\) can only be called inside a produce\(\) recipe/);
+    expect(() => draftOf(config)).toThrow(/draftOf\(\) can only be called inside a produce\(\) recipe/);
   });
 
   it('returns non-draftables as themselves', () => {
     produce(base, () => {
-      expect(draft(1)).toBe(1);
-      expect(draft('s')).toBe('s');
-      expect(draft(null)).toBe(null);
-      expect(draft(undefined)).toBe(undefined);
-      const date = ValueDate.of(new Date(0));
-      expect(draft(date)).toBe(date);
+      expect(draftOf(1)).toBe(1);
+      expect(draftOf('s')).toBe('s');
+      expect(draftOf(null)).toBe(null);
+      expect(draftOf(undefined)).toBe(undefined);
+      const date = ValueDate.from(new Date(0));
+      expect(draftOf(date)).toBe(date);
     });
   });
 
   it('is idempotent on a draft of this scope', () => {
     produce(base, (d) => {
-      const c = draft(other);
-      expect(draft(c)).toBe(c);
-      expect(draft(d)).toBe(d);
-      expect(draft(d.config)).toBe(d.config);
-      expect(draft(d.byId)).toBe(d.byId);
+      const c = draftOf(other);
+      expect(draftOf(c)).toBe(c);
+      expect(draftOf(d)).toBe(d);
+      expect(draftOf(d.config)).toBe(d.config);
+      expect(draftOf(d.byId)).toBe(d.byId);
       expect(isDraft(c)).toBe(true);
     });
   });
 
   it('rejects a draft from another produce() call', () => {
     produce(base, (outer) => {
-      expect(() => produce(config, () => draft(outer.config))).toThrow(/different produce\(\) call/);
+      expect(() => produce(config, () => draftOf(outer.config))).toThrow(/different produce\(\) call/);
     });
   });
 
@@ -275,8 +275,8 @@ describe('draft() — guards', () => {
     let leaked: Config | undefined;
     let leakedMap: ValueMap<string, number> | undefined;
     produce(base, () => {
-      leaked = draft(other);
-      leakedMap = draft(ValueMap.from<string, number>([['k', 1]])) as unknown as ValueMap<string, number>;
+      leaked = draftOf(other);
+      leakedMap = draftOf(ValueMap.from<string, number>([['k', 1]])) as unknown as ValueMap<string, number>;
     });
     expect(() => leaked!.level).toThrow(/revoked/);
     expect(() => leakedMap!.get('k')).toThrow(/escaped its produce\(\) call/);
@@ -284,9 +284,9 @@ describe('draft() — guards', () => {
 
   it('returns the base draft type', () => {
     produce(base, () => {
-      const c = draft(other);
+      const c = draftOf(other);
       c.level = 2; // Draft<Config> is writable
-      const m = draft(ValueMap.from<string, number>([['k', 1]]));
+      const m = draftOf(ValueMap.from<string, number>([['k', 1]]));
       m.set('k', 2); // Draft<ValueMap> is DraftMap
     });
   });
