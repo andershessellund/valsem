@@ -29,7 +29,21 @@ value, not a draft (`toArray` included). Iterating a `DraftList`, a `DraftMap`
 or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
 out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
 the same as on a plain array; keys, and the members of a set, come as the
-values they are. A draft costs about 0.3 µs, so a loop that only reads a
+values they are. A set holds its members by content, so there is no editing
+one in place: changing a member is removing it and adding another, which may
+already be there. Say so: for every member,
+`d.tags = castDraft(d.tags.map((t) => ({ ...t, n: 0 })))`, where two members
+that become equal are one member, as `map` on a set always gives; for one,
+`d.tags.delete(t); d.tags.add({ ...t, n: 0 })`. In a loop, walk a copy
+(`for (const t of [...d.tags])`): a member added to the set being walked is
+visited too, as on a native `Set`, and a loop that re-adds what it visits
+does not end. Going in, it is the same rule from the other side: where a
+value is required (a set member, a map key, an argument to `intern` or a
+memoized function), a draft stands for the value it holds right now, as
+`current(draft)` would give it. So `d.seen.add(t); t.done = true` leaves the
+set holding `t` as it was, where a list slot given the same draft follows it
+to the end of the recipe. Finish the edit, then add. Records you mean to edit in place have an id, and belong in a map
+keyed by it. A draft costs about 0.3 µs, so a loop that only reads a
 large collection is cheaper over `current(d.todos)` or `d.todos.slice()`,
 which draft nothing, and so are the functional reads: `map`, `filter`,
 `reduce`, `some`, `every` and `findIndex` on a draft show their callback

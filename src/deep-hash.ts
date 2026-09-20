@@ -17,6 +17,7 @@ import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype } from './deep-equal.js';
 import { hashString, hashNumber, mix } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
+import { _undraft } from './shared.js';
 
 /**
  * @internal The one hash cache: canonical object → its precomputed hash (the
@@ -270,6 +271,10 @@ export function deepHash(value: unknown): number {
   // Canonical objects carry their hash (the interner fills the meta store).
   const meta = _metaOf(obj);
   if (meta !== undefined) return meta.h;
+
+  // A draft hashes as the value it holds right now, as `intern` takes it.
+  const undrafted = _undraft(obj);
+  if (undrafted !== obj) return deepHash(undrafted);
 
   // Decode-boundary depth cap: the recursive walk below is where hostile
   // (or cyclic) input would otherwise exhaust the stack. Cached canonical

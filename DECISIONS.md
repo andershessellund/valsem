@@ -1314,9 +1314,10 @@ careless call work (`step(d.sub)` with the result dropped), and it makes
 what-if asked twice applies twice, a result kept past the recipe is a revoked
 proxy, and `produceWithPatches` has no value to be relative to. With the
 snapshot rule the one way to go wrong is to drop the result, which is how
-every operation on a value goes wrong. A draft is still not a value anywhere
-else (`intern`, a `HashMap` key, a `memoize` argument), and the error there
-now says so. **Cost.** The snapshot of the two core draft kinds no longer
+every operation on a value goes wrong. Everywhere else a value is required
+(`intern`, a set member, a map key, a `memoize` argument) a draft was at
+first refused, with an error that said to pass `current(draft)`; since D57 it
+stands for its current value there too. **Cost.** The snapshot of the two core draft kinds no longer
 tree-shakes away with `current()`: a bundle importing `produce` alone grows
 by 1.2 KB minified (330 B gzipped); one that already imports `current` by
 0.2 KB. DESIGN.md §7.1.
@@ -1349,14 +1350,76 @@ with live drafts in it, where `ValueList.toArray()` is the frozen canonical
 snapshot. Inspection (`console.log`) walks what the draft holds and drafts
 nothing. **Rejected:** a separate draft-yielding iterator (`drafts()`) beside
 a value-yielding default: two walks to choose between, and the default the
-wrong one for a recipe. **Not decided here:** set members. A member's content
-is its identity, so an edited member is a deletion and an addition that may
-collide with a member already there; until that has a rule, sets hand out
-values. **Cost.** Breaking: the element type of the iterators is `Draft<T>`,
+wrong one for a recipe. Set members are the exception, and stay values:
+D57. **Cost.** Breaking: the element type of the iterators is `Draft<T>`,
 and code that compared an iterated element to a base element by `===` now
 compares a draft. `DraftMap` iteration order is the base's, then the keys
 the recipe added (it was: untouched base entries, then everything touched);
 the order of an unordered map was never API.
+
+### D57. Set members are not drafted: a member's content is its identity
+
+Iterating a `DraftSet` or a `DraftOrderedSet` hands out its members as the
+values they are, the one exception to D53. A member is edited by saying what
+that is: for every member, `d.tags = castDraft(d.tags.map((t) => ({ ...t, n:
+0 })))`; for one, `d.s.delete(m); d.s.add({ ...m, n: 0 })`, over a copy when
+in a loop, since a member added to a set being walked is visited too, as on
+a native `Set`.
+
+Going in, it is the same rule from the other side: **where a value is
+required, a draft stands for the value it holds right now.** `add(x)`, a map
+key, and an argument to `intern`, `deepHash`, `HashMap` or `memoize` take a
+draft as its snapshot, which is `current(draft)`. A set member and a key have
+no location to follow a draft from (D36), so "right now" is the only reading
+there is, and later edits to that draft do not reach the set, where a list
+slot holding the same draft follows it to the end of the recipe. This was
+half true by accident before: a draft of a plain record is a Proxy, `intern`
+walked it as raw data, and the content it had was admitted; but the walk
+read children through the proxy, which hands out drafts, and the first
+collection among them was refused ("this DraftList is a draft, not a value"),
+as was any collection draft given directly. So `d.seen.add(d.todo)` worked
+until a todo held a list. Now every draft is resolved before the walk, through
+a registration the draft core makes in the leaf module, since `intern` cannot
+import it; an untouched draft is its base, in O(1). No collection can hold a
+draft as a key or a member, which a recipe's end would have revoked inside
+it. The check is gated on a recipe being in progress, outside of which no
+live draft exists: ungated, the property read cost raw `deepHash` about 5%
+(1.04 to 1.06 times `main`, interleaved in one process); gated, it is inside
+the noise (0.97 to 1.05). A draft that has outlived its recipe is refused as before, and
+the error says that.
+
+**Why.** A set holds its members by content, so there is no editing one in
+place: changing a member is removing it and adding another, and the other
+may already be there. Two members edited to the same content are one member,
+and the set has shrunk. Under value semantics that is the right answer, and
+it is what `map` on a set has always given, where nobody is surprised by it.
+Behind a `for…of` it is a member that disappears. Drafting members would
+also need rules that nothing suggests: what `size` and `has` answer between
+the edit and the end of the recipe, when a member's final content is not yet
+known (answer by the original members and they contradict `current(d.s)`;
+answer exactly and the set must track which member drafts changed, which
+`markChanged` does not tell a parent); what becomes of a draft whose
+original is deleted while it is held; which position survives a collision in
+an `OrderedSet`; and an inverse patch that must not delete the member that
+was already there. And it compounds, because a set can be a member of a set:
+an edit to a member of the inner one changes the inner set's identity, which
+is a removal and an addition in the outer one, at every level up. immer
+drafts set members and meets none of this, because a native `Set` holds its
+members by reference: two edited objects with equal content stay two. A data
+model that wants to edit records in place has an identity beside the
+content, an id, and the collection for that is a map keyed by it, whose
+values are drafted on iteration like any other. **Rejected:** drafting
+members with edits that land at finalize while `has` and `size` answer by
+the originals: cheap, and `d.s.has(x)` disagrees with `current(d.s).has(x)`
+inside one recipe. **Rejected:** drafting members with exact reads, through a
+child-changed hook in the draft core: consistent, and all of the above to
+specify, for an operation the set algebra and `map` already express.
+**Cost.** `for (const m of d.s) m.n = 0` throws the engine's read-only
+`TypeError`, which valsem cannot replace with a better one (the member is a
+frozen plain object), and under `skipFreezing()` it writes into the pooled
+member unnoticed. The direction is the reversible one: handing out drafts
+later would change an element type from `T` to `Draft<T>` and break almost
+nobody; taking them back would.
 
 ### D54. The functional reads: `Array`'s on `ValueList`, five of them on the sets, and they do not draft
 

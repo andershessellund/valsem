@@ -16,7 +16,7 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
-import { same, inspectAs, DRAFT_STATE, type Inspect, type InspectOptions } from './shared.js';
+import { same, inspectAs, DRAFT_STATE, _setDraftValue, _recipes, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
@@ -117,9 +117,11 @@ export function _currentScope(): Scope | undefined {
 export function _runInScope<T>(body: () => T): T {
   const scope: Scope = { parent: currentScope, states: [] };
   currentScope = scope;
+  _recipes(1);
   try {
     return body();
   } finally {
+    _recipes(-1);
     for (const s of scope.states) {
       s.revoked = true;
       s.revoke?.();
@@ -355,6 +357,12 @@ let coreSnapshot: ((state: DraftState) => unknown) | undefined;
 export function _setCoreSnapshot(fn: (state: DraftState) => unknown): void {
   coreSnapshot = fn;
 }
+
+// Where a value is required and a draft is given (a set member, a map key, an
+// argument to intern, deepHash or memoize), the draft stands for its snapshot.
+// The lowest layer asks through this registration; it cannot import this
+// module, and where there is a draft this module has loaded.
+_setDraftValue((draft) => snapshotOf(draft));
 
 /**
  * The value `value` stands for right now: a draft becomes its current
