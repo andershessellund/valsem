@@ -1293,6 +1293,43 @@ tree-shakes away with `current()`: a bundle importing `produce` alone grows
 by 1.2 KB minified (330 B gzipped); one that already imports `current` by
 0.2 KB. DESIGN.md §7.1.
 
+### D53. Iterating a draft collection hands out drafts
+
+`for…of`, `forEach`, `values()` and `entries()` on a `DraftList`, a
+`DraftMap` and a `DraftOrderedMap` yield what `get` yields: the child's draft
+where it can be drafted, the value where it cannot. Keys come as values, and
+so do the members of a `DraftSet` and a `DraftOrderedSet`. `DraftList`'s
+iterator goes by index and is live, as an `Array`'s is.
+
+**Why.** This reverses the first rule, "iteration stays a read, only `get`
+hands out a draft", which was argued from cost: walking a large map should
+draft nothing. But a loop written in a recipe is there to edit, and the rule
+made the commonest recipe there is, `d.todos.forEach((t) => { t.done = true;
+})`, throw the engine's bare "Cannot assign to read only property", on a
+`DraftList` and not on a plain array draft, whose proxy had always drafted
+what a loop read. With `skipFreezing()` the same loop did worse than throw:
+it wrote into the pooled canonical element and `produce` returned the base.
+The cost that argued for the rule is 0.3 µs an element, measured on 10 000
+records (Node 26): a read-only walk 0.17 ms → 2.4 ms for a list, 0.37 ms →
+3.4 ms for a map, which is what the plain array draft has always paid
+(3.5 ms), and nothing beside the edits the loop is there to make (12 ms to
+edit all 10 000). A list of primitives drafts nothing and pays the by-index
+walk, 17 → 32 ns an element. The read that drafts nothing is still there and
+says so: `current(d.todos)`, `slice()`, the snapshot reads, 0.1 ms.
+`toArray()` became one of them; it had been `[...this]`, an unfrozen array
+with live drafts in it, where `ValueList.toArray()` is the frozen canonical
+snapshot. Inspection (`console.log`) walks what the draft holds and drafts
+nothing. **Rejected:** a separate draft-yielding iterator (`drafts()`) beside
+a value-yielding default: two walks to choose between, and the default the
+wrong one for a recipe. **Not decided here:** set members. A member's content
+is its identity, so an edited member is a deletion and an addition that may
+collide with a member already there; until that has a rule, sets hand out
+values. **Cost.** Breaking: the element type of the iterators is `Draft<T>`,
+and code that compared an iterated element to a base element by `===` now
+compares a draft. `DraftMap` iteration order is the base's, then the keys
+the recipe added (it was: untouched base entries, then everything touched);
+the order of an unordered map was never API.
+
 ## Non-goals
 
 Permanently out of scope: mutable built-ins as values; cycle support; wire

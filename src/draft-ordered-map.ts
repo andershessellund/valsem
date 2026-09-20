@@ -228,29 +228,39 @@ export class DraftOrderedMap<K, V> {
     s.edits = new Map();
   }
 
-  *entries(): IterableIterator<[K, V]> {
-    const s = this.#state;
-    for (const k of s.work.keys()) yield [k as K, this.#current(s, k) as V];
+  /**
+   * The entries in order, each value drafted if it can be, as `get` hands it
+   * out: `for (const [, v] of d.m) v.done = true` edits. A walk that only
+   * reads is cheaper over `current(d.m)`, which drafts nothing.
+   */
+  *entries(): IterableIterator<[K, Draft<V> | (V & undefined)]> {
+    for (const k of this.#state.work.keys()) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
   }
 
   keys(): IterableIterator<K> {
     return this.#state.work.keys() as IterableIterator<K>;
   }
 
-  *values(): IterableIterator<V> {
+  *values(): IterableIterator<Draft<V> | (V & undefined)> {
     for (const [, v] of this.entries()) yield v;
   }
 
-  [Symbol.iterator](): IterableIterator<[K, V]> {
+  [Symbol.iterator](): IterableIterator<[K, Draft<V> | (V & undefined)]> {
     return this.entries();
+  }
+
+  /** The entries as they are held, nothing drafted: what inspection walks. */
+  *#peek(): IterableIterator<[K, V]> {
+    const s = this.#state;
+    for (const k of s.work.keys()) yield [k as K, this.#current(s, k) as V];
   }
 
   /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
   [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
-    return inspectDraft('DraftOrderedMap', this, () => this.size, () => new Map(this), depth, options, inspect);
+    return inspectDraft('DraftOrderedMap', this, () => this.size, () => new Map(this.#peek()), depth, options, inspect);
   }
 
-  forEach(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => void, thisArg?: unknown): void {
+  forEach(fn: (value: Draft<V> | (V & undefined), key: K, map: DraftOrderedMap<K, V>) => void, thisArg?: unknown): void {
     for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
   }
 

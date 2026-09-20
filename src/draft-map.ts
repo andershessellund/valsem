@@ -141,38 +141,61 @@ export class DraftMap<K, V> {
     s.assigned.clear();
   }
 
-  *entries(): IterableIterator<[K, V]> {
+  /**
+   * The entries, each value drafted if it can be, as `get` hands it out:
+   * `for (const [, v] of d.m) v.done = true` edits. The base's entries come
+   * first, in the base's order, then the keys the recipe added. A walk that
+   * only reads is cheaper over `current(d.m)`, which drafts nothing.
+   */
+  *entries(): IterableIterator<[K, Draft<V> | (V & undefined)]> {
     const s = this.#state;
+    // `get` records a child draft in `edits` as the walk goes, so the second
+    // loop takes the keys the base does not have, not "whatever is in edits".
     if (!s.cleared) {
-      for (const [k, v] of s.base) {
-        if (s.assigned.get(k) === false || s.edits.has(k)) continue;
-        yield [k as K, v as V];
+      for (const k of s.base.keys()) {
+        if (s.assigned.get(k) === false) continue;
+        yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
       }
     }
-    for (const [k, v] of s.edits) {
-      if (s.assigned.get(k) === false) continue;
-      yield [k as K, v as V];
+    for (const k of s.edits.keys()) {
+      if (s.assigned.get(k) === false || (!s.cleared && s.base.has(k))) continue;
+      yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
     }
   }
 
   *keys(): IterableIterator<K> {
-    for (const [k] of this.entries()) yield k;
+    for (const [k] of this.#peek()) yield k;
   }
 
-  *values(): IterableIterator<V> {
+  *values(): IterableIterator<Draft<V> | (V & undefined)> {
     for (const [, v] of this.entries()) yield v;
   }
 
-  [Symbol.iterator](): IterableIterator<[K, V]> {
+  [Symbol.iterator](): IterableIterator<[K, Draft<V> | (V & undefined)]> {
     return this.entries();
+  }
+
+  /** The entries as they are held, nothing drafted: what `keys()` and inspection walk. */
+  *#peek(): IterableIterator<[K, V]> {
+    const s = this.#state;
+    if (!s.cleared) {
+      for (const [k, v] of s.base) {
+        if (s.assigned.get(k) === false) continue;
+        yield [k as K, (s.edits.has(k) ? s.edits.get(k) : v) as V];
+      }
+    }
+    for (const [k, v] of s.edits) {
+      if (s.assigned.get(k) === false || (!s.cleared && s.base.has(k))) continue;
+      yield [k as K, v as V];
+    }
   }
 
   /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
   [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
-    return inspectDraft('DraftMap', this, () => this.size, () => new Map(this), depth, options, inspect);
+    return inspectDraft('DraftMap', this, () => this.size, () => new Map(this.#peek()), depth, options, inspect);
   }
 
-  forEach(fn: (value: V, key: K, map: DraftMap<K, V>) => void, thisArg?: unknown): void {
+  forEach(fn: (value: Draft<V> | (V & undefined), key: K, map: DraftMap<K, V>) => void, thisArg?: unknown): void {
     for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
   }
 

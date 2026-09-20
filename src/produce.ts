@@ -1252,7 +1252,6 @@ export type RecipeReturn<T> =
  */
 function valueOfBase<T>(base: T): T {
   if (stateOf(base) === undefined) return base;
-  _setCoreSnapshot(_snapshotCore); // what current.ts registers; a produce-only bundle has not
   return snapshotOf(base) as T;
 }
 
@@ -1261,6 +1260,11 @@ function runProduce<T>(
   recipe: (draft: Draft<T>) => RecipeReturn<T>,
   recorder: PatchRecorder | undefined,
 ): T {
+  // What current.ts registers too, but a bundle that never calls current()
+  // has dropped that module, and a collection draft's reads go through the
+  // snapshot all the same: `d.todos.slice()` over an edited record, a draft as
+  // the base. One assignment; the function is in this module either way (D47).
+  _setCoreSnapshot(_snapshotCore);
   const base = valueOfBase(given);
   return _runInScope(() => {
     let rootState: DraftState | undefined;
