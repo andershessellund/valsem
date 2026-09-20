@@ -12,6 +12,7 @@ import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { ValueList } from './value-list.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 describe('DraftMap — iteration, size, clear', () => {
   const base = ValueMap.from<string, number>([
@@ -276,5 +277,78 @@ describe('record and array proxy traps', () => {
     expect(() => map!.get('k')).toThrow(/escaped its produce\(\) call/);
     expect(() => set!.has(1)).toThrow(/escaped its produce\(\) call/);
     expect(() => list!.get(0)).toThrow(/escaped its produce\(\) call/);
+  });
+});
+
+describe('an array draft is an array to reflection too', () => {
+  it('describes its indices and its length as own, writable properties', () => {
+    produce(intern([10, 20]), (d) => {
+      expect(Object.getOwnPropertyDescriptor(d, 0)).toEqual({ value: 10, writable: true, configurable: true, enumerable: true });
+      expect(Object.getOwnPropertyDescriptor(d, 'length')).toEqual({ value: 2, writable: true, configurable: false, enumerable: false });
+      expect(Object.getOwnPropertyDescriptor(d, 5)).toBeUndefined();
+      d[1] = 21;
+      d.push(30);
+      expect(Object.getOwnPropertyDescriptor(d, 1)!.value).toBe(21); // from the copy, once there is one
+      expect(Object.getOwnPropertyDescriptor(d, 2)!.value).toBe(30);
+      expect(Object.keys(d)).toEqual(['0', '1', '2']);
+    });
+  });
+
+  it('2^32 - 1 is not an index, as on any array: it reads as a property that is not there', () => {
+    produce(intern([1, 2]), (d) => {
+      const notAnIndex = d as unknown as Record<string, unknown>;
+      expect(notAnIndex['4294967295']).toBeUndefined();
+      expect('4294967295' in d).toBe(false);
+      expect(notAnIndex['4294967294']).toBeUndefined(); // an index, merely out of range
+      expect(d.length).toBe(2);
+    });
+  });
+});
+
+describe('record patches for undefined and for what was never there', () => {
+  it('assigning undefined to a key is its deletion, in the patches as in the value', () => {
+    const base = intern({ a: 1, b: 2 }) as { a?: number; b: number };
+    const [next, patches, inverse] = produceWithPatches(base, (d) => {
+      d.a = undefined;
+    });
+    expect(next).toBe(intern({ b: 2 }));
+    expect(patches).toEqual([{ kind: 'record.delete', path: [], key: 'a' }]);
+    expect(inverse).toEqual([{ kind: 'record.set', path: [], key: 'a', value: 1 }]);
+    expectPatchRoundTrip(base, next, patches, inverse);
+  });
+
+  it('deleting, or assigning undefined to, a key that was never there records nothing', () => {
+    const base = intern({ a: 1 }) as Record<string, number | undefined>;
+    const [next, patches, inverse] = produceWithPatches(base, (d) => {
+      delete d['never'];
+      d['nor'] = undefined;
+      d['a'] = 2;
+    });
+    expect(next).toBe(intern({ a: 2 }));
+    expect(patches).toEqual([{ kind: 'record.set', path: [], key: 'a', value: 2 }]);
+    expectPatchRoundTrip(base, next, patches, inverse);
+  });
+
+  it('a raw record adopted into a recipe drops its undefined-valued keys, like any record', () => {
+    const next = produce(intern({ held: null as unknown }), (d) => {
+      d.held = { kept: 1, dropped: undefined, deep: [{ also: undefined, n: 2 }] };
+    });
+    expect(next).toBe(intern({ held: { kept: 1, deep: [{ n: 2 }] } }));
+    expect(Object.hasOwn(next.held as object, 'dropped')).toBe(false);
+  });
+});
+
+describe('an array recipe that rewrites its end with what was there', () => {
+  it('nets out to the base with no patches, the first time and from the remembered transition', () => {
+    const base = intern([{ id: 1 }, { id: 2 }, { id: 3 }]);
+    for (let run = 0; run < 3; run++) {
+      const [next, patches, inverse] = produceWithPatches(base, (d) => {
+        const last = d.pop()!;
+        d.push({ id: last.id }); // an equal element, built anew
+      });
+      expect(next).toBe(base);
+      expect(patches).toEqual([]);
+      expect(inverse).toEqual([]);
+    }
   });
 });

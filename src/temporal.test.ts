@@ -1,20 +1,18 @@
 // Temporal value semantics (`valsem/temporal`).
 //
 // Importing the module registers globally, so the import itself is the setup.
-// Native Temporal is a recent-Node feature: without the global the whole
-// file skips (the module throws at import by design — see
-// temporal-missing.test.ts), so a Node-floor CI leg stays green while the
-// latest-Node leg runs these for real.
+// The Temporal is the runtime's own where it has one and the polyfill where
+// it does not (temporal.test-helpers.ts), so nothing here skips: the
+// Node-floor CI leg runs these against the polyfill, the latest-Node leg
+// against native Temporal. Without any global the module throws at import,
+// by design — see temporal-missing.test.ts.
 import { describe, it, expect } from 'vitest';
+import { Temporal as T } from './temporal.test-helpers.js';
 import { deepEqual, deepHash, intern } from './index.js';
 
-const HAS_TEMPORAL = typeof (globalThis as { Temporal?: unknown }).Temporal !== 'undefined';
-if (HAS_TEMPORAL) await import('./temporal.js');
-// Node's Temporal has no lib types yet; the tests talk to it untyped.
-const T = (globalThis as { Temporal?: any }).Temporal;
-const describeTemporal = describe.skipIf(!HAS_TEMPORAL);
+await import('./temporal.js');
 
-describeTemporal('temporal — value semantics', () => {
+describe('temporal — value semantics', () => {
   it('every kind compares structurally instead of by reference', () => {
     const pairs: [string, unknown, unknown][] = [
       ['PlainDate', T.PlainDate.from('2026-08-31'), T.PlainDate.from('2026-08-31')],
@@ -70,7 +68,7 @@ describeTemporal('temporal — value semantics', () => {
   });
 });
 
-describeTemporal('temporal — ZonedDateTime is strictly field-wise: time-zone aliases are distinct values', () => {
+describe('temporal — ZonedDateTime is strictly field-wise: time-zone aliases are distinct values', () => {
   // equals() resolves link names to their primary identifier; the accessors
   // and toString() keep the identifier as supplied. Substitutability sides
   // with the accessors — and does not depend on the runtime's link table.
@@ -147,7 +145,7 @@ describeTemporal('temporal — ZonedDateTime is strictly field-wise: time-zone a
   });
 });
 
-describeTemporal('temporal — Duration is strictly field-wise, not Duration.compare', () => {
+describe('temporal — Duration is strictly field-wise, not Duration.compare', () => {
   it('treats P1D and PT24H as distinct even though compare() says 0', () => {
     const day = T.Duration.from('P1D');
     const hours = T.Duration.from('PT24H');
@@ -204,7 +202,7 @@ describeTemporal('temporal — Duration is strictly field-wise, not Duration.com
   });
 });
 
-describeTemporal('temporal — interning', () => {
+describe('temporal — interning', () => {
   it('pools Temporal values as canonical instances', () => {
     const a = T.PlainDate.from('2026-08-31');
     const b = T.PlainDate.from('2026-08-31');
@@ -231,5 +229,15 @@ describeTemporal('temporal — interning', () => {
     expect(() => intern(new Set())).toThrow(/ValueSet\.from/);
     // Top-level and nested fail the same way.
     expect(() => intern({ at: new Date(0) })).toThrow(/Temporal\.Instant/);
+  });
+});
+
+describe('temporal — registration', () => {
+  it('registerTemporal() again is a no-op: importing the module twice, or calling it by hand, changes nothing', async () => {
+    const { registerTemporal } = await import('./temporal.js');
+    const before = intern(T.PlainDate.from('2026-08-31'));
+    expect(() => registerTemporal()).not.toThrow();
+    expect(() => registerTemporal()).not.toThrow();
+    expect(intern(T.PlainDate.from('2026-08-31'))).toBe(before);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ValueMap } from './value-map.js';
 import { hashCode, interned } from './deep-equal.js';
+import { withPolluted } from './pollution.test-helpers.js';
 
 describe('ValueMap', () => {
   it('empty maps are identical', () => {
@@ -143,15 +144,12 @@ describe('ValueMap — undefined IS a value here, unlike in records', () => {
 
 describe('ValueMap.fromObject — own keys only', () => {
   it('does not admit inherited enumerable keys (prototype pollution) as entries', () => {
-    (Object.prototype as unknown as Record<string, unknown>)['polluted'] = 7;
-    try {
+    withPolluted(Object.prototype, 'polluted', 7, () => {
       const m = ValueMap.fromObject({ a: 1 });
       expect(m.size).toBe(1);
       expect([...m.keys()]).toEqual(['a']);
       expect(m.has('polluted')).toBe(false);
-    } finally {
-      delete (Object.prototype as unknown as Record<string, unknown>)['polluted'];
-    }
+    });
   });
 });
 

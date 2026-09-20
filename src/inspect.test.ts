@@ -83,3 +83,19 @@ describe('Symbol.toStringTag', () => {
     expect(Object.keys(value)).toEqual([]); // a prototype getter: no own property, nothing for a spread to copy
   });
 });
+
+describe('a draft that outlived its recipe', () => {
+  it('inspects as revoked instead of throwing from inside console.log', () => {
+    // Node answers for a revoked Proxy itself (`<Revoked Proxy>`), before any
+    // hook; the draft's own hook says the same where a runtime does ask it.
+    let leakedRecord: unknown;
+    let leakedArray: unknown;
+    produce(intern({ list: [1, 2] }), (d) => {
+      leakedRecord = d;
+      leakedArray = d.list;
+    });
+    expect(inspect(leakedRecord)).toMatch(/revoked/i);
+    expect(inspect(leakedArray)).toMatch(/revoked/i);
+    expect(inspect({ holding: leakedRecord })).toMatch(/revoked/i);
+  });
+});

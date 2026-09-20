@@ -139,7 +139,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
       if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && !_isPlainRecord(raw)) {
         throw new TypeError(
           `valsem: memoize — ${name} returned an instance of ` +
-            `${_ctorOf(raw)?.name ?? 'an anonymous class'}, which is not a value ` +
+            `${_ctorOf(raw)?.name || 'an anonymous class'}, which is not a value ` +
             `(${(e as Error).message}). Memoized results are interned and shared: return data, or a ` +
             'type valsem can canonicalise.',
         );

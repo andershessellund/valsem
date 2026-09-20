@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { HashSet } from './hash-set.js';
-import { HashMap } from './hash-map.js';
 import { intern, isCanonical } from './intern.js';
 import { ValueList } from './value-list.js';
 
@@ -69,14 +68,5 @@ describe('HashSet', () => {
     for (let i = 0; i < 3000; i += 2) expect(s.delete({ i, s: `k${i}` })).toBe(true);
     expect(s.size).toBe(1500);
     for (let i = 1; i < 3000; i += 2) expect(s.has({ i, s: `k${i}` })).toBe(true);
-  });
-});
-
-describe('HashMap.from', () => {
-  it('builds from entries', () => {
-    const m = HashMap.from([[{ a: 1 }, 'x'], [{ a: 1 }, 'y']]);
-    expect(m.size).toBe(1);
-    expect(m.get({ a: 1 })).toBe('y');
-    expect(isCanonical([...m.keys()][0])).toBe(true);
   });
 });

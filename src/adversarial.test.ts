@@ -15,6 +15,7 @@ import { configureHasher } from './hasher.js';
 import { produce, produceWithPatches, applyPatches } from './produce.js';
 import { ValueMap } from './value-map.js';
 import { HashMap } from './hash-map.js';
+import { withPolluted } from './pollution.test-helpers.js';
 
 /** `{name:'a', n:1}` merged with a payload — built by JSON.parse, because
  * `Object.assign` uses [[Set]] and would swallow a `__proto__` key. */
@@ -125,21 +126,18 @@ describe('prototype-chain keys reach records only as OWN keys', () => {
 
 describe('prototype pollution cannot split equality from hashing', () => {
   it('records with Object.prototype and null prototype agree under pollution', () => {
-    const proto = Object.prototype as unknown as Record<string, unknown>;
-    proto['polluted'] = 'yes';
-    try {
+    withPolluted(Object.prototype, 'polluted', 'yes', () => {
       const a = { x: 1 };
       const b = Object.assign(Object.create(null), { x: 1 }) as Record<string, unknown>;
       expect(deepEqual(a, b)).toBe(true);
       expect(deepHash(a)).toBe(deepHash(b));
+      expect(deepHash({ x: 1 })).toBe(deepHash(a));
       expect(intern(a)).toBe(intern(b));
       expect(intern(a)).toBe(intern({ x: 1 }));
       expect(Object.hasOwn(intern(a), 'polluted')).toBe(false);
       expect(ValueMap.fromObject({ x: 1 }).size).toBe(1);
       expect(produce(intern({ x: 1 }), () => {})).toBe(intern({ x: 1 }));
-    } finally {
-      delete proto['polluted'];
-    }
+    });
   });
 });
 

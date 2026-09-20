@@ -28,7 +28,6 @@ import {
   trieIsSubset,
   trieIsDisjoint,
   NOT_FOUND,
-  _trieStats,
   type HNode,
 } from './hamt.js';
 
@@ -218,8 +217,10 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   }
 
   [equalsSym](other: unknown): boolean {
-    // Hash consing makes deep equality a pointer comparison on roots.
-    return other instanceof ValueSet && (other as ValueSet<T>).#root === this.#root;
+    // Hash consing makes deep equality a pointer comparison on roots. `#root in`
+    // and not `instanceof`: an object that merely inherits the prototype has no
+    // root to compare, and a predicate answers false, it does not throw.
+    return typeof other === 'object' && other !== null && #root in other && (other as ValueSet<T>).#root === this.#root;
   }
 
   /** The `produce` draft protocol: a {@link DraftSet} over this set. */
@@ -260,10 +261,5 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
     const members: unknown[] = [];
     for (const raw of values) members.push(intern(raw));
     return ValueSet.#for<T>(trieFrom(CFG, members, null));
-  }
-
-  /** @internal Trie node-pool sizes — exposed for sharing tests. */
-  static _nodeStats(): { bnodes: number; cnodes: number } {
-    return _trieStats(CFG);
   }
 }

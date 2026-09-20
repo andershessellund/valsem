@@ -28,6 +28,7 @@ import { deepHash } from './deep-hash.js';
 import { createInternPool } from './intern-pool.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 // A custom patch kind, registered by declaration merging so it narrows exactly.
 declare module './draft-core.js' {
@@ -196,8 +197,7 @@ describe('a third-party draftable', () => {
       { kind: 'record.set', path: ['range', 'meta'], key: 'label', value: 'z' },
       { kind: 'interval.set', path: ['range'], lo: 2, hi: 10 },
     ]);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 
   it('supports current() and original() through `snapshot`', () => {
@@ -259,5 +259,25 @@ describe('a third-party draftable', () => {
     expectTypeOf<Draft<Interval>>().toEqualTypeOf<IntervalDraft>();
     expectTypeOf<Draft<{ range: Interval }>>().toEqualTypeOf<{ range: IntervalDraft }>();
     expectTypeOf<Draft<ValueList<Interval>>['get']>().returns.toEqualTypeOf<IntervalDraft>(); // drafts all the way down, and get() names an element, so no undefined
+  });
+});
+
+describe('patches against a third-party draftable', () => {
+  const state = intern({ range: Interval.of(0, 10, { label: 'a' }) });
+
+  it('a path goes where its childAt leads, and nowhere else', () => {
+    const relabelled = applyPatches(state, [{ kind: 'record.set', path: ['range', 'meta'], key: 'label', value: 'b' }]);
+    expect(relabelled).toBe(intern({ range: Interval.of(0, 10, { label: 'b' }) }));
+    for (const path of [['range', 'lo'], ['range', 'nope'], ['range', 'meta', 'label', 'deeper']]) {
+      expect(() => applyPatches(state, [{ kind: 'record.set', path, key: 'k', value: 1 }])).toThrow(/^valsem: (patch path segment|cannot apply a 'record\.set' patch to a value that is not there)/);
+    }
+  });
+
+  it('a replace below it is refused unless the type says how (replaceChild): produce cannot write into a type it does not know', () => {
+    expect(() => applyPatches(state, [{ kind: 'replace', path: ['range', 'meta'], value: { label: 'z' } }])).toThrow(
+      /cannot apply a 'replace' patch inside a interval draft/,
+    );
+    // The slot the interval itself sits in is the record's, and can be replaced.
+    expect(applyPatches(state, [{ kind: 'replace', path: ['range'], value: Interval.of(1, 2) }])).toBe(intern({ range: Interval.of(1, 2) }));
   });
 });

@@ -412,3 +412,23 @@ describe('ValueList.diff', () => {
     );
   });
 });
+
+describe('ValueList.from — anything iterable or array-like', () => {
+  it('a Set, a generator, an array-like and another ValueList all build the same list', () => {
+    function* abc(): Generator<string> {
+      yield* ['a', 'b', 'c'];
+    }
+    const expected = ValueList.of('a', 'b', 'c');
+    expect(ValueList.from(new Set(['a', 'b', 'c']))).toBe(expected);
+    expect(ValueList.from(abc())).toBe(expected);
+    expect(ValueList.from({ length: 3, 0: 'a', 1: 'b', 2: 'c' })).toBe(expected);
+    expect(ValueList.from(expected)).toBe(expected);
+    expect(ValueList.from(new Set())).toBe(ValueList.empty());
+  });
+
+  it('a list short enough to be all tail has no tree, and says so to the structure inspectors', () => {
+    expect(ValueList.of(1, 2)._structure()).toEqual({ tree: null, tail: [1, 2] });
+    expect(ValueList.empty()._structure()).toEqual({ tree: null, tail: [] });
+    expect(ValueList.of(1, 2)._height).toBe(0);
+  });
+});

@@ -23,11 +23,12 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { intern } from './intern.js';
-import { applyPatches, isDraft, produceWithPatches } from './produce.js';
+import { isDraft, produceWithPatches } from './produce.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { mutableClone, plainTree } from './property.test-helpers.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 // --- op model over plain data ----------------------------------------------
 
@@ -209,8 +210,7 @@ describe('property — produce convergence (plain data)', () => {
         });
 
         expect(actual).toBe(expected);
-        expect(applyPatches(base, patches)).toBe(actual);
-        expect(applyPatches(actual, inverse)).toBe(base);
+        expectPatchRoundTrip(base, actual, patches, inverse);
         if (actual === base) {
           expect(patches).toEqual([]);
           expect(inverse).toEqual([]);
@@ -321,8 +321,7 @@ describe('property — produce convergence (collection drafts)', () => {
           });
 
           expect(actual).toBe(expected);
-          expect(applyPatches(base, patches)).toBe(actual);
-          expect(applyPatches(actual, inverse)).toBe(base);
+          expectPatchRoundTrip(base, actual, patches, inverse);
           if (actual === base) {
             expect(patches).toEqual([]);
             expect(inverse).toEqual([]);

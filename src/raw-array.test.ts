@@ -82,3 +82,22 @@ describe('RawArray', () => {
     expect(ValueList.from(view.slice())).toBe(ValueList.from(rows(20)));
   });
 });
+
+describe('RawArray.from — anything iterable or array-like', () => {
+  it('takes a Set, a generator and an array-like, and copies an array it is given', () => {
+    function* rowsOf(): Generator<{ id: number }> {
+      yield { id: 1 };
+      yield { id: 2 };
+    }
+    for (const source of [new Set([{ id: 1 }, { id: 2 }]), rowsOf(), { length: 2, 0: { id: 1 }, 1: { id: 2 } }]) {
+      const view = RawArray.from<{ id: number }>(source as Iterable<{ id: number }>);
+      expect(view.length).toBe(2);
+      expect(view.get(1)).toBe(intern({ id: 2 }));
+      expect(view.slice()).toBe(intern([{ id: 1 }, { id: 2 }]));
+    }
+    const mine = [{ id: 1 }];
+    const view = RawArray.from(mine);
+    mine.push({ id: 2 }); // the caller's array, afterwards: not the view's
+    expect(view.length).toBe(1);
+  });
+});

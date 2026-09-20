@@ -8,6 +8,7 @@ import { ValueSet } from './value-set.js';
 import { ValueList } from './value-list.js';
 import type { DraftMap } from './draft-map.js';
 import type { DraftList } from './draft-list.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 const base = intern({
   title: 'x',
@@ -194,6 +195,46 @@ describe('current()', () => {
       expectTypeOf(current(d)).toEqualTypeOf<typeof base>();
       expectTypeOf(original(d.index)).toEqualTypeOf<ValueMap<string, { n: number }>>();
       expectTypeOf(current(d.items)).toEqualTypeOf<ValueList<number>>();
+    });
+  });
+});
+
+// A law of every collection's draft, so over the roster: mid-recipe,
+// current() is the canonical value the draft would finalize to right now,
+// original() is the base, and neither disturbs the recipe.
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('current() and original() — a %s draft', (_name, c) => {
+  it('at the root of a recipe and nested in a record', () => {
+    const base = c.of('a');
+    const next = produce(base, (d) => {
+      expect(current(d)).toBe(base);
+      c.draftAdd(d, { n: 1 });
+      expect(current(d)).toBe(c.of('a', { n: 1 }));
+      expect(original(d)).toBe(base);
+      c.draftAdd(d, 'z');
+    });
+    expect(next).toBe(c.of('a', { n: 1 }, 'z'));
+
+    const state = intern({ held: base });
+    produce(state, (d) => {
+      c.draftAdd(d.held, 'b');
+      expect(current(d)).toBe(intern({ held: c.of('a', 'b') }));
+      expect(current(d.held)).toBe(c.of('a', 'b'));
+      expect(original(d.held)).toBe(base);
+    });
+  });
+});
+
+describe('current() through raw material the recipe assigned', () => {
+  it('a raw ARRAY holding a draft is snapshotted through; one holding none is returned as it is', () => {
+    produce(intern({ item: { n: 1 }, held: null as unknown }), (d) => {
+      d.item.n = 2;
+      const withDraft = [d.item, 'x'];
+      const without = [1, [2, 3]];
+      d.held = { withDraft, without };
+      const snap = current(d) as unknown as { held: { withDraft: unknown[]; without: unknown[] } };
+      expect(snap.held.withDraft[0]).toBe(intern({ n: 2 }));
+      expect(isDraft(snap.held.withDraft[0])).toBe(false);
+      expect(current(d)).toBe(intern({ item: { n: 2 }, held: { withDraft: [{ n: 2 }, 'x'], without: [1, [2, 3]] } }));
     });
   });
 });

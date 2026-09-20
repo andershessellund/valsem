@@ -13,24 +13,8 @@ import { deepEqual, hashCode, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { HashMap } from './hash-map.js';
 import { ValueDate } from './value-date.js';
+import { runStarts } from './ordered.test-helpers.js';
 
-
-/** The index at which each run (leaf, then the open tail) of `list` starts — where an inserted key becomes an anchor. */
-function runStarts(list: ValueList<unknown>): number[] {
-  const { tree, tail } = list._structure();
-  const starts: number[] = [];
-  let pos = 0;
-  const walk = (node: unknown[]): void => {
-    if (node.length !== 0 && Array.isArray(node[0])) for (const kid of node) walk(kid as unknown[]);
-    else {
-      starts.push(pos);
-      pos += node.length;
-    }
-  };
-  if (tree !== null) walk(tree as unknown[]);
-  if (tail.length !== 0) starts.push(pos);
-  return starts;
-}
 
 const abc = () =>
   OrderedMap.from<string, number>([
@@ -300,5 +284,15 @@ describe('OrderedMap — sizes across tree levels', () => {
     }
     check();
     expect(m).toBe(OrderedMap.from(model));
+  });
+});
+
+describe('OrderedMap — what is not a key has no position and no anchor', () => {
+  it('indexOf is -1 and the anchor inspector answers undefined, for a raw probe too', () => {
+    const m = abc();
+    expect(m.indexOf('missing')).toBe(-1);
+    expect(m._anchorOf('missing')).toBeUndefined();
+    expect(OrderedMap.empty<unknown, number>()._anchorOf({ raw: 1 })).toBeUndefined();
+    expect(m._anchorOf('a')).not.toBeUndefined();
   });
 });

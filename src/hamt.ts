@@ -219,7 +219,10 @@ function memberCompare(a: unknown, b: unknown): number {
     case 7:
       return ordinal(a as object) - ordinal(b as object);
     default:
-      return 0; // undefined/null are singletons — never two distinct
+      // undefined and null are singletons, so never two DISTINCT ones. The
+      // set algebra merges two collision nodes member by member, though, and
+      // there a member meets itself (as `true` meets `true` in case 2).
+      return 0;
   }
 }
 

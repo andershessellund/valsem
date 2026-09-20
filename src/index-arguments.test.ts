@@ -32,6 +32,7 @@ import { OrderedMap } from './ordered-map.js';
 import { applyPatches, produce, produceWithPatches } from './produce.js';
 import { intern } from './intern.js';
 import { indexArg, extentArg, elementIndex, insertionIndex } from './shared.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 // Whole arguments: integers on both sides of every bound, -0, the infinities.
 const WHOLE = [-0, 0, 3, -3, 1e9, -1e9, Infinity, -Infinity] as const;
@@ -393,8 +394,7 @@ describe('a plain-array draft’s mutators', () => {
           expect(Number.isInteger(p.index) && !Object.is(p.index, -0)).toBe(true);
           expect(Number.isInteger(p.remove)).toBe(true);
         }
-        expect(applyPatches(base, patches)).toBe(result);
-        expect(applyPatches(result, inverse)).toBe(base);
+        expectPatchRoundTrip(base, result, patches, inverse);
       }),
       { numRuns: 600 },
     );

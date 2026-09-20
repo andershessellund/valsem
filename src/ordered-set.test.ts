@@ -9,24 +9,8 @@ import { ValueList } from './value-list.js';
 import { intern } from './intern.js';
 import { deepEqual, hashCode, interned } from './deep-equal.js';
 import { HashSet } from './hash-set.js';
+import { runStarts } from './ordered.test-helpers.js';
 
-
-/** The index at which each run (leaf, then the open tail) of `list` starts — where an inserted key becomes an anchor. */
-function runStarts(list: ValueList<unknown>): number[] {
-  const { tree, tail } = list._structure();
-  const starts: number[] = [];
-  let pos = 0;
-  const walk = (node: unknown[]): void => {
-    if (node.length !== 0 && Array.isArray(node[0])) for (const kid of node) walk(kid as unknown[]);
-    else {
-      starts.push(pos);
-      pos += node.length;
-    }
-  };
-  if (tree !== null) walk(tree as unknown[]);
-  if (tail.length !== 0) starts.push(pos);
-  return starts;
-}
 
 describe('OrderedSet', () => {
   it('empty sets are one instance; equal member sequences are one object however built', () => {
@@ -187,5 +171,15 @@ describe('OrderedSet — set-like for the native Set methods', () => {
     expect(new Set([1, 3]).isSubsetOf(s)).toBe(true);
     expect(new Set([1, 2, 3, 4]).isSupersetOf(s)).toBe(true);
     expect(new Set([7]).isDisjointFrom(s)).toBe(true);
+  });
+});
+
+describe('OrderedSet — what is not a member has no position and no anchor', () => {
+  it('indexOf is -1 and the anchor inspector answers undefined, for a raw probe too', () => {
+    const s = OrderedSet.of('a', 'b');
+    expect(s.indexOf('missing')).toBe(-1);
+    expect(s._anchorOf('missing')).toBeUndefined();
+    expect(OrderedSet.empty<unknown>()._anchorOf({ raw: 1 })).toBeUndefined();
+    expect(s._anchorOf('a')).not.toBeUndefined();
   });
 });

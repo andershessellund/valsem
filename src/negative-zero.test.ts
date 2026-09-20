@@ -9,6 +9,7 @@ import { RawArray } from './raw-array.js';
 import { HashMap } from './hash-map.js';
 import { produce } from './produce.js';
 import { current } from './current.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 const isPlusZero = (x: unknown): boolean => Object.is(x, 0);
 
@@ -108,5 +109,35 @@ describe('-0 is stored as +0', () => {
     h.set(-0, 'zero');
     expect(isPlusZero([...h.keys()][0])).toBe(true);
     expect(h.get(0)).toBe('zero');
+  });
+});
+
+// The law itself, over every collection in the roster: whichever door -0 came
+// through (the bulk factory, a persistent operation, a draft inside a recipe,
+// nested in a record), what is read back is +0, a -0 probe finds it, and the
+// result is the very instance the +0 spelling builds. The cases above pin
+// each type's own doors (fromObject, setMany, splice, union, ...).
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('-0 is stored as +0 — %s', (_name, c) => {
+  const allPlusZero = (value: object): boolean => c.contents(value).length > 0 && c.contents(value).every(isPlusZero);
+
+  it('through the factory, a persistent operation, and a draft', () => {
+    expect(allPlusZero(c.of(-0))).toBe(true);
+    expect(allPlusZero(c.chained(-0))).toBe(true);
+    expect(allPlusZero(produce(c.empty(), (d) => c.draftAdd(d, -0)))).toBe(true);
+  });
+
+  it('one value, one instance, whichever spelling came first', () => {
+    expect(c.of(-0)).toBe(c.of(0));
+    expect(c.chained(-0)).toBe(c.of(0));
+    expect(produce(c.empty(), (d) => c.draftAdd(d, -0))).toBe(c.of(0));
+    expect(c.has(c.of(0), -0)).toBe(true);
+    expect(c.has(c.of(-0), 0)).toBe(true);
+  });
+
+  it('nested in what is stored', () => {
+    const stored = c.contents(c.of({ at: [-0] })) as { at: number[] }[];
+    expect(stored.length).toBeGreaterThan(0);
+    for (const record of stored) expect(isPlusZero(record.at[0])).toBe(true);
+    expect(c.of({ at: [-0] })).toBe(c.of({ at: [0] }));
   });
 });

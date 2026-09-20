@@ -16,7 +16,9 @@ jobs:
       matrix:
         # 22 is the runtime floor (`engines`): Set.prototype.union & co.
         # `latest` is where native Temporal ships unflagged, so the
-        # `valsem/temporal` suites run for real there (and self-skip on 22).
+        # `valsem/temporal` suites run against the real thing there, and
+        # against temporal-polyfill on 22. Nothing may skip on either: with
+        # CI set, vitest.config.ts fails the run on a skipped test.
         node: [22, latest]
     name: test (node ${{ matrix.node }})
     steps:

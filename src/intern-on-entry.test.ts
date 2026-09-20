@@ -5,12 +5,48 @@
 // collections (not just wire-decoded ones), closes the mutation-poisoning
 // hazard (raw plain data is frozen at the door), and restores the
 // cross-representation unity toArray() === intern([...contents]).
+//
+// The invariant is a law of every collection, so it is stated first over the
+// roster; what follows pins each of the original three, door by door.
 import { describe, it, expect } from 'vitest';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { intern } from './intern.js';
 import { deepEqual } from './deep-equal.js';
+import { produce } from './produce.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
+
+describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('intern on entry — %s', (_name, c) => {
+  const raw = (): { city: string; at: number[] } => ({ city: 'Aarhus', at: [1, 2] });
+
+  it('whatever is stored is the canonical value, through every door', () => {
+    const canonical = intern(raw());
+    const doors = [c.of(raw()), c.chained(raw()), c.add(c.empty(), raw()), produce(c.empty(), (d) => c.draftAdd(d, raw()))];
+    for (const value of doors) {
+      expect(c.contents(value).length).toBeGreaterThan(0);
+      for (const stored of c.contents(value)) expect(stored).toBe(canonical);
+      expect(value).toBe(doors[0]); // structurally equal raw input converges on one instance
+    }
+    expect(c.of({ at: [1, 2], city: 'Aarhus' })).toBe(doors[0]); // key order is layout
+  });
+
+  it('the caller keeps their object: it is copied at the door, never frozen or aliased', () => {
+    const mine = raw();
+    const value = c.of(mine);
+    expect(Object.isFrozen(mine)).toBe(false);
+    mine.city = 'changed';
+    mine.at.push(3);
+    expect(c.contents(value)[0]).toBe(intern(raw()));
+    expect(value).toBe(c.of(raw()));
+  });
+
+  it('a probe is canonicalized: any structurally equal object finds the member', () => {
+    expect(c.has(c.of(raw()), { at: [1, 2], city: 'Aarhus' })).toBe(true);
+    expect(c.has(c.of(raw()), { city: 'Aarhus', at: [1] })).toBe(false);
+    if (c.distinct) expect(c.add(c.of(raw()), raw())).toBe(c.of(raw())); // adding an equal is not a change
+  });
+});
 
 describe('intern on entry — structural convergence for raw inputs', () => {
   it('lists of structurally equal raw objects are the same instance', () => {

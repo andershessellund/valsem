@@ -7,12 +7,16 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { intern, isCanonical, fastEquals } from './intern.js';
 import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
-import { produce, applyPatches, type Patch } from './produce.js';
+import { produce, produceWithPatches, applyPatches, type Patch } from './produce.js';
 import { current } from './current.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
+import { ValueSet } from './value-set.js';
+import { OrderedMap } from './ordered-map.js';
+import { OrderedSet } from './ordered-set.js';
 import { HashMap } from './hash-map.js';
 import { memoize } from './memoize.js';
+import { withPolluted } from './pollution.test-helpers.js';
 
 const clean = (): void => {
   delete (Object.prototype as Record<string, unknown>)['polluted'];
@@ -89,10 +93,11 @@ describe('JSON with __proto__ and constructor keys is data everywhere', () => {
 
 describe('holes and a polluted Array.prototype', () => {
   it('an undefined-valued key stays absent even with Array.prototype[i] set', () => {
-    (Array.prototype as unknown as Record<number, unknown>)[1] = 'LEAK';
-    const c = intern({ a: 1, b: undefined, c: 3 });
-    expect(Object.hasOwn(c, 'b')).toBe(false);
-    expect(c).toBe(intern({ a: 1, c: 3 }));
+    withPolluted(Array.prototype, 1, 'LEAK', () => {
+      const c = intern({ a: 1, b: undefined, c: 3 });
+      expect(Object.hasOwn(c, 'b')).toBe(false);
+      expect(c).toBe(intern({ a: 1, c: 3 }));
+    });
   });
 });
 
@@ -218,8 +223,111 @@ describe('applyPatches says what is wrong with a malformed patch list', () => {
     for (const bad of [null, 'abc', [[]], [null]]) expect(() => apply(bad)).toThrow(TypeError);
   });
 
+  it('a payload of the wrong type for its kind, named by kind', () => {
+    expect(() => apply([{ kind: 'record.set', path: [], key: 5, value: 1 }])).toThrow(/malformed 'record\.set' patch — expected a string or symbol key/);
+    expect(() => apply([{ kind: 'record.delete', path: [], key: null }])).toThrow(/malformed 'record\.delete' patch — expected a string or symbol key/);
+    const members = OrderedSet.of('a', 'b');
+    for (const index of [0.5, '1', null, NaN]) {
+      expect(() => applyPatches(members, [{ kind: 'oset.insert', path: [], index, value: 'z' } as unknown as Patch])).toThrow(/malformed 'oset\.insert' patch — expected an integer index/);
+    }
+    expect(base).toBe(intern({ a: 1 }));
+  });
+
+  it('a path that ends at what is no record: refused by valsem, not by the engine', () => {
+    // A stale path is the ordinary way to get here: the map key is gone, the
+    // list is shorter, the slot now holds a number. record.set and
+    // record.delete were the two kinds that did not look before they wrote,
+    // and the caller got "Cannot set properties of undefined".
+    const holders: [string, unknown, PropertyKey, PropertyKey][] = [
+      ['record', intern({ rec: { x: 1 }, n: 5 }), 'n', 'gone'],
+      ['array', intern([{ x: 1 }, 5]), 1, 9],
+      ['ValueMap', ValueMap.from<string, unknown>([['rec', { x: 1 }], ['n', 5]]), 'n', 'gone'],
+      ['OrderedMap', OrderedMap.from<string, unknown>([['rec', { x: 1 }], ['n', 5]]), 'n', 'gone'],
+      ['ValueList', ValueList.of<unknown>({ x: 1 }, 5), 1, 9],
+    ];
+    for (const [name, holder, atPrimitive, atNothing] of holders) {
+      for (const at of [atPrimitive, atNothing]) {
+        for (const patch of [
+          { kind: 'record.set', path: [at], key: 'k', value: 1 },
+          { kind: 'record.delete', path: [at], key: 'k' },
+        ]) {
+          expect(() => applyPatches(holder, [patch as Patch]), `${name} ${String(at)} ${patch.kind}`).toThrow(
+            /^valsem: (cannot apply a 'record\.(set|delete)' patch to a |patch path segment )/,
+          );
+        }
+      }
+    }
+    // A null slot likewise, and a stored undefined (a value, in a map) is still no record.
+    expect(() => applyPatches(intern({ slot: null }), [{ kind: 'record.set', path: ['slot'], key: 'k', value: 1 }])).toThrow(/patch to a null/);
+    const holdsUndefined = ValueMap.from<string, unknown>([['u', undefined]]);
+    expect(() => applyPatches(holdsUndefined, [{ kind: 'record.set', path: ['u'], key: 'k', value: 1 }])).toThrow(/value that is not there/);
+  });
+
   it('any iterable of patches will do', () => {
     const patches = new Set([{ kind: 'record.set', path: [], key: 'a', value: 2 }]);
     expect(apply(patches)).toBe(intern({ a: 2 }));
+  });
+});
+
+describe('a patch applies to its own kind of value and to no other', () => {
+  // A patch list replayed against the wrong state is the ordinary failure
+  // (a stale client, two documents crossed), and the dangerous outcome is a
+  // patch that "applies": `list.set` once wrote the key "0" onto a record.
+  // So: one GENUINE patch of every kind, recorded from a real recipe, against
+  // every kind of target, at the root and one level down.
+  const targets: Record<string, unknown> = {
+    record: intern({ a: 1, b: 2 }),
+    array: intern([1, 2, 3]),
+    ValueList: ValueList.of(1, 2, 3),
+    ValueMap: ValueMap.from([['a', 1], ['b', 2]]),
+    ValueSet: ValueSet.from(['a', 'b']),
+    OrderedMap: OrderedMap.from([['a', 1], ['b', 2]]),
+    OrderedSet: OrderedSet.of('a', 'b'),
+  };
+  // `any`: one recipe per target kind, each written against that kind's own draft.
+  const recipes: Record<string, (d: any) => void> = {
+    record: (d) => { d.a = 9; delete d.b; },
+    array: (d) => { d[0] = 9; d.push(4); },
+    ValueList: (d) => { d.set(0, 9); d.push(4); },
+    ValueMap: (d) => { d.set('a', 9); d.delete('b'); },
+    ValueSet: (d) => { d.add('c'); d.delete('a'); },
+    OrderedMap: (d) => { d.set('a', 9); d.delete('b'); d.insertAt(0, 'z', 1); },
+    OrderedSet: (d) => { d.add('c'); d.delete('a'); d.insertAt(0, 'z'); },
+  };
+  // The one family with two members: a sequence patch fits either sequence.
+  const family = (name: string): string => (name === 'array' || name === 'ValueList' ? 'sequence' : name);
+
+  const genuine = new Map<string, { from: string; patch: Patch }>();
+  for (const [from, base] of Object.entries(targets)) {
+    for (const patch of produceWithPatches(base, recipes[from]!)[1]) if (!genuine.has(patch.kind)) genuine.set(patch.kind, { from, patch });
+  }
+
+  it('the recipes between them record every kind of patch there is', () => {
+    expect([...genuine.keys()].sort()).toEqual([
+      'list.set', 'list.splice',
+      'map.delete', 'map.set',
+      'omap.delete', 'omap.insert', 'omap.set',
+      'oset.add', 'oset.delete', 'oset.insert',
+      'record.delete', 'record.set',
+      'set.add', 'set.delete',
+    ]);
+  });
+
+  const cases = [...genuine].flatMap(([kind, { from, patch }]) => Object.keys(targets).map((onto) => [kind, from, onto, patch] as const));
+
+  it.each(cases)('%s (recorded on a %s) onto a %s', (kind, from, onto, patch) => {
+    const base = targets[onto];
+    const nested = intern({ held: base });
+    const below = { ...patch, path: ['held', ...patch.path] } as Patch;
+    if (family(from) === family(onto)) {
+      expect(applyPatches(base, [patch])).not.toBe(base);
+      expect((applyPatches(nested, [below]) as { held: unknown }).held).toBe(applyPatches(base, [patch]));
+      return;
+    }
+    // Says which patch and what it met; "arrays take integer indices" is the
+    // array draft's own refusal of a record.set, which never gets as far.
+    const refusal = new RegExp(`cannot apply a '${kind.replace('.', '\\.')}' patch to |arrays take integer indices`);
+    expect(() => applyPatches(base, [patch])).toThrow(refusal);
+    expect(() => applyPatches(nested, [below])).toThrow(refusal);
   });
 });

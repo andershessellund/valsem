@@ -16,6 +16,7 @@ import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { ValueList } from './value-list.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 describe('produce — the degenerate law', () => {
   it('produce(base, noop) === intern(base)', () => {
@@ -329,8 +330,7 @@ describe('produceWithPatches — semantic patches, both directions', () => {
     }
     expect(() => (patches as unknown[]).push({})).toThrow(TypeError);
     expect(() => (patches[0]!.path as unknown[]).push('x')).toThrow(TypeError);
-    expect(applyPatches(base, patches)).toBe(result);
-    expect(applyPatches(result, inverse)).toBe(base);
+    expectPatchRoundTrip(base, result, patches, inverse);
     // An empty recipe's lists are frozen too: one rule, no "unless nothing happened".
     const [, none] = produceWithPatches(base, () => {});
     expect(none).toEqual([]);
@@ -438,8 +438,7 @@ describe('produceWithPatches — semantic patches, both directions', () => {
     const base = intern({ a: 1 });
     const [result, patches, inverse] = produceWithPatches<unknown>(base, () => ({ b: 2 }));
     expect(patches).toEqual([{ kind: 'replace', path: [], value: intern({ b: 2 }) }]);
-    expect(applyPatches(base, patches)).toBe(result);
-    expect(applyPatches(result, inverse)).toBe(base);
+    expectPatchRoundTrip(base, result, patches, inverse);
   });
 
   it('applyPatches applies strictly in order — a replace does not jump the queue', () => {

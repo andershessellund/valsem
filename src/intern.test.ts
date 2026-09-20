@@ -107,3 +107,18 @@ describe('intern — NaN-containing values are canonical too', () => {
     expect(intern([NaN, 1])).not.toBe(intern([1, NaN]));
   });
 });
+
+describe('intern — a wide record (past the assign-by-key limit) is built from entries', () => {
+  it('and drops its undefined-valued keys there too', () => {
+    const wide: Record<string, number | undefined> = {};
+    for (let i = 0; i < 40; i++) wide[`k${i}`] = i % 7 === 0 ? undefined : i;
+    const canonical = intern(wide);
+    expect(Object.keys(canonical).length).toBe(40 - 6);
+    expect(Object.hasOwn(canonical, 'k7')).toBe(false);
+    expect(canonical['k8']).toBe(8);
+    const dense = Object.fromEntries(Object.entries(wide).filter(([, v]) => v !== undefined));
+    expect(intern(dense)).toBe(canonical);
+    expect(deepEqual(wide, canonical)).toBe(true);
+    expect(internHash(wide)).toBe(internHash(canonical));
+  });
+});

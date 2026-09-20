@@ -7,13 +7,15 @@
 // dropped; the lifetime is the scope's, like every other draft.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, applyPatches, draft, isDraft } from './produce.js';
+import { produce, produceWithPatches, draft, isDraft } from './produce.js';
 import { current, original } from './current.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
 import { ValueList } from './value-list.js';
 import { ValueDate } from './value-date.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
+import { COLLECTIONS } from './roster.test-helpers.js';
 
 interface Config {
   enabled: boolean;
@@ -117,6 +119,16 @@ describe('draft() — attaching', () => {
     expect(next.config).toBe(intern({ enabled: true, level: 4 }));
   });
 
+  it.each(COLLECTIONS.map((c) => [c.name, c] as const))('%s drafts detached, and lands canonical where it is attached', (_name, c) => {
+    const next = produce(base, (d) => {
+      const detached = draft(c.of('a'));
+      expect(detached).toBeInstanceOf(c.draftType);
+      c.draftAdd(detached, { n: 1 });
+      (d as unknown as { held: unknown }).held = detached;
+    });
+    expect((next as unknown as { held: unknown }).held).toBe(c.of('a', { n: 1 }));
+  });
+
   it('collections draft detached too', () => {
     const next = produce(base, (d) => {
       const m = draft(ValueMap.from<string, number>([['k', 1]]));
@@ -202,8 +214,7 @@ describe('draft() — patches and inspectors', () => {
       { kind: 'record.set', path: [], key: 'config', value: intern({ enabled: true, level: 9 }) },
     ]);
     expect(inverse).toEqual([{ kind: 'record.set', path: [], key: 'config', value: config }]);
-    expect(applyPatches(base, patches)).toBe(next);
-    expect(applyPatches(next, inverse)).toBe(base);
+    expectPatchRoundTrip(base, next, patches, inverse);
   });
 
   it('a returned draft is a root replace patch', () => {

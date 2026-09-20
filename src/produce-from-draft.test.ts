@@ -19,6 +19,7 @@ import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { HashMap } from './hash-map.js';
 import { memoize } from './memoize.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 
 interface Todo { readonly id: number; readonly done: boolean }
 interface Sub { readonly n: number; readonly todos: ValueList<Todo> }
@@ -85,8 +86,7 @@ describe('the patch functions take a draft the same way', () => {
       const now = intern({ n: 5, todos: base.sub.todos });
       const [next, patches, inverse] = produceWithPatches(d.sub as unknown as Sub, (s) => void s.n++);
       expect(next).toBe(intern({ n: 6, todos: base.sub.todos }));
-      expect(applyPatches(now, patches)).toBe(next);
-      expect(applyPatches(next, inverse)).toBe(now);
+      expectPatchRoundTrip(now, next, patches, inverse);
     });
   });
 

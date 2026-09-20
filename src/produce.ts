@@ -1525,7 +1525,13 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
       continue;
     }
     switch (p.kind) {
+      // The record ops are for records, as the sequence ops below are for
+      // sequences. A path can END anywhere (a map key that is gone, a list
+      // index past the end, a number), and what it ends at is then no record:
+      // unchecked, the write below met `undefined` or a primitive, and the
+      // caller got the engine's TypeError in place of what was wrong.
       case 'record.set':
+        if (!isRecordTarget(target, state)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         // Define semantics on raw targets too: a `__proto__` key must become an
         // own property, never a prototype change. (A draft's set trap does the same.)
         if (typeof p.key !== 'string' && typeof p.key !== 'symbol') throw badPatch(p.kind, 'a string or symbol key');
@@ -1533,7 +1539,7 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
         else _defineRecordField(target as Rec, p.key, p.value);
         break;
       case 'record.delete':
-        if (Array.isArray(target)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
+        if (!isRecordTarget(target, state)) throw new Error(`valsem: cannot apply a '${p.kind}' patch to a ${describe(target)}`);
         if (typeof p.key !== 'string' && typeof p.key !== 'symbol') throw badPatch(p.kind, 'a string or symbol key');
         delete (target as Rec)[p.key];
         break;
@@ -1596,13 +1602,20 @@ function describeArg(value: unknown): string {
   return typeof kind === 'string' ? `a '${kind}' patch without a path array` : 'an object without a `kind`';
 }
 
+/** What a record patch may be applied to: a record's draft, or a raw plain object. */
+function isRecordTarget(target: unknown, state: DraftState | undefined): boolean {
+  return state !== undefined ? state.kind === 'object' : isPlainObject(target);
+}
+
 function badPatch(kind: string, expected: string): Error {
   return new Error(`valsem: malformed '${kind}' patch — expected ${expected}`);
 }
 
 function describe(target: unknown): string {
   const state = stateOf(target);
-  return state !== undefined ? `${state.kind} draft` : Array.isArray(target) ? 'plain array' : typeof target;
+  if (state !== undefined) return `${state.kind} draft`;
+  if (target === undefined) return 'value that is not there (the path ends at undefined)';
+  return Array.isArray(target) ? 'plain array' : target === null ? 'null' : typeof target;
 }
 
 /**
