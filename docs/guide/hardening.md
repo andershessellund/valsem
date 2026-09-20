@@ -74,7 +74,7 @@ registration, and an entry whose value has been collected is simply not
 carried over — so neither growing the index nor cleaning it is ever one long
 task on the main thread. The pool notices a collection through a canary (a
 `WeakRef` to an object nothing holds), and ignores one that left more than
-half of a shard alive, so the dead number about the living at most. There is
+half of the pool alive, so the dead number about the living at most. There is
 no `FinalizationRegistry`, no timer and no idle callback, which matters on
 hosts that run finalizers without an I/O context or not at all. The cost: a
 pool that stops interning stops cleaning — what it keeps is a cleared

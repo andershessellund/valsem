@@ -28,11 +28,16 @@
 //     EPOCH advances. A word's stamp is the epoch in which its target was last
 //     known alive (registered, found, or verified), and an entry stamped with
 //     the current epoch is moved without being asked;
-//   * a collection is otherwise IGNORED unless a 64-slot sample of the shard
-//     finds at least half of it dead. Below that, growth is a plain copy. A
-//     lap that dereferences a shard therefore frees at least half of it, which
+//   * a collection is otherwise IGNORED unless a 64-slot sample finds at least
+//     half of the pool dead. Below that, growth is a plain copy. A lap that
+//     dereferences a shard therefore frees about half of it or more, which
 //     bounds the dead at about the number of the living, and the asking at
-//     about one live deref per death.
+//     about one live deref per death. The sample is taken ONCE per pool per
+//     epoch, from whichever shard is registered into first: shards are random
+//     partitions of one population, so its answer is every shard's. (Sampling
+//     each shard put 64 samples — a few µs apiece — on the first registrations
+//     after every collection, which is where a benchmark row, or a request,
+//     begins.)
 //
 // The canary is a hint, not a requirement on the runtime: if it never clears
 // there are no verifying laps (and nothing was cleared); if it clears often
@@ -84,8 +89,13 @@ const SAMPLE = 64;
 const DEAD_FRACTION = 0.5;
 /** Added to the sampled survivor fraction when sizing: 64 slots estimate to within about ±0.06. */
 const SIZING_MARGIN = 0.1;
-/** Slots the migration may pass per registration (dead and empty ones are cheap, and free). */
-const SLOTS_PER_STEP = 64;
+/**
+ * Slots of the old table the migration may pass per registration. Passing a
+ * dead or empty slot is cheap (~6 ns) but it is paid inside `register`, in the
+ * registrations that follow a collection: at 64 it added ~0.4 µs to each, which
+ * a short operation feels; at 16, ~0.1 µs over a lap four times as long.
+ */
+const SLOTS_PER_STEP = 16;
 /** A shard this small is left alone by a collection; it is looked at when it next grows. */
 const IGNORE_BELOW = 32;
 
@@ -171,9 +181,10 @@ function beginMigration(s: Shard, survivors: number, verify: boolean): void {
   s.oldRefs = s.refs;
   s.cursor = 0;
   s.verify = verify;
-  // One entry moves per registration, so the new table receives as many
-  // registrations as it receives survivors.
-  s.bits = bitsFor(s.used * Math.min(1, survivors + SIZING_MARGIN) * 2 + 16);
+  // The lap lasts one registration per survivor moved, or per SLOTS_PER_STEP
+  // slots passed, whichever is more — and the new table receives them all.
+  const moved = s.used * Math.min(1, survivors + SIZING_MARGIN);
+  s.bits = bitsFor(moved + Math.max(moved, s.words.length / SLOTS_PER_STEP) + 16);
   s.words = new Int32Array(1 << s.bits);
   s.refs = new Array<WeakRef<object> | undefined>(1 << s.bits).fill(undefined);
   s.used = 0;
@@ -280,6 +291,9 @@ export interface InternPool<T extends object> {
 
 class InternPoolImpl<T extends object> implements InternPool<T> {
   readonly #shards: (Shard | undefined)[] = new Array<Shard | undefined>(SHARDS).fill(undefined);
+  /** The epoch whose collection this pool has sampled, and the fraction it found alive. */
+  #sampled = 0;
+  #survivors = 1;
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
     const m = Math.imul(hash, 0x9e3779b1);
@@ -326,11 +340,17 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     }
     if (s.oldWords === null) {
       const full = s.used >= s.words.length * GROW_AT;
-      if (full || (s.answered !== epoch && s.used > IGNORE_BELOW)) {
-        const survivors = sampleSurvivors(s);
-        if (1 - survivors >= DEAD_FRACTION) beginMigration(s, survivors, true);
-        else if (full) beginMigration(s, 1, false);
+      if (s.answered !== epoch && (full || s.used > IGNORE_BELOW)) {
+        // A shard answers a collection once: until the next one, nothing more can be found dead.
         s.answered = epoch;
+        if (this.#sampled !== epoch) {
+          this.#sampled = epoch;
+          this.#survivors = sampleSurvivors(s);
+        }
+        if (1 - this.#survivors >= DEAD_FRACTION) beginMigration(s, this.#survivors, true);
+        else if (full) beginMigration(s, 1, false);
+      } else if (full) {
+        beginMigration(s, 1, false);
       }
     }
     place(s, (m << SHARD_BITS) | stamp, new WeakRef<object>(value));

@@ -31,7 +31,9 @@
 // compare columns, do not read them as production latencies.
 //
 // Env: BATCH (inserts per job, default 5000), HOT (hits go to the first HOT
-// live members, default all), PROF=<file> (CPU profile of the timed phase).
+// live members, default all), PROF=<file> (CPU profile of the timed phase),
+// RUNTIME=<binary> (run the measuring processes under it instead of this node:
+// the pinned Bun, for JavaScriptCore — see bench/fetch-engines.mjs).
 //
 // Run: pnpm build && node scripts/experiments/mix-bench.mjs [rounds] [pool,pool,…]
 // ---------------------------------------------------------------------------
@@ -304,6 +306,7 @@ function fmix(k) {
 }
 
 async function child(poolName, scenarioName) {
+  globalThis.gc ??= () => globalThis.Bun.gc(true); // JavaScriptCore, under Bun: a synchronous full collection
   const sc = SCENARIOS[scenarioName];
   const yieldTask = () => new Promise((r) => setImmediate(r));
   let pool;
@@ -438,14 +441,15 @@ if (process.argv[2] === 'child') {
 } else {
   const rounds = Number(process.argv[2] ?? 3);
   const self = fileURLToPath(import.meta.url);
-  console.log(`node ${process.version}, ${rounds} rounds, median (min–max for ns/op)\n`);
+  console.log(`${process.env.RUNTIME ?? `node ${process.version}`}, ${rounds} rounds, median (min–max for ns/op)\n`);
   for (const scenario of Object.keys(SCENARIOS)) {
     console.log(`## ${scenario}`);
     console.log('pool            ns/op (min–max)      gc ms   turns ms   max batch   stored    mem MB   | migrated: by hit / no deref / →dead / →live');
     for (const pool of POOLS) {
       const rs = [];
       for (let r = 0; r < rounds; r++) {
-        const p = spawnSync(process.execPath, ['--expose-gc', '--max-old-space-size=8192', self, 'child', pool, scenario], { encoding: 'utf8', timeout: 240_000 });
+        const runtime = process.env.RUNTIME;
+        const p = spawnSync(runtime ?? process.execPath, [...(runtime ? [] : ['--expose-gc', '--max-old-space-size=8192']), self, 'child', pool, scenario], { encoding: 'utf8', timeout: 240_000 });
         if (p.status !== 0) {
           console.log(`${pool}: FAILED ${p.stderr.split('\n')[0]}`);
           continue;

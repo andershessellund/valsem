@@ -313,8 +313,8 @@ asking rare. A canary — a `WeakRef` to an object nothing holds, looked at
 every 64th registration — advances an epoch each time it is found
 collected; a slot stamped with the current epoch (registered, found or
 verified since) is moved unasked. And a collection is ignored unless a
-64-slot sample of the shard finds half of it dead; below that, growth is a
-plain copy. So the dead number about the living at most, and cleanup rides
+64-slot sample, taken once per pool per epoch, finds half of it dead; below
+that, growth is a plain copy. So the dead number about the living at most, and cleanup rides
 on registration: a pool that stops registering keeps its husks (a cleared
 `WeakRef` and eight bytes of table each) until it resumes or is dropped.
 There are no finalization callbacks, timers or idle callbacks, and the

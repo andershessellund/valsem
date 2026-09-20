@@ -228,10 +228,14 @@ cold or when a job has pinned many targets). Two gates keep it rare. A
 **canary**, a `WeakRef` to an object nothing holds, is looked at every 64th
 registration; each time it is found collected an epoch advances, and a slot
 stamped with the current epoch (registered, found or verified since) is
-moved unasked. And a collection is **ignored** unless a 64-slot sample of
-the shard finds at least half of it dead; below that, growth is a plain
-copy. A lap that dereferences therefore frees at least half of what it
-walks, which bounds the dead at about the number of the living.
+moved unasked. And a collection is **ignored** unless a 64-slot sample
+finds at least half of the pool dead; below that, growth is a plain copy.
+A lap that dereferences therefore frees about half of what it walks or
+more, which bounds the dead at about the number of the living. The sample
+is taken once per pool per epoch, from the shard registered into first
+(shards are random partitions of one population), and a shard answers a
+collection once. A registration moves one live entry and passes at most 16
+slots of the old table.
 
 **Why.** Measured against the design it replaced (below) over mixes of
 inserts, lookup hits and deaths, every measurement its own process, major
@@ -241,13 +245,19 @@ rounds, medians, ns per operation, replaced → this):
 
 | scenario | ns/op | ms in the turns between batches | end memory, MB |
 | --- | --- | --- | --- |
-| churn, 50k live | 244 → 220 | 397 → 18 | 36 → 21 |
-| churn, 50k live, 4 hits per insert | 224 → 187 | 155 → 5 | 36 → 21 |
-| churn, 1M live | 387 → 376 | 601 → 8 | 276 → 239 |
-| churn, 1M live, 4 hits per insert | 626 → 479 | 244 → 6 | 220 → 180 |
-| read-mostly, 1M live, 16 hits per insert | 626 → 506 | 56 → 3 | 220 → 131 |
-| grow to 2M, no deaths | 305 → 188 | 159 → 19 | 373 → 197 |
-| collapse 1M → 50k, then churn | 270 → 250 | 266 → 4 | 36 → 21 |
+| churn, 50k live | 251 → 233 | 406 → 18 | 36 → 21 |
+| churn, 50k live, 4 hits per insert | 240 → 202 | 164 → 6 | 36 → 20 |
+| churn, 1M live | 409 → 358 | 623 → 8 | 276 → 200 |
+| churn, 1M live, 4 hits per insert | 597 → 453 | 231 → 6 | 220 → 154 |
+| read-mostly, 1M live, 16 hits per insert | 622 → 586 | 55 → 4 | 220 → 131 |
+| grow to 2M, no deaths | 387 → 238 | 183 → 27 | 373 → 197 |
+| collapse 1M → 50k, then churn | 396 → 375 | 339 → 8 | 36 → 20 |
+
+On JavaScriptCore (Bun 1.4.2, two rounds, `RUNTIME=<bun>`), ns per operation
+in the same order: 158 → 105, 163 → 100, 255 → 215, 403 → 269, 366 → 258,
+179 → 101, 172 → 177; there the forced collections take longer with this
+index on the 1M churn (589 → 903 ms) and it ends that scenario holding
+more (343 → 374 MB), and less everywhere else.
 
 The registry's cost was never in `register` (registering a cell is nearly
 free); it is in the event-loop turns after a collection, where the
@@ -278,10 +288,26 @@ nothing: the move is a write to a cold line. *Spending the migration in
 batches of 16 or 100 registrations:* no measurable difference. *A
 stop-the-world rebuild:* 2–5× slower in JS than `Map`'s native rehash
 (42 ms against 8 ms at 1M entries).
-**Cost.** Cleanup rides on registration: a pool that stops registering
-keeps its husks (a cleared `WeakRef` and eight bytes of table each, never
-the values) until it resumes or is dropped, and a shard of fewer than 32
-entries is looked at only when it grows. The per-node `WeakRef` (~60 ns,
+*A sample per shard:* 64 samples of a few µs each on the first registrations
+after every collection. *Passing 64 slots per registration:* ~0.4 µs on each
+registration that follows a collection; at 16 it is ~0.1 µs over a lap four
+times as long.
+**Cost.** Cleanup rides on registration, and it is paid *inside* the
+operations that follow a collection, where the registry paid it in idle
+turns. The harness above counts both; `pnpm bench` times neither the idle
+turns nor anything between rows, forces a collection before every row, and
+so shows only this side of the trade: the `collections` suite A/B'd against
+the replaced pool is ×1.17 overall (A/A control: ×0.96), rows that register
+a few nodes right after the collection ("set one key, then hash") ×1.6–2.7,
+while `produce`, `list` and `ordered` are level (×1.02, ×0.99, ×1.00) and
+`list-draft` is ×0.94. Part of that ×1.17 is not the pool's code at all:
+rows that never touch a pool (`get`, `deepEqual` of equal maps) measure
+×1.3–1.7 slower in the suite and identical under `--single-threaded-gc` or
+in isolation: the husks give V8's background collector more to do after
+each forced collection, and it overlaps the next row. A pool that stops
+registering keeps its husks (a cleared `WeakRef` and eight bytes of table
+each, never the values) until it resumes or is dropped, and a shard of
+fewer than 32 entries is looked at only when it grows. The per-node `WeakRef` (~60 ns,
 and most of the time inside a collection) remains the dominant term in
 every construction and update. On a million live entries a lookup hit is
 ~400 ns of dependent cache misses (slot, ref, `WeakRef`, target) in either
@@ -318,7 +344,8 @@ open-addressed table had been measured against that `Map` once before and
 rejected: it won a fixed-population micro-benchmark on V8, tied on real
 sequences, lost ~10 % under unbounded growth to JS rebuilds against a native
 rehash, and lost 2× on JavaScriptCore. The growth loss was the
-stop-the-world rebuild, which D2 removes. **Not re-measured:** JavaScriptCore.
+stop-the-world rebuild, which D2 removes, and on JavaScriptCore this table
+now measures level or ahead of the `Map` in every scenario (D2).
 DESIGN.md §4.2.
 
 ### D48. The pool index is 64 tables, sharded by hash
