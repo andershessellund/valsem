@@ -67,7 +67,7 @@ function flushTail(s: ListState): void {
   s.tail = [];
 }
 
-export class DraftList<T> implements Iterable<T> {
+export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   declare readonly [DRAFT_STATE]: ListState<T>;
 
   constructor(token: symbol, state: ListState) {
@@ -235,8 +235,8 @@ export class DraftList<T> implements Iterable<T> {
   }
 
   // What does not edit answers about the VALUE this draft would be right now
-  // (its snapshot, `current(draft)`), and gives back values, not drafts: only
-  // `get` hands out a draft. Assign the result into a slot to keep it.
+  // (its snapshot, `current(draft)`), and gives back values, not drafts: `get`
+  // and iteration hand out drafts. Assign the result into a slot to keep it.
 
   /** Elements `[start, end)` of the list as it is right now, as `ValueList.slice`: a value, not a draft. */
   slice(start?: number, end?: number): ValueList<T> {
@@ -248,28 +248,37 @@ export class DraftList<T> implements Iterable<T> {
     return (snapshotOf(this) as ValueList<T>).concat(other);
   }
 
-  /** Visit every element in index order, as it is right now (iteration's view: a child already drafted comes as its draft). */
-  forEach(fn: (value: T, index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
+  /** Visit every element in index order, each drafted if it can be, as `get` hands it out: `d.todos.forEach((t) => { t.done = true; })` edits. */
+  forEach(fn: (value: Draft<T> | (T & undefined), index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
     let i = 0;
     for (const v of this) fn.call(thisArg, v, i++, this);
   }
 
-  *[Symbol.iterator](): IterableIterator<T> {
-    const s = this.#state;
-    if (s.overlay.size === 0) {
-      yield* s.work as Iterable<T>;
-    } else {
-      let i = 0;
-      for (const x of s.work) {
-        const e = s.overlay.get(i++);
-        yield (e !== undefined ? e.v : x) as T;
-      }
-    }
-    for (const e of s.tail) yield e.v as T;
+  /**
+   * The elements in index order, each drafted if it can be, as `get` hands it
+   * out: `for (const t of d.todos) t.done = true` edits. By index and live, as
+   * an `Array`'s iterator is, so it sees what the loop body pushes or removes.
+   * A walk that only reads is cheaper over `current(d.todos)` or `slice()`,
+   * which draft nothing.
+   */
+  *[Symbol.iterator](): IterableIterator<Draft<T> | (T & undefined)> {
+    for (let i = 0; i < this.length; i++) yield this.get(i);
   }
 
+  /** The elements as they are held, nothing drafted: what inspection walks. */
+  *#peek(): IterableIterator<unknown> {
+    const s = this.#state;
+    let i = 0;
+    for (const x of s.work) {
+      const e = s.overlay.get(i++);
+      yield e !== undefined ? e.v : x;
+    }
+    for (const e of s.tail) yield e.v;
+  }
+
+  /** The list as it is right now as a frozen canonical array, as `ValueList.toArray`: values, not drafts. */
   toArray(): readonly T[] {
-    return [...this];
+    return (snapshotOf(this) as ValueList<T>).toArray();
   }
 
   /**
@@ -285,7 +294,7 @@ export class DraftList<T> implements Iterable<T> {
 
   /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
   [INSPECT](depth: number, options: InspectOptions, inspect: Inspect): string {
-    return inspectDraft('DraftList', this, () => this.length, () => [...this], depth, options, inspect);
+    return inspectDraft('DraftList', this, () => this.length, () => [...this.#peek()], depth, options, inspect);
   }
 }
 

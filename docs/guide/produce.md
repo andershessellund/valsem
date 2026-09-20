@@ -25,7 +25,13 @@ array methods); `ValueMap`/`ValueSet`/`ValueList` slots hand out
 API: a draft has every method of its value. What edits, edits the draft in
 place; what does not (`slice`, `concat`, the set algebra) answers about the
 value the draft would be right now, as `current(draft)` would, and returns a
-value, not a draft. Raw material assigned into a draft is **adopted**: interned on the way
+value, not a draft (`toArray` included). Iterating a `DraftList`, a `DraftMap`
+or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
+out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
+the same as on a plain array; keys, and the members of a set, come as the
+values they are. A draft costs about 0.3 µs, so a loop that only reads a
+large collection is cheaper over `current(d.todos)` or `d.todos.slice()`,
+which draft nothing. Raw material assigned into a draft is **adopted**: interned on the way
 into the result, exactly like the collections' intern-on-entry. Drafts are
 revoked when `produce` returns — using a leaked draft throws.
 
