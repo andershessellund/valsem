@@ -29,7 +29,7 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
  * Positional arguments are CHECKED, never coerced (D45). Three kinds, by what
  * the argument names:
  *
- * - an ELEMENT ({@link elementIndex}: `set`, `remove`, and valsem's own reads): an
+ * - an ELEMENT ({@link elementIndex}: `get`, `set`, `remove`): an
  *   integer in `[0, length)`. There is no element anywhere else, so there is
  *   nothing to answer with and nothing to edit;
  * - an INSERTION POINT ({@link insertionIndex}: `insert`, `insertAt`,

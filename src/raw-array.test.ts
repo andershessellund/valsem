@@ -18,7 +18,7 @@ describe('RawArray', () => {
     expect(isCanonical(window)).toBe(true);
     expect(window[0]).toBe(intern({ id: 100, name: 'user-100', tag: 't0' }));
     expect(view.slice(100, 200)).toBe(window); // same content, same array
-    expect(view.at(150)).toBe(window[50]); // and the same element object
+    expect(view.get(150)).toBe(window[50]); // and the same element object
     expect(_internPoolSize()).toBe(after); // the second slice admitted nothing new
   });
 
@@ -34,15 +34,17 @@ describe('RawArray', () => {
     for (let i = 0; i < 50; i++) expect(c[i]).toBe(a[i]);
   });
 
-  it('at, bounds, negative indices, holes, and length', () => {
+  it('get, bounds, negative indices, holes, and length', () => {
     const holey: unknown[] = [1];
     holey[2] = 3; // a hole at index 1
     const view = RawArray.from(holey);
     expect(view.length).toBe(3);
-    expect(view.at(1)).toBeUndefined(); // a hole is an element, and it is undefined
-    expect(view.at(3)).toBeUndefined(); // no element there, as Array.prototype.at
-    expect(view.at(-1)).toBe(3);
-    expect(view.at(-4)).toBeUndefined();
+    expect(view.get(1)).toBeUndefined(); // a hole is an element, and it is undefined
+    expect(() => view.get(3)).toThrow(RangeError); // no element there
+    expect(() => view.get(-1)).toThrow(RangeError);
+    expect(view.at(-1)).toBe(3); // at is Array.prototype.at: from the end, and undefined for no element
+    expect(view.at(3)).toBeUndefined();
+    expect(view.at(1)).toBeUndefined(); // the hole
     expect(view.slice(-2)).toBe(intern([undefined, 3]));
     expect(view.slice(1, 100)).toBe(intern([undefined, 3]));
     expect(view.slice(5, 2)).toBe(intern([]));
@@ -55,7 +57,7 @@ describe('RawArray', () => {
     arr[0] = { id: 99, name: 'x', tag: 'y' };
     arr.length = 1;
     expect(view.length).toBe(5);
-    expect(view.at(0)).toBe(intern({ id: 0, name: 'user-0', tag: 't0' }));
+    expect(view.get(0)).toBe(intern({ id: 0, name: 'user-0', tag: 't0' }));
     expect(Object.isFrozen(view)).toBe(true);
   });
 
@@ -93,7 +95,7 @@ describe('RawArray.from — anything iterable or array-like', () => {
     for (const source of [new Set([{ id: 1 }, { id: 2 }]), rowsOf(), { length: 2, 0: { id: 1 }, 1: { id: 2 } }]) {
       const view = RawArray.from<{ id: number }>(source as Iterable<{ id: number }>);
       expect(view.length).toBe(2);
-      expect(view.at(1)).toBe(intern({ id: 2 }));
+      expect(view.get(1)).toBe(intern({ id: 2 }));
       expect(view.slice()).toBe(intern([{ id: 1 }, { id: 2 }]));
     }
     const mine = [{ id: 1 }];

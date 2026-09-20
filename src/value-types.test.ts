@@ -71,7 +71,7 @@ describe('a class with [equals] and [hashCode] is a value', () => {
     expect(r1.price).toBe(intern(eur(5)));
     expect(r1.tags[0]).toBe(intern(eur(1)));
     expect(ValueList.of(eur(1), eur(2))).toBe(ValueList.of(eur(1), eur(2)));
-    expect(ValueList.of(eur(1)).at(0)).toBe(intern(eur(1)));
+    expect(ValueList.of(eur(1)).get(0)).toBe(intern(eur(1)));
     expect(ValueSet.from([eur(1)])).toBe(ValueSet.from([eur(1)]));
     expect(ValueSet.from([eur(1)]).has(eur(1))).toBe(true);
     expect(ValueMap.from([[eur(1), 'a']]).get(eur(1))).toBe('a');

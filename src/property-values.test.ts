@@ -110,7 +110,7 @@ describe('property — collection canonical form', () => {
         expect(chained).toBe(l);
         expect(ValueList.from(l.toArray())).toBe(l);
         const flat = l.toArray();
-        for (let i = 0; i < flat.length; i++) expect(l.at(i)).toBe(flat[i]);
+        for (let i = 0; i < flat.length; i++) expect(l.get(i)).toBe(flat[i]);
         expect(l.push('x').pop()).toBe(l);
       }),
       { numRuns: 300 },

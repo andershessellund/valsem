@@ -144,7 +144,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
    */
   at(index: number): [K, V] | undefined {
     const i = atIndex(index, this.#keys.length, 'OrderedMap.at');
-    return i === -1 ? undefined : [this.#keys._get(i), this.#vals._get(i)];
+    return i === -1 ? undefined : [this.#keys.get(i), this.#vals.get(i)];
   }
   /** The first entry, or `undefined` when empty. */
   first(): [K, V] | undefined {
@@ -230,7 +230,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   /** Call `fn` for each entry in order, as `ReadonlyMap.forEach` does. */
   forEach(fn: (value: V, key: K, map: OrderedMap<K, V>) => void, thisArg?: unknown): void {
     const vals = this.#vals;
-    this.#keys.forEach((k, i) => fn.call(thisArg, vals._get(i) as V, k, this));
+    this.#keys.forEach((k, i) => fn.call(thisArg, vals.get(i) as V, k, this));
   }
 
   /**

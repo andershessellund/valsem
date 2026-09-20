@@ -157,19 +157,16 @@ describe('DraftSet — size, clear, iteration', () => {
   });
 });
 
-describe('DraftList — at, toArray, length', () => {
+describe('DraftList — get, toArray, length', () => {
   const base = ValueList.of(1, 2, 3);
 
-  it('at() bounds: negative, fractional, past-the-end, and after growth', () => {
+  it('get() bounds: negative, fractional, past-the-end, and after growth', () => {
     produce(base, (d) => {
-      expect(d.at(0)).toBe(1);
-      expect(d.at(2)).toBe(3);
-      expect(d.at(-1)).toBe(3);
-      expect(d.at(3)).toBeUndefined();
-      expect(d.at(-4)).toBeUndefined();
-      for (const i of [1.5, NaN]) expect(() => d.at(i)).toThrow(RangeError);
+      expect(d.get(0)).toBe(1);
+      expect(d.get(2)).toBe(3);
+      for (const i of [3, -1, 1.5, NaN]) expect(() => d.get(i)).toThrow(RangeError);
       d.push(4);
-      expect(d.at(3)).toBe(4);
+      expect(d.get(3)).toBe(4);
       expect(d.length).toBe(4);
     });
   });
@@ -183,21 +180,21 @@ describe('DraftList — at, toArray, length', () => {
       d.splice(1, 1); // materializes
       expect(d.toArray()).toEqual([99, 3, 4, 5]);
       expect(d.length).toBe(4);
-      expect(d.at(1)).toBe(3);
+      expect(d.get(1)).toBe(3);
     });
   });
 
   it('get() drafts a base-positioned object, once, and the draft is what iterates', () => {
     const list = ValueList.from([{ n: 1 }, { n: 2 }]);
     const next = produce(list, (d) => {
-      const first = d.at(0)!;
-      expect(d.at(0)).toBe(first); // memoized child draft
+      const first = d.get(0)!;
+      expect(d.get(0)).toBe(first); // memoized child draft
       first.n = 42;
       expect(d.toArray()[0]!.n).toBe(42);
       expect([...d][0]!.n).toBe(42);
     });
     expect(next).toBe(ValueList.from([{ n: 42 }, { n: 2 }]));
-    expect(next.at(1)).toBe(list.at(1)); // untouched sibling shared
+    expect(next.get(1)).toBe(list.get(1)); // untouched sibling shared
   });
 
   it('pop() past the tail pulls from the base; pop() on empty is undefined', () => {
@@ -279,7 +276,7 @@ describe('record and array proxy traps', () => {
     expect(() => arr!.length).toThrow(/revoked/);
     expect(() => map!.get('k')).toThrow(/escaped its produce\(\) call/);
     expect(() => set!.has(1)).toThrow(/escaped its produce\(\) call/);
-    expect(() => list!.at(0)).toThrow(/escaped its produce\(\) call/);
+    expect(() => list!.get(0)).toThrow(/escaped its produce\(\) call/);
   });
 });
 

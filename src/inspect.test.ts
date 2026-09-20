@@ -52,7 +52,7 @@ describe('util.inspect', () => {
     });
     let leaked: unknown;
     produce(base, (d) => {
-      d.l.at(0)!.n = 10;
+      d.l.get(0).n = 10;
       d.l.push({ n: 2 });
       d.m.set('k', 2);
       d.s.delete('a');

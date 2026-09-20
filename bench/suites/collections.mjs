@@ -92,8 +92,8 @@ The last rows use record values, where the semantics differ by design: valsem ca
       const mid = N >> 1;
       const t = `List ${N}`;
       await cmp(`${t}: build from array`, () => ValueList.from(arr).length, () => IList(arr).size, perWalk, assertEq);
-      await cmp(`${t}: get (mid index)`, (i) => vl.at((mid + i) % N), (i) => il.get((mid + i) % N), perOp, assertEq);
-      await cmp(`${t}: set (mid) → novel value`, (i) => vl.set(mid, -i).at(mid), (i) => il.set(mid, -i).get(mid), perOp, assertEq);
+      await cmp(`${t}: get (mid index)`, (i) => vl.get((mid + i) % N), (i) => il.get((mid + i) % N), perOp, assertEq);
+      await cmp(`${t}: set (mid) → novel value`, (i) => vl.set(mid, -i).get(mid), (i) => il.set(mid, -i).get(mid), perOp, assertEq);
       await cmp(`${t}: push`, (i) => vl.push(i).length, (i) => il.push(i).size, perOp, assertEq);
       await cmp(`${t}: pop`, () => vl.pop().length, () => il.pop().size, perOp, assertEq);
       await cmp(`${t}: iterate elements`, () => { let s = 0; for (const x of vl) s += x; return s; }, () => { let s = 0; for (const x of il) s += x; return s; }, perWalk, assertEq);

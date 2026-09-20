@@ -8,7 +8,7 @@
 // review, finding 6). The fix coerced as Array does, ToIntegerOrInfinity.
 // Second (D45): positional arguments are CHECKED, by what they name.
 //
-//   - an ELEMENT (`get`, `keyAt`, `valueAt`, `set`, `remove`): an
+//   - an ELEMENT (`get`, `set`, `remove`): an
 //     integer in [0, length), or a RangeError. No element, no answer;
 //   - an INSERTION POINT (`insert`, `insertAt`, `splice`'s start): an integer
 //     in [0, length], not counted from the end, or a RangeError. An edit
@@ -228,14 +228,19 @@ describe('ValueList: an edit names a place that exists', () => {
   });
 });
 
-describe('ValueList: an edit names an element; a read is Array.prototype.at', () => {
-  it('set and setMany answer for [0, length) and throw for anything else; at reads what is there, or undefined', () => {
+describe('ValueList: get names an element, as arr[i] with its type made true; at is Array.prototype.at', () => {
+  it('get, set and setMany answer for [0, length) and throw for anything else; at reads what is there, or undefined', () => {
     for (const n of [5, 300]) {
       const list = ValueList.from(range(n));
       for (const i of [NaN, 0.5, 1.5, -1, -0.5, Infinity, -Infinity, n, n + 0.5]) {
+        expect(() => list.get(i)).toThrow(RangeError);
         expect(() => list.set(i, 9)).toThrow(RangeError);
         expect(() => list.setMany([[i, 9]])).toThrow(RangeError);
       }
+      expect(list.get(-0)).toBe(0);
+      expect(list.get(n - 1)).toBe(n - 1);
+      const typed: number = list.get(0); // a T, not a T | undefined
+      expect(typed).toBe(0);
       for (const i of [NaN, 0.5, 1.5, -0.5, n + 0.5]) expect(() => list.at(i)).toThrow(RangeError);
       for (const i of [Infinity, -Infinity, n, -n - 1]) expect(list.at(i)).toBeUndefined();
       expect(list.at(-0)).toBe(0);
@@ -246,12 +251,14 @@ describe('ValueList: an edit names an element; a read is Array.prototype.at', ()
     }
     expect(ValueList.empty().at(0)).toBeUndefined();
     expect(ValueList.empty().at(-1)).toBeUndefined();
+    expect(() => ValueList.empty().get(0)).toThrow('ValueList.get: index 0 out of range [0, 0)');
   });
 
-  it('the midpoint of an odd list is still a loud mistake: a non-integer is not an index', () => {
+  it('so the midpoint of an odd list is a loud mistake, not a quiet undefined, through either read', () => {
     const list = ValueList.from(range(5));
+    expect(() => list.get(list.length / 2)).toThrow('ValueList.get: index must be an integer, got 2.5');
     expect(() => list.at(list.length / 2)).toThrow('ValueList.at: index must be an integer, got 2.5');
-    expect(list.at(list.length >> 1)).toBe(2);
+    expect(list.get(list.length >> 1)).toBe(2);
   });
 });
 
@@ -310,7 +317,7 @@ describe('at is Array.prototype.at, for whole arguments', () => {
 });
 
 describe('the other index-taking entry points', () => {
-  it('RawArray: slice is a range (Array’s, and the window past the last row is the rows there are); at is Array’s too', () => {
+  it('RawArray: slice is a range (Array’s, and the window past the last row is the rows there are); get names an element, at is Array’s', () => {
     fc.assert(
       fc.property(whole, whole, (a, b) => {
         const arr = range(12);
@@ -324,6 +331,7 @@ describe('the other index-taking entry points', () => {
       expect(() => raw.slice!(bad)).toThrow(RangeError);
       expect(() => raw.slice!(0, bad)).toThrow(RangeError);
       expect(() => raw.at!(bad)).toThrow(RangeError);
+      expect(() => raw.get!(bad)).toThrow(RangeError);
     }
     expect(raw.slice!()).toEqual([1, 2, 3]); // both optional: the whole content
     expect(raw.slice!(0, 100)).toEqual([1, 2, 3]);
@@ -331,6 +339,8 @@ describe('the other index-taking entry points', () => {
     expect(raw.at!(-1)).toBe(3);
     expect(raw.at!(3)).toBeUndefined();
     for (const i of [-4, Infinity, -Infinity]) expect(raw.at!(i)).toBeUndefined();
+    expect(raw.get!(2)).toBe(3);
+    for (const i of [3, -1, Infinity]) expect(() => raw.get!(i)).toThrow(RangeError);
   });
 
   it('OrderedSet and OrderedMap: first and last have no index to get wrong; insertAt names a place', () => {
@@ -415,10 +425,14 @@ describe('the other index-taking entry points', () => {
     produce(base, (d) => {
       d.push(8);
       expect(d.at(8)).toBe(8); // the tail counts
+      expect(d.get(8)).toBe(8);
       expect(d.at(-1)).toBe(8);
       expect(d.at(9)).toBeUndefined();
       for (const i of [1.5, NaN]) expect(() => d.at(i)).toThrow(RangeError);
-      for (const i of [9, -1, 1.5, NaN]) expect(() => d.set(i, 0)).toThrow(RangeError);
+      for (const i of [9, -1, 1.5, NaN]) {
+        expect(() => d.get(i)).toThrow(RangeError);
+        expect(() => d.set(i, 0)).toThrow(RangeError);
+      }
     });
   });
 });

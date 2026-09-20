@@ -18,9 +18,9 @@ describe('ValueList inside produce — the chunked draft', () => {
       d.set(5, { id: -5, v: 0 });
       d.push({ id: 3000, v: 0 });
       d.splice(100, 2, { id: -100, v: 1 });
-      d.at(7)!.v = 99; // child draft through a read
+      d.get(7)!.v = 99; // child draft through a read
       expect(d.length).toBe(3000);
-      expect(d.at(5)!.id).toBe(-5);
+      expect(d.get(5)!.id).toBe(-5);
     });
     const expected = arrOf(3000);
     expected[5] = { id: -5, v: 0 };
@@ -29,19 +29,19 @@ describe('ValueList inside produce — the chunked draft', () => {
     expected[7] = { id: 7, v: 99 };
     expect(next).toBe(ValueList.from(expected));
     expect(produce(base, () => {})).toBe(base);
-    expect(produce(base, (d) => void d.set(5, base.at(5)!))).toBe(base);
-    expect(produce(base, (d) => void (d.at(7)!.v = 2))).toBe(base); // netted out
+    expect(produce(base, (d) => void d.set(5, base.get(5)!))).toBe(base);
+    expect(produce(base, (d) => void (d.get(7)!.v = 2))).toBe(base); // netted out
     expect(produce(base, (d) => { d.push({ id: 1, v: 1 }); d.pop(); })).toBe(base);
   });
 
   it('nests inside records, and holds child drafts that survive later splices', () => {
     const state = intern({ list: ValueList.from(arrOf(500)), n: 1 });
     const next = produce(state, (d) => {
-      const item = d.list.at(10)!;
+      const item = d.list.get(10)!;
       item.v = 42;
       d.list.splice(0, 3); // shifts the drafted item to index 7
       d.list.splice(1, 0, { id: -1, v: 0 }); // and back to 8
-      expect(d.list.at(8)).toBe(item);
+      expect(d.list.get(8)).toBe(item);
       d.n = 2;
     });
     const expected = arrOf(500);
@@ -49,7 +49,7 @@ describe('ValueList inside produce — the chunked draft', () => {
     expected.splice(0, 3);
     expected.splice(1, 0, { id: -1, v: 0 });
     expect(next.list).toBe(ValueList.from(expected));
-    expect(next.list.at(8)).toBe(intern({ id: 10, v: 42 }));
+    expect(next.list.get(8)).toBe(intern({ id: 10, v: 42 }));
     expect(next.n).toBe(2);
   });
 
@@ -58,7 +58,7 @@ describe('ValueList inside produce — the chunked draft', () => {
     const [next, patches, inverse] = produceWithPatches(base, (d) => {
       d.set(3, { id: -3, v: 0 });
       d.splice(500, 10, { id: -500, v: 0 });
-      d.at(0)!.v = 7;
+      d.get(0)!.v = 7;
       expect(current(d)).toBe(ValueList.from((() => { const e = arrOf(1000); e[3] = { id: -3, v: 0 }; e.splice(500, 10, { id: -500, v: 0 }); e[0] = { id: 0, v: 7 }; return e; })()));
       expect(original(d)).toBe(base);
     });

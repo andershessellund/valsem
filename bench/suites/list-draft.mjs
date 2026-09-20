@@ -24,9 +24,9 @@ leaf and ancestor once) and the tail as one splice. The last row is the direct p
     let seq = 0;
     const r = async (name, fn, it) => rows.push(row(name, { 'per produce': await timeSettled(fn, it) }));
     await r('1 set', () => produce(vl, (d) => { d.set(N >> 1, { id: -1, v: ++seq }); }), 2000);
-    await r('1 nested edit (get(i).v = x)', () => produce(vl, (d) => { d.at(N >> 1).v = ++seq; }), 2000);
+    await r('1 nested edit (get(i).v = x)', () => produce(vl, (d) => { d.get(N >> 1).v = ++seq; }), 2000);
     await r('100 sets, spread out', () => produce(vl, (d) => { for (let k = 0; k < 100; k++) d.set((k * (N / 100)) | 0, { id: -k, v: ++seq }); }), 200);
-    await r('100 nested edits, spread out', () => produce(vl, (d) => { for (let k = 0; k < 100; k++) d.at((k * (N / 100)) | 0).v = ++seq; }), 200);
+    await r('100 nested edits, spread out', () => produce(vl, (d) => { for (let k = 0; k < 100; k++) d.get((k * (N / 100)) | 0).v = ++seq; }), 200);
     await r('push 100', () => produce(vl, (d) => { for (let k = 0; k < 100; k++) d.push({ id: -k, v: ++seq }); }), 200);
     await r('1 insert at n/2', () => produce(vl, (d) => { d.splice(N >> 1, 0, { id: -1, v: ++seq }); }), 2000);
     await r('10 inserts + 10 removes, spread out', () => produce(vl, (d) => { for (let k = 0; k < 10; k++) { d.splice((k * (N / 10)) | 0, 0, { id: -k, v: ++seq }); d.splice(((k * (N / 10)) | 0) + 5, 1); } }), 500);

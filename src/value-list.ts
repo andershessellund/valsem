@@ -17,7 +17,7 @@
 // diff between ANY two lists in O(c log n) expected for c changes, related
 // or not, by skipping shared nodes.
 //
-// The price: `at` walks size tables instead of shifting bits, and the
+// The price: `get` walks size tables instead of shifting bits, and the
 // bounds are expected, on the seeded hash — an adversary who does not know
 // the seed cannot craft a bad sequence, and there is no amortised rebuild
 // anywhere: every operation is a path of local re-chunks.
@@ -424,23 +424,29 @@ export class ValueList<T> implements Iterable<T> {
   /**
    * The element at `index`, as `Array.prototype.at` reads it: a negative index
    * counts from the end (`at(-1)` is the last element), and one that names
-   * nothing gives `undefined`. It is the positional read; an `undefined` that
-   * comes back from inside `[0, length)` is an element. A non-integer throws
-   * (D45). A size-table walk (O(log n)); the leaf of the last read is cached,
-   * so sequential reads stay in one leaf.
+   * nothing gives `undefined`. What `arr.at(i)` is to an array; {@link get}
+   * is what `arr[i]` is. A non-integer throws (D45).
    */
   at(index: number): T | undefined {
     const i = atIndex(index, this.length, 'ValueList.at');
-    return i === -1 ? undefined : this._get(i);
+    return i === -1 ? undefined : this.get(i);
   }
 
-  /** The element at `index`, an integer in `[0, length)` or a `RangeError`: the read valsem's own code uses, which knows its index exists. */
-  _get(index: number): T {
+  /**
+   * The element at `index`, which must name one: an integer in
+   * `[0, length)`, or a `RangeError`. What `arr[i]` is to an array, with its
+   * type made true: the result is a `T` because a missing element throws
+   * instead of coming back as an `undefined` typed `T`. So an `undefined`
+   * that comes back is an element, and a loop over `length` needs no `!`.
+   * {@link at} is the read that probes. A size-table walk (O(log n)); the
+   * leaf of the last read is cached, so sequential reads stay in one leaf.
+   */
+  get(index: number): T {
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
     // `!(… < …)` rather than `>=`: NaN fails every comparison, and must not pass.
     if (!Number.isInteger(index) || index < 0 || !(index < trunk + this.#tail.length)) {
-      elementIndex(index, trunk + this.#tail.length, 'ValueList._get'); // throws, saying which it was
+      elementIndex(index, trunk + this.#tail.length, 'ValueList.get'); // throws, saying which it was
     }
     if (index >= trunk) return this.#tail[index - trunk] as T;
     const last = this.#last;
@@ -708,7 +714,7 @@ export class ValueList<T> implements Iterable<T> {
   find(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): T | undefined;
   find(fn: (value: T, index: number, list: ValueList<T>) => unknown, thisArg?: unknown): T | undefined {
     const i = findIndexIn(this, this, true, fn as never, thisArg);
-    return i === -1 ? undefined : this._get(i);
+    return i === -1 ? undefined : this.get(i);
   }
 
   /** The index of the first element `fn` accepts, or -1. */
@@ -719,7 +725,7 @@ export class ValueList<T> implements Iterable<T> {
   /**
    * The **interned** flat-array snapshot of the elements — O(n) on first
    * call, weakly memoized per instance. Elements are already canonical, so
-   * `toArray()[i] === at(i)` always, and `list.toArray() === intern([...sameContents])`:
+   * `toArray()[i] === get(i)` always, and `list.toArray() === intern([...sameContents])`:
    * one canonical flat array per list value, process-wide.
    */
   toArray(): readonly T[] {

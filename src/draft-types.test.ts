@@ -234,10 +234,10 @@ describe('castDraft: a value into a draft slot', () => {
   it('the cast value is still editable through its slot', () => {
     const next = produce(state, (d) => {
       d.todos = castDraft(fetched.todos);
-      d.todos.at(0)!.done = false; // read back, it is a DraftList over the assigned value
+      d.todos.get(0).done = false; // read back, it is a DraftList over the assigned value
       d.todos.push({ id: 9, done: true });
     });
     expect(next.todos).toBe(ValueList.of({ id: 2, done: false }, { id: 9, done: true }));
-    expect(fetched.todos.at(0)!.done).toBe(true); // copy-on-write: the assigned value is untouched
+    expect(fetched.todos.get(0).done).toBe(true); // copy-on-write: the assigned value is untouched
   });
 });

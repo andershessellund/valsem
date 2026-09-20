@@ -122,9 +122,9 @@ function run(d: D, o: Op): void {
     case 'mapDelete': d.m.delete(o.k); break;
     case 'mapRefill': { const entries = [...base.m]; d.m.clear(); for (const [k, v] of entries) d.m.set(k, v); break; }
     case 'listSet': if (o.i < d.l.length) d.l.set(o.i, leaf(o.v)); break;
-    case 'listEdit': if (o.i < d.l.length) d.l.at(o.i)!.y = o.v; break;
+    case 'listEdit': if (o.i < d.l.length) d.l.get(o.i).y = o.v; break;
     case 'listPush': d.l.push(leaf(o.v)); break;
-    case 'listAlias': if (o.i < d.l.length) d.l.push(d.l.at(o.i) as Leaf); break;
+    case 'listAlias': if (o.i < d.l.length) d.l.push(d.l.get(o.i) as Leaf); break;
     case 'listPop': d.l.pop(); break;
     case 'omapSet': d.o.set(o.k, leaf(o.v)); break;
     case 'omapEdit': { const e = d.o.get(o.k); if (e) e.y = o.v; break; }

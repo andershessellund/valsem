@@ -29,7 +29,7 @@ const base: State = intern({ sub: { n: 1, todos: ValueList.of({ id: 1, done: fal
 
 // B: ordinary functions from value to value, which happen to use produce.
 const bump = (sub: Sub): Sub => produce(sub, (d) => void d.n++);
-const finishAll = (sub: Sub): Sub => produce(sub, (d) => d.todos.forEach((_, i) => void (d.todos.at(i)!.done = true)));
+const finishAll = (sub: Sub): Sub => produce(sub, (d) => d.todos.forEach((_, i) => void (d.todos.get(i).done = true)));
 const append = produce<ValueList<number>, [number]>((d, x) => void d.push(x)); // the curried form
 
 describe('a function built on produce, called from inside another recipe', () => {
@@ -95,7 +95,7 @@ describe('the patch functions take a draft the same way', () => {
       d.list.push(3);
       expect(applyPatches(d.list as unknown as ValueList<number>, [{ kind: 'list.set', path: [], index: 0, value: 9 }])).toBe(ValueList.of(9, 2, 3));
       expect(applyPatches(d.list as unknown as ValueList<number>, [])).toBe(ValueList.of(1, 2, 3));
-      expect(d.list.at(0)).toBe(1);
+      expect(d.list.get(0)).toBe(1);
     });
   });
 });

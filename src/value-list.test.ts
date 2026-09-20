@@ -87,17 +87,14 @@ describe('ValueList', () => {
     expect(() => a.set(-1, 9)).toThrow(RangeError);
   });
 
-  it('at() reads by index, from the end when negative; an index that names no element is undefined', () => {
+  it('get() reads by index; an index that names no element throws', () => {
     const a = ValueList.of(10, 20, 30);
-    expect(a.at(0)).toBe(10);
-    expect(a.at(2)).toBe(30);
-    expect(a.at(-1)).toBe(30);
-    expect(a.at(-3)).toBe(10);
-    for (const i of [3, -4]) expect(a.at(i)).toBeUndefined();
-    for (const i of [1.5, NaN]) expect(() => a.at(i)).toThrow(RangeError);
-    // An undefined from inside [0, length) is an element: compare with length to tell.
-    expect(ValueList.of(undefined).at(0)).toBeUndefined();
-    expect(ValueList.of(undefined).length).toBe(1);
+    expect(a.get(0)).toBe(10);
+    expect(a.get(2)).toBe(30);
+    for (const i of [3, -1, 1.5, NaN]) expect(() => a.get(i)).toThrow(RangeError);
+    // ...so an undefined that comes back IS an element.
+    expect(ValueList.of(undefined).get(0)).toBeUndefined();
+    expect(() => ValueList.of(undefined).get(1)).toThrow(RangeError);
     expect([...a]).toEqual([10, 20, 30]);
   });
 
@@ -110,7 +107,7 @@ describe('ValueList', () => {
     expect(a.toArray()).toBe(snap); // weakly memoized
     // Elements come back canonical — identical to what get() returns.
     const l = ValueList.of({ id: 1 });
-    expect(l.toArray()[0]).toBe(l.at(0));
+    expect(l.toArray()[0]).toBe(l.get(0));
   });
 
   it('[equals] uses kind discriminator', () => {
@@ -129,7 +126,7 @@ describe('ValueList', () => {
     const a = ValueList.of(NaN);
     expect(ValueList.of(NaN)).toBe(a);
     expect(a.set(0, NaN)).toBe(a);
-    expect(a.at(0)).toBeNaN();
+    expect(a.get(0)).toBeNaN();
   });
 });
 
@@ -172,8 +169,8 @@ describe('ValueList — hash-consed canonicality across the tree/tail boundary',
     expect(base.set(5, 999).set(5, 5)).toBe(base); // in the tree (runs cap at 64)
     expect(base.set(199, 999).set(199, 199)).toBe(base); // the last element: tail, unless it closes a run
     expect(base.set(5, 5)).toBe(base); // unchanged write
-    expect(base.at(5)).toBe(5);
-    expect(base.set(5, 999).at(5)).toBe(999);
+    expect(base.get(5)).toBe(5);
+    expect(base.set(5, 999).get(5)).toBe(999);
   });
 
   it('iteration and get() agree with a plain-array mirror at an awkward size', () => {
@@ -181,7 +178,7 @@ describe('ValueList — hash-consed canonicality across the tree/tail boundary',
     const l = ValueList.from(mirror);
     expect([...l]).toEqual(mirror);
     for (const i of [0, 31, 32, 1023, 1024, 1055, 1056]) {
-      expect(l.at(i)).toBe(mirror[i]);
+      expect(l.get(i)).toBe(mirror[i]);
     }
   });
 
@@ -223,9 +220,9 @@ describe('ValueList — size sweep through several tree levels', () => {
   it('get()/iteration agree with a plain array across both boundaries', () => {
     const items = Array.from({ length: N }, (_, i) => i * 3);
     const list = ValueList.from(items);
-    for (let i = 0; i < N; i++) expect(list.at(i)).toBe(items[i]);
+    for (let i = 0; i < N; i++) expect(list.get(i)).toBe(items[i]);
     expect([...list]).toEqual(items);
-    expect(list.at(N)).toBeUndefined();
+    expect(() => list.get(N)).toThrow(RangeError);
   });
 
   it('set() deep in the tree detours and returns', () => {
@@ -234,7 +231,7 @@ describe('ValueList — size sweep through several tree levels', () => {
     for (const i of [0, 31, 32, 1_023, 1_024, 1_040, N - 1]) {
       const changed = list.set(i, -1);
       expect(changed).not.toBe(list);
-      expect(changed.at(i)).toBe(-1);
+      expect(changed.get(i)).toBe(-1);
       expect(changed.set(i, i)).toBe(list);
       const mirror = items.slice();
       mirror[i] = -1;
@@ -277,9 +274,9 @@ describe('ValueList — canonical form (content-chunked tree)', () => {
       expect(a.length).toBe(n);
       expect(a.toArray()).toEqual(items);
       expect([...a]).toEqual(items);
-      for (let i = 0; i < n; i += Math.max(1, n >> 4)) expect(a.at(i)).toBe(intern(items[i]));
-      expect(a.at(-1)).toBe(n === 0 ? undefined : intern(items[n - 1]));
-      expect(a.at(n)).toBeUndefined();
+      for (let i = 0; i < n; i += Math.max(1, n >> 4)) expect(a.get(i)).toBe(intern(items[i]));
+      expect(() => a.get(-1)).toThrow(RangeError);
+      expect(() => a.get(n)).toThrow(RangeError);
     }
   });
 
@@ -344,7 +341,7 @@ describe('ValueList — property: every operation agrees with an array mirror an
           expect(list.toArray()).toEqual(mirror);
           expect(list).toBe(ValueList.from(mirror)); // canonical after every step
         }
-        for (let i = 0; i < mirror.length; i++) expect(list.at(i)).toBe(intern(mirror[i]));
+        for (let i = 0; i < mirror.length; i++) expect(list.get(i)).toBe(intern(mirror[i]));
         expect([...list]).toEqual(mirror);
       }),
       { numRuns: 300 },

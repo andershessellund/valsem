@@ -24,14 +24,14 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern } from './intern.js';
 import { hashNumber } from './hasher.js';
-import { indexArg, atIndex } from './shared.js';
+import { indexArg, atIndex, elementIndex } from './shared.js';
 
 let nextId = 0;
 const NOT_YET = Symbol('valsem.raw-array.not-yet');
 
 /**
  * A raw array — as parsed from JSON — that admits its elements on demand.
- * `slice(start, end)` is the canonical array of that range; `at(i)` one
+ * `slice(start, end)` is the canonical array of that range; `get(i)` one
  * canonical element. Elements are interned once and memoized per slot, so
  * the same row is the same object across slices and, when its content is
  * unchanged, across views over successive fetches.
@@ -70,6 +70,11 @@ export class RawArray<T> {
     this.#canon[i] = v;
     this.#raw[i] = undefined; // the raw record is not needed again
     return v;
+  }
+
+  /** The canonical element at `index`, admitted on first read. The index must name an element: an integer in `[0, length)`, or a `RangeError`; the result is a `T`. */
+  get(index: number): T {
+    return this.#admit(elementIndex(index, this.#canon.length, 'RawArray.get'));
   }
 
   /** The canonical element at `index`, admitted on first read, as `Array.prototype.at` reads the index: a negative one counts from the end, and one that names nothing gives `undefined`. */

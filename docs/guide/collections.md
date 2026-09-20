@@ -45,15 +45,18 @@ m1.get('sp');                    // 5
 **A position is checked.** What happens to an index depends on what it
 names, and what fails throws a `RangeError` before anything is touched:
 
-- **A read is `at(i)`, and it is `Array.prototype.at`**, on `ValueList`,
-  `RawArray` and the ordered collections: a negative index counts from the
-  end, so `list.at(-1)` is the last element, and an index that names nothing
-  gives `undefined`, as `map.get(key)` does for a key that is not there.
-  There is no second, throwing accessor. An `undefined` from inside
-  `[0, length)` is an element; compare with `length` to tell.
-- **An edit names an element** (`set`, `remove`): an integer in
-  `[0, length)`. A read of nothing has an answer; a write to nowhere does
-  not.
+- **An element** (`get`, `set`, `remove`) must exist: an integer in
+  `[0, length)`. `list.get(i)` is what `arr[i]` is to an array, with its type
+  made true: it returns a `T`, not a `T | undefined`, because a missing
+  element throws instead of coming back as an `undefined` typed `T`. A loop
+  over `length` needs no `!`, and an `undefined` that comes back *is* an
+  element.
+- **`at(i)` is `Array.prototype.at`**, on `ValueList`, `RawArray` and the
+  ordered collections: a negative index counts from the end, so
+  `list.at(-1)` is the last element, and an index that names nothing gives
+  `undefined`. It is the read to probe with. The ordered collections have
+  `at` alone; their strict reads are their lists', `m.keyList.get(i)` and
+  `s.valueList.get(i)`.
 - **An insertion point** (`insert`, `insertAt`, `splice`'s `start`) is an
   integer in `[0, length]`, never counted from the end, so the `-1` of an
   `indexOf` miss cannot quietly mean "the last one".
@@ -73,10 +76,10 @@ names, and what fails throws a `RangeError` before anything is touched:
 
 ```ts
 const list = ValueList.of('a', 'b', 'c');
-list.at(1);                      // 'b', typed string | undefined
-list.at(-1);                     // 'c'
+list.get(1);                     // 'b', typed string
+list.get(3);                     // RangeError: ValueList.get: index 3 out of range [0, 3)
+list.at(-1);                     // 'c', typed string | undefined
 list.at(3);                      // undefined
-list.set(3, 'x');                // RangeError: ValueList.set: index 3 out of range [0, 3)
 list.remove(['a'].indexOf('z')); // RangeError: ValueList.remove: index -1 out of range [0, 3)
 list.slice(-2).toArray();        // ['b', 'c']: a range clamps, as Array's does
 list.slice(0, 10).length;        // 3
@@ -118,9 +121,9 @@ any other collection (`list.filter(() => true) === list`), and a set's `map`
 merges equal results.
 
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
-read with `at(i)` (a size-table walk; sequential reads stay in one leaf),
+read with `get(i)` (a size-table walk; sequential reads stay in one leaf),
 iterate in index order, and take the interned frozen snapshot with
-`toArray()` — explicitly O(n), weakly memoized, with `toArray()[i] === at(i)`
+`toArray()` — explicitly O(n), weakly memoized, with `toArray()[i] === get(i)`
 always. Because a chunk boundary is a property of the elements beside it,
 the tree's shape is a function of the content alone, so `insert`, `remove`,
 `splice`, `slice` and `concat` are O(log n) expected (they disturb only the
@@ -248,7 +251,7 @@ instances and come back `===`. It is not a value of its content — two views
 over equal JSON are two values, by identity — so it sits inside canonical
 state as an opaque leaf: it is canonical by construction, so `intern` and
 `produce` return it as it is.
-`slice()` with no arguments admits everything, and `at(i)` reads one row;
+`slice()` with no arguments admits everything, and `get(i)` reads one row;
 there is deliberately no iteration, so the O(n) step is always spelled out.
 
 ```ts
