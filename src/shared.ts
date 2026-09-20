@@ -29,7 +29,7 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
  * Positional arguments are CHECKED, never coerced (D45). Three kinds, by what
  * the argument names:
  *
- * - an ELEMENT ({@link elementIndex}: `get`, `at`, `set`, `remove`): an
+ * - an ELEMENT ({@link elementIndex}: `get`, `set`, `remove`): an
  *   integer in `[0, length)`. There is no element anywhere else, so there is
  *   nothing to answer with and nothing to edit;
  * - an INSERTION POINT ({@link insertionIndex}: `insert`, `insertAt`,
@@ -72,6 +72,18 @@ export function spliceCount(deleteCount: number | undefined, itemCount: number, 
     throw new RangeError(`${operation}: deleteCount must be an integer when items follow it, got undefined (Infinity removes through the end)`);
   }
   return deleteCount;
+}
+
+/**
+ * `Array.prototype.at`'s reading of an index: counted from the end when
+ * negative, and -1 when it names nothing, which is `at`'s `undefined`. Its
+ * bounds are `Array`'s; its type is not, as everywhere (D45): a non-integer
+ * is an upstream computation gone wrong, and throws.
+ */
+export function atIndex(index: number, length: number, operation: string): number {
+  const i = indexArg(index, operation, 'index');
+  const k = i < 0 ? length + i : i;
+  return k >= 0 && k < length ? k : -1;
 }
 
 /** The index of an element that exists: an integer in `[0, length)`. */

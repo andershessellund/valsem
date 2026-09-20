@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -332,7 +332,7 @@ export class ValueList<T> implements Iterable<T> {
   /** The open last run (canonical elements), possibly empty. */
   readonly #tail: readonly unknown[];
   readonly #hash: number;
-  /** The leaf of the last `get`, with its index range — sequential reads stay in one leaf. */
+  /** The leaf of the last read, with its index range — sequential reads stay in one leaf. */
   readonly #last: { start: number; end: number; leaf: CNode | null };
 
   private constructor(root: CNode | null, tail: readonly unknown[], hash: number) {
@@ -422,11 +422,24 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /**
+   * The element at `index`, as `Array.prototype.at` reads it: a negative index
+   * counts from the end (`at(-1)` is the last element), and one that names
+   * nothing gives `undefined`. What `arr.at(i)` is to an array; {@link get}
+   * is what `arr[i]` is. A non-integer throws (D45).
+   */
+  at(index: number): T | undefined {
+    const i = atIndex(index, this.length, 'ValueList.at');
+    return i === -1 ? undefined : this.get(i);
+  }
+
+  /**
    * The element at `index`, which must name one: an integer in
-   * `[0, length)`, or a `RangeError`. So the result is a `T`, and an
-   * `undefined` that comes back is an element (check `i < list.length` to
-   * probe). A size-table walk (O(log n)); the leaf of the last read is
-   * cached, so sequential reads stay in one leaf.
+   * `[0, length)`, or a `RangeError`. What `arr[i]` is to an array, with its
+   * type made true: the result is a `T` because a missing element throws
+   * instead of coming back as an `undefined` typed `T`. So an `undefined`
+   * that comes back is an element, and a loop over `length` needs no `!`.
+   * {@link at} is the read that probes. A size-table walk (O(log n)); the
+   * leaf of the last read is cached, so sequential reads stay in one leaf.
    */
   get(index: number): T {
     const root = this.#root;

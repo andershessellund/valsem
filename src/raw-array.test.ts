@@ -42,6 +42,9 @@ describe('RawArray', () => {
     expect(view.get(1)).toBeUndefined(); // a hole is an element, and it is undefined
     expect(() => view.get(3)).toThrow(RangeError); // no element there
     expect(() => view.get(-1)).toThrow(RangeError);
+    expect(view.at(-1)).toBe(3); // at is Array.prototype.at: from the end, and undefined for no element
+    expect(view.at(3)).toBeUndefined();
+    expect(view.at(1)).toBeUndefined(); // the hole
     expect(view.slice(-2)).toBe(intern([undefined, 3]));
     expect(view.slice(1, 100)).toBe(intern([undefined, 3]));
     expect(view.slice(5, 2)).toBe(intern([]));

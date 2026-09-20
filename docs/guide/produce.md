@@ -138,8 +138,9 @@ is not a value, and is rejected with a teaching error. Await your data first,
 then produce.
 
 **Positions are checked.** The collection drafts follow their values:
-`d.list.get(i)`, `set(i, v)` and the ordered drafts' `at(i)` name an element
-that must exist, `d.list.splice(start, count)` takes a `start` in
+`d.list.get(i)` and `set(i, v)` name an element that must exist (`at(i)` is
+`Array`'s: from the end when negative, `undefined` for no element, and a
+draft where `get` gives one, so `d.list.at(-1)!.done = true` edits), `d.list.splice(start, count)` takes a `start` in
 `[0, length]` and a count that means "up to", and anything else is a
 `RangeError` (see [the collections guide](./collections)). A plain array in
 a recipe is an `Array`, and its reads and its bounds are the native ones;

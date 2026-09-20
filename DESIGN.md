@@ -430,9 +430,10 @@ and does not pretend to be (D29).
   unchanged write returns `this`.
 - **Checked positions.** A positional argument is checked by what it names,
   and fails with a `RangeError` before anything is touched. An *element*
-  (`get`, `at`, `keyAt`, `valueAt`, `set`, `remove`) is an integer in
-  `[0, length)`, so those reads return `T`, never `undefined` for "not
-  there". An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
+  (`get`, `set`, `remove`) is an integer in `[0, length)`, so `get` returns
+  `T`, never `undefined` for "not there": `arr[i]` with its type made true.
+  `at` is `Array.prototype.at`: a negative index from the end, and
+  `undefined` for no element (D56). An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
   an integer in `[0, length]`, not counted from the end. A *range*
   has an answer wherever it points, the part that exists: `slice`'s bounds
   keep `Array`'s clamping whole, and `splice`'s count is an amount, an
@@ -575,7 +576,7 @@ lists alone (`OrderedMap`: hash of the two list hashes; hit when both lists
 are `===`). `keyList` and `valueList` are public: two maps with the same
 keys in the same order share one key list whatever their values did.
 
-Operations: `get`, `has`, `indexOf`, `at`, `keyAt`, `valueAt`, `first`,
+Operations: `get`, `has`, `indexOf`, `at`, `first`,
 `last`, `set` (a present key keeps its position; a new key appends),
 `delete`, `insertAt`, all O(log n) expected. A structural edit runs the
 list operation under `_record`, sets or removes the trie entry (a new key

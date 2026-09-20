@@ -37,7 +37,7 @@ import {
 import { intern } from './intern.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { extentArg, spliceCount, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { atIndex, extentArg, spliceCount, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -101,8 +101,20 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   }
 
   /**
+   * The element at `index` (drafted, if it can be), as `ValueList.at` and
+   * `Array.prototype.at` read it: a negative index counts from the end, and
+   * one that names nothing gives `undefined`. `d.todos.at(-1)!.done = true`
+   * edits.
+   */
+  at(index: number): Draft<T> | undefined {
+    const i = atIndex(index, this.length, 'DraftList.at');
+    return i === -1 ? undefined : this.get(i);
+  }
+
+  /**
    * The element at `index` (drafted, if it can be), which must name one: an
-   * integer in `[0, length)`, or a `RangeError`.
+   * integer in `[0, length)`, or a `RangeError`, as `ValueList.get`. So
+   * `d.todos.get(i).done = true` needs no `!`. `at` is the read that probes.
    *
    * The return type is `Draft<T>`, spelled so that TypeScript can still see
    * the class as covariant: `T & undefined` is `never` unless the list holds
@@ -236,7 +248,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   }
 
   // What does not edit answers about the VALUE this draft would be right now
-  // (its snapshot, `current(draft)`), and gives back values, not drafts: `get`
+  // (its snapshot, `current(draft)`), and gives back values, not drafts: `get`, `at`
   // and iteration hand out drafts. Assign the result into a slot to keep it.
 
   /** Elements `[start, end)` of the list as it is right now, as `ValueList.slice`: a value, not a draft. */

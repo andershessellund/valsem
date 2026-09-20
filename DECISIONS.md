@@ -623,9 +623,11 @@ runs before the draft is marked or copied, so a recipe that catches the
 error carries on with an untouched draft. **Rejected:** `TypeError` for
 non-numbers and `RangeError` for non-integers, as Temporal splits them: two
 error types for one mistake, and `set` and `insertAt` already answered
-`RangeError` for both. **Rejected:** negative indices in `at`, after
-`Array.prototype.at`: one rule for every element accessor is worth more than
-the namesake, and `last()` exists. **Cost.** Breaking for callers who relied
+`RangeError` for both. **Rejected, then reversed (D56):** negative indices
+in `at`, after `Array.prototype.at`; the argument then was that one rule for
+every element accessor is worth more than the namesake. D56 also removed the
+ordered collections' `keyAt` and `valueAt`; `get(i)` stands as described
+here. **Cost.** Breaking for callers who relied
 on any of it; and `DraftList.get`'s return type is spelled `Draft<T> | (T &
 undefined)`, which is `Draft<T>` exactly, because a bare conditional type
 there is opaque to TypeScript's variance check and `ValueList<number>`
@@ -1405,6 +1407,41 @@ The last pass over the public names, while renaming still costs nothing.
 `size` is a getter: it walks every bucket and dereferences every weak
 reference, and a property should not cost O(n). **Cost.** Breaking, four
 times; nothing is published under the old names that anyone depends on.
+
+### D56. Two positional reads, as on `Array`: `get` is `arr[i]` with its type made true, `at` is `Array.prototype.at`
+
+A sequence has the two reads an array has. `get(i)`, on `ValueList`,
+`DraftList` and `RawArray`, names an element that must exist, an integer in
+`[0, length)` or a `RangeError`, and so returns `T`. `at(i)`, on those and on
+`OrderedSet`, `OrderedMap` and their drafts, reads its index as
+`Array.prototype.at` does: a negative index counts from the end, and one that
+names no element gives `undefined`. The ordered collections' `keyAt` and
+`valueAt` are gone.
+
+**Why.** D45 refused negative indices in `at`: one rule for every element
+accessor, and `last()` exists. But `at` is not a legacy name with legacy
+behaviour. It was added to the language in 2022 for exactly one reason,
+`arr.at(-1)`, so a method called `at` that throws on `-1` contradicts the
+only thing its name says; and since D52 the rule here is that a borrowed name
+brings its arguments. Once `at` was `Array`'s, the strict reads beside it
+looked like surplus, and for an afternoon they were removed. What that cost
+is the reason they existed: `at` returns `T | undefined`, so every indexed
+read became `list.at(i)!`, an assertion that many codebases lint against and
+that fails silently where `get` fails loudly. An array has the same two
+reads for the same reason, `arr[i]` typed `T` and `arr.at(i)` typed
+`T | undefined`; a `ValueList` cannot offer `[i]`, so `get(i)` stands in for
+it, and makes the type true by throwing where `arr[i]` hands back an
+`undefined` typed `T`. `ValueMap.get(key)` answers `undefined` and
+`ValueList.get(i)` throws, and both return types are honest: whether an
+index exists can be read off `length`, whether a key exists cannot be known
+without asking. `keyAt` and `valueAt` did not come back. They were three
+methods ending in `At` of which two threw and one did not, and nothing is
+lost without them: `keyList` and `valueList` are `ValueList`s, so
+`m.keyList.get(i)` and `s.valueList.get(i)` are the strict reads, and
+`m.at(i)` the entry. What is not borrowed from `Array` is the coercion, as
+everywhere since D45: `at(0.5)` and `at(NaN)` throw, where `Array` reads
+index 0. **Cost.** Breaking on the ordered collections: `at` returns
+`T | undefined` where it threw, and `keyAt` / `valueAt` are removed.
 
 ## Non-goals
 

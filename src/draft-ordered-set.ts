@@ -79,9 +79,9 @@ export class DraftOrderedSet<T> implements Iterable<T> {
     return (snapshotOf(this) as OrderedSet<T>).valueList;
   }
 
-  /** The member at `index`, which must name one: an integer in `[0, size)`, or a `RangeError`. */
-  at(index: number): T {
-    return this.#state.work.at(index) as T;
+  /** The member at `index` as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. */
+  at(index: number): T | undefined {
+    return this.#state.work.at(index) as T | undefined;
   }
 
   first(): T | undefined {

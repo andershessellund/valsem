@@ -45,11 +45,18 @@ m1.get('sp');                    // 5
 **A position is checked.** What happens to an index depends on what it
 names, and what fails throws a `RangeError` before anything is touched:
 
-- **An element** (`get`, `set`, `remove`, and `at`/`keyAt`/`valueAt` on the
-  ordered collections) must exist: an integer in `[0, length)`. So `get(i)`
-  returns a `T`, not a `T | undefined`, a loop over `length` needs no `!`,
-  and an `undefined` that comes back *is* an element. To probe, compare with
-  `length`.
+- **An element** (`get`, `set`, `remove`) must exist: an integer in
+  `[0, length)`. `list.get(i)` is what `arr[i]` is to an array, with its type
+  made true: it returns a `T`, not a `T | undefined`, because a missing
+  element throws instead of coming back as an `undefined` typed `T`. A loop
+  over `length` needs no `!`, and an `undefined` that comes back *is* an
+  element.
+- **`at(i)` is `Array.prototype.at`**, on `ValueList`, `RawArray` and the
+  ordered collections: a negative index counts from the end, so
+  `list.at(-1)` is the last element, and an index that names nothing gives
+  `undefined`. It is the read to probe with. The ordered collections have
+  `at` alone; their strict reads are their lists', `m.keyList.get(i)` and
+  `s.valueList.get(i)`.
 - **An insertion point** (`insert`, `insertAt`, `splice`'s `start`) is an
   integer in `[0, length]`, never counted from the end, so the `-1` of an
   `indexOf` miss cannot quietly mean "the last one".
@@ -71,6 +78,8 @@ names, and what fails throws a `RangeError` before anything is touched:
 const list = ValueList.of('a', 'b', 'c');
 list.get(1);                     // 'b', typed string
 list.get(3);                     // RangeError: ValueList.get: index 3 out of range [0, 3)
+list.at(-1);                     // 'c', typed string | undefined
+list.at(3);                      // undefined
 list.remove(['a'].indexOf('z')); // RangeError: ValueList.remove: index -1 out of range [0, 3)
 list.slice(-2).toArray();        // ['b', 'c']: a range clamps, as Array's does
 list.slice(0, 10).length;        // 3

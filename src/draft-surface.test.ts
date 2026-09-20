@@ -69,7 +69,7 @@ describe('DraftList: insert, remove, shift, unshift, forEach', () => {
   });
 });
 
-describe('DraftSet.entries and DraftOrderedMap.valueAt', () => {
+describe('DraftSet.entries and DraftOrderedMap.at', () => {
   it('entries: [value, value] pairs of what the draft holds', () => {
     produce(intern({ s: ValueSet.from(['a']) }), (d) => {
       d.s.add('b');
@@ -78,15 +78,17 @@ describe('DraftSet.entries and DraftOrderedMap.valueAt', () => {
     });
   });
 
-  it('valueAt: the value at a position, drafted, so it can be edited through', () => {
+  it('at: the entry at a position, its value drafted, so it can be edited through', () => {
     const base = intern({ m: OrderedMap.from([['a', { v: 1 }], ['b', { v: 2 }]]) });
     const next = produce(base, (d) => {
-      d.m.valueAt(1).v = 20;
-      expect(d.m.valueAt(1)).toBe(d.m.get('b'));
-      for (const i of [2, -1, 0.5, NaN]) expect(() => d.m.valueAt(i)).toThrow(RangeError);
+      d.m.at(1)![1].v = 20;
+      expect(d.m.at(1)![1]).toBe(d.m.get('b'));
+      expect(d.m.at(-1)![1]).toBe(d.m.get('b'));
+      expect(d.m.at(2)).toBeUndefined();
+      for (const i of [0.5, NaN]) expect(() => d.m.at(i)).toThrow(RangeError);
     });
-    expect(next.m.valueAt(1)).toEqual({ v: 20 });
-    expect(next.m.valueAt(0)).toBe(base.m.valueAt(0));
+    expect(next.m.at(1)).toEqual(['b', { v: 20 }]);
+    expect(next.m.at(0)![1]).toBe(base.m.at(0)![1]);
   });
 });
 
@@ -94,7 +96,7 @@ describe('what does not edit answers about the value the draft would be right no
   it('DraftList.slice and concat: values, with the pending edits in them', () => {
     const base = intern({ l: ValueList.of({ n: 1 }, { n: 2 }, { n: 3 }), top: ValueList.empty<{ n: number }>() });
     const next = produce(base, (d) => {
-      d.l.get(0).n = 10; // a pending edit through a child draft
+      d.l.at(0)!.n = 10; // a pending edit through a child draft
       d.l.push({ n: 4 });
       expect(d.l.slice(0, 2)).toBe(ValueList.of({ n: 10 }, { n: 2 }));
       expect(d.l.slice(-1)).toBe(ValueList.of({ n: 4 })); // a range: Array's bounds

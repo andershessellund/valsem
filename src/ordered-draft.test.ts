@@ -35,7 +35,7 @@ describe('DraftOrderedMap', () => {
       expect(d.size).toBe(3);
       expect(d.has('b')).toBe(true);
       expect(d.indexOf('c')).toBe(2);
-      expect(d.keyAt(1)).toBe('b');
+      expect(d.at(1)![0]).toBe('b');
       expect(d.first()![0]).toBe('a');
       expect(d.last()![0]).toBe('c');
       expect(d.at(1)![1].n).toBe(2);

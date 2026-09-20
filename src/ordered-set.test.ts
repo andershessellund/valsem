@@ -48,8 +48,9 @@ describe('OrderedSet', () => {
     expect(s.indexOf('c')).toBe(2);
     expect(s.indexOf('z')).toBe(-1);
     expect(s.at(1)).toBe('b');
-    expect(() => s.at(5)).toThrow(RangeError);
-    expect(() => s.at(-1)).toThrow(RangeError); // not counted from the end: that is last()
+    expect(s.at(5)).toBeUndefined(); // as Array.prototype.at
+    expect(s.at(-1)).toBe(s.last());
+    expect(s.at(-4)).toBeUndefined();
     expect(s.first()).toBe('a');
     expect(s.last()).toBe('c');
     expect(OrderedSet.empty().last()).toBeUndefined();
