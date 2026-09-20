@@ -47,7 +47,7 @@ export const leaf: fc.Arbitrary<unknown> = fc.oneof(
   { weight: 1, arbitrary: fc.bigInt({ min: -(2n ** 70n), max: 2n ** 70n }) },
   { weight: 1, arbitrary: fc.constantFrom(Symbol.for('valsem.prop.a'), Symbol.for('valsem.prop.b'), Symbol.iterator, ...UNIQUE_SYMBOLS) },
   { weight: 1, arbitrary: fc.string({ maxLength: 4 }).map((s) => InternedString.for(s)) },
-  { weight: 1, arbitrary: fc.integer({ min: -8.64e15, max: 8.64e15 }).map((ms) => ValueDate.of(ms)) },
+  { weight: 1, arbitrary: fc.integer({ min: -8.64e15, max: 8.64e15 }).map((ms) => ValueDate.from(ms)) },
   { weight: 1, arbitrary: fc.constantFrom(...RAW_ARRAYS) },
 );
 
@@ -139,7 +139,7 @@ export function mutableClone(v: unknown): unknown {
  */
 export function shuffledClone(v: unknown, rnd: () => number): unknown {
   if (v instanceof InternedString) return InternedString.for(v.value);
-  if (v instanceof ValueDate) return rnd() < 0.5 ? ValueDate.of(v.valueOf()) : ValueDate.of(v.toDate());
+  if (v instanceof ValueDate) return rnd() < 0.5 ? ValueDate.from(v.valueOf()) : ValueDate.from(v.toDate());
   if (v instanceof RawArray) return v; // a value by identity: its only equal is itself
   if (typeof v === 'bigint') return BigInt(v.toString());
   if (v instanceof OrderedMap) {

@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
-import { intern, internHash, isCanonical, fastEquals } from './intern.js';
+import { intern, internHash, isCanonical, fastEqual } from './intern.js';
 import { HashMap } from './hash-map.js';
 import { HashSet } from './hash-set.js';
 import { ValueList } from './value-list.js';
@@ -60,8 +60,8 @@ describe('a class with [equals] and [hashCode] is a value', () => {
     expect(deepEqual(a, eur(5))).toBe(true);
     expect(deepEqual(eur(5), a)).toBe(true);
     expect(deepEqual(a, intern(eur(6)))).toBe(false);
-    expect(fastEquals(a, intern(eur(5)))).toBe(true);
-    expect(() => fastEquals(a, eur(5))).toThrow(/instance of Money/);
+    expect(fastEqual(a, intern(eur(5)))).toBe(true);
+    expect(() => fastEqual(a, eur(5))).toThrow(/instance of Money/);
   });
 
   it('converges nested in records, arrays and the collections', () => {
@@ -87,7 +87,7 @@ describe('a class with [equals] and [hashCode] is a value', () => {
     m.set(eur(1), 'uno');
     expect(m.size).toBe(1);
     expect([...m.keys()][0]).toBe(intern(eur(1)));
-    expect(m.getOrCreate(eur(1), () => 'never')).toBe('uno');
+    expect(m.getOrInsertComputed(eur(1), () => 'never')).toBe('uno');
     expect(m.delete(eur(1))).toBe(true);
 
     const s = new HashSet<Money>();
@@ -519,8 +519,8 @@ describe('the protocol, at its edges', () => {
     const orphan: object = Object.create(Object.create(null)); // not plain, and no `constructor` anywhere
     expect(() => deepHash(orphan)).toThrow(/^deepHash: /);
     expect(() => intern(orphan)).toThrow(TypeError);
-    expect(() => fastEquals(new Anonymous(), 1)).toThrow(/an instance of an unregistered class/);
-    expect(() => fastEquals(orphan, 1)).toThrow(/a raw object/);
+    expect(() => fastEqual(new Anonymous(), 1)).toThrow(/an instance of an unregistered class/);
+    expect(() => fastEqual(orphan, 1)).toThrow(/a raw object/);
     // (memoize once named it with `??`, and '' is not nullish: "an instance of , which…")
     expect(() => memoize(() => new Anonymous())()).toThrow(/returned an instance of an anonymous class, which/);
     expect(() => memoize(() => orphan)()).toThrow(/returned an instance of an anonymous class, which/);

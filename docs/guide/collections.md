@@ -267,7 +267,7 @@ cache.set({ table: 'users', id: '1' }, row);
 cache.get({ id: '1', table: 'users' }); // → row  (field order irrelevant)
 
 // Avoid the has/get/set dance:
-const row2 = cache.getOrCreate({ table: 'users', id: '2' }, loadRow);
+const row2 = cache.getOrInsertComputed({ table: 'users', id: '2' }, loadRow);
 
 const seen = new HashSet<{ x: number; y: number }>();
 seen.add({ x: 1, y: 2 });
@@ -281,7 +281,7 @@ that is already canonical — your state, anything out of `intern`, `produce`
 or a collection — costs one cache probe over the native lookup, 10–20 ns.
 A raw key is interned first: a pool lookup, about 300 ns for a small record,
 and a copy into the pool when the key is new. Two consequences: iteration
-yields canonical keys, ready for `fastEquals` or a native `Map`; and a key
+yields canonical keys, ready for `fastEqual` or a native `Map`; and a key
 mutated after insertion changes nothing, because the stored key is the
 canonical copy, not your object.
 

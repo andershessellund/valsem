@@ -96,7 +96,7 @@ function describeNonCanonical(value: unknown): string {
  * (whose `===` would be a silent `false`). `skipChecks()` turns the check
  * off; the comparison is then a bare `===`.
  */
-export function fastEquals(a: unknown, b: unknown): boolean {
+export function fastEqual(a: unknown, b: unknown): boolean {
   if (_checking()) {
     if (!isCanonical(a)) throw nonCanonical('first', a);
     if (!isCanonical(b)) throw nonCanonical('second', b);
@@ -106,7 +106,7 @@ export function fastEquals(a: unknown, b: unknown): boolean {
 
 function nonCanonical(which: string, value: unknown): TypeError {
   return new TypeError(
-    `valsem: fastEquals() compares canonical values by identity, but its ${which} argument is ${describeNonCanonical(value)}. ` +
+    `valsem: fastEqual() compares canonical values by identity, but its ${which} argument is ${describeNonCanonical(value)}. ` +
       'Intern it first (intern(), produce(), or a collection), or use deepEqual(). skipChecks() disables this check.',
   );
 }

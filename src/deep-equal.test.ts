@@ -394,7 +394,7 @@ describe('mutable built-ins — tier-1 registration is contained', () => {
     expect(deepEqual(new Date(5), new Date(5))).toBe(true);
     expect(deepEqual(new Date(5), new Date(6))).toBe(false);
     const { deepHash } = await import('./deep-hash.js');
-    expect(() => deepHash(new Date(5))).toThrow(/ValueDate\.of/);
+    expect(() => deepHash(new Date(5))).toThrow(/ValueDate\.from/);
     const { intern } = await import('./intern.js');
     expect(() => intern(new Date(5))).toThrow(/Temporal\.Instant/);
     expect(() => intern({ at: new Date(5) })).toThrow(/Temporal\.Instant/);

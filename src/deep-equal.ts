@@ -142,7 +142,7 @@ export function _setCanonicalProbe(probe: (obj: object) => boolean): void {
  * throw and all share these strings.
  */
 const MUTABLE_BUILTINS = new Map<Function, string>([
-  [Date, 'a Date can be re-timed with setTime(). Use ValueDate.of(date) instead — an ' +
+  [Date, 'a Date can be re-timed with setTime(). Use ValueDate.from(date) instead — an ' +
     'immutable, canonical timestamp with toDate() for a mutable copy — or Temporal.Instant ' +
     "via import 'valsem/temporal'"],
   [RegExp, 'a RegExp carries a mutable lastIndex cursor, and is behavior rather than ' +

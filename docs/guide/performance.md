@@ -13,7 +13,7 @@ and how to hold a state that gets large.
 valsem enforces two promises its callers make. It **freezes** every plain
 record and array it canonicalises, so the promise "nobody mutates a shared
 value" is kept by the engine (a mutation throws in strict mode). And where
-an API says *canonical only* — `fastEquals(a, b)` — it **checks** that the
+an API says *canonical only* — `fastEqual(a, b)` — it **checks** that the
 caller kept that promise, because the alternative is a silent wrong answer
 (`===` on a raw object is `false`).
 
@@ -26,7 +26,7 @@ at startup, the way Angular's `enableProdMode()` is:
 import { skipChecks, skipFreezing } from 'valsem';
 
 if (process.env.NODE_ENV === 'production') {
-  skipChecks();   // fastEquals trusts its arguments
+  skipChecks();   // fastEqual trusts its arguments
   skipFreezing(); // canonical records and arrays are no longer frozen
 }
 ```

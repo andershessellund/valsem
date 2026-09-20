@@ -1,7 +1,7 @@
 // Runs in its own worker: skipFreezing() is one-way and process-global.
 import { describe, it, expect } from 'vitest';
 import { skipFreezing } from './checks.js';
-import { intern, isCanonical, fastEquals } from './intern.js';
+import { intern, isCanonical, fastEqual } from './intern.js';
 import { produce, produceWithPatches } from './produce.js';
 import { deepEqual } from './deep-equal.js';
 import { ValueList } from './value-list.js';
@@ -28,18 +28,18 @@ describe('after skipFreezing()', () => {
   it('collections and value types still freeze their own instances', () => {
     expect(Object.isFrozen(ValueList.of(1))).toBe(true);
     expect(Object.isFrozen(ValueMap.from([[1, 1]]))).toBe(true);
-    expect(Object.isFrozen(ValueDate.of(0))).toBe(true);
+    expect(Object.isFrozen(ValueDate.from(0))).toBe(true);
     for (const t of VALUE_TYPES) expect(Object.isFrozen(t.sample()), t.name).toBe(true);
   });
 
-  it('canonicality, hash-consing, equality and fastEquals are unaffected', () => {
+  it('canonicality, hash-consing, equality and fastEqual are unaffected', () => {
     const a = intern({ x: [1, { y: 2 }] });
     expect(intern({ x: [1, { y: 2 }] })).toBe(a);
     expect(isCanonical(a)).toBe(true);
     expect(isCanonical(a.x)).toBe(true);
     expect(deepEqual(a, intern({ x: [1, { y: 2 }] }))).toBe(true);
-    expect(fastEquals(a, intern({ x: [1, { y: 2 }] }))).toBe(true);
-    expect(() => fastEquals(a, { x: 1 })).toThrow(/raw object/); // checks are a separate switch
+    expect(fastEqual(a, intern({ x: [1, { y: 2 }] }))).toBe(true);
+    expect(() => fastEqual(a, { x: 1 })).toThrow(/raw object/); // checks are a separate switch
     const m = new HashMap<object, number>();
     m.set(a, 1);
     expect(m.get({ x: [1, { y: 2 }] })).toBe(1);

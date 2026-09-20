@@ -32,7 +32,7 @@ through any other view over the same buffer anyway. **Rejected:**
 half-support. Before removal, `HashMap.get()` silently missed on
 structurally equal `Date` keys; loud rejection replaced silent wrong
 answers. **Cost.** Users wrap dates and maps. `ValueDate` exists so that
-wrapping a date is `ValueDate.of(date)` with JSON parity; a `ValueRegExp`
+wrapping a date is `ValueDate.from(date)` with JSON parity; a `ValueRegExp`
 was considered and dropped for lack of a use. TypedArray support can return
 gated on `buffer.immutable` once TC39's immutable-`ArrayBuffer` ships.
 DESIGN.md §2.2.
@@ -330,7 +330,7 @@ argument +30–39% (a miss on an absent property is dearer than a miss in a
 `WeakMap`). It trades the common case for the rare one, on top of what D11
 already held against it. **Rejected: several capped `WeakMap`s**, newest
 first: every lookup on a canonical object would probe each table, and that
-lookup is the hot path (`deepHash` of a canonical child, `fastEquals`).
+lookup is the hot path (`deepHash` of a canonical child, `fastEqual`).
 **Rejected: `[hashCode]` as the carrier**: one number where three are
 needed, no room for an owner check, and on a plain record that symbol is
 content (D9). DESIGN.md §3.4; the guide's Performance and scale page.
@@ -950,7 +950,7 @@ level: a canonical nested inside the recipe's own raw literal (`d.k = {
 inner: c }`) is read off that raw object, not off a draft, and a write
 through it throws the engine's `TypeError` on the frozen `c`; proxying the
 recipe's own material to catch it would undo the raw-material rule.
-`draft(value)` opts material in explicitly (D42). **Decided, unbuilt:** schema-compiled accessor drafts for
+`draftOf(value)` opts material in explicitly (D42). **Decided, unbuilt:** schema-compiled accessor drafts for
 closed-schema records (real `get`/`set` accessors per known field, a fixed
 hidden-class shape, cached by schema content, proxy-free) with automatic
 fallback to the proxy path; invisible by rule 4 of D29. DESIGN.md §7.2.
@@ -1069,7 +1069,7 @@ DESIGN.md §7.2, §7.7, §10.3.
 
 ### D16. Two switches the user owns; nothing reads the environment
 
-`skipChecks()` stops verifying *canonical only* arguments (`fastEquals`);
+`skipChecks()` stops verifying *canonical only* arguments (`fastEqual`);
 `skipFreezing()` stops freezing canonical records and arrays. Both are on
 by default, one-way, and independent of `NODE_ENV`.
 
@@ -1213,9 +1213,9 @@ field `[hashCode]` nor verify immutability; `intern` answers per instance,
 and a binding learns the answer the same way: it returns the canonical
 instance or throws naming what the class lacks. DESIGN.md §10.
 
-### D42. `draft(value)` is a detached root inside the recipe's scope; there is no `finishDraft`
+### D42. `draftOf(value)` is a detached root inside the recipe's scope; there is no `finishDraft`
 
-`draft(value)`, called inside a recipe, returns a draft of any draftable
+`draftOf(value)`, called inside a recipe, returns a draft of any draftable
 with no location in the recipe's draft. It resolves wherever it is attached
 or returned, is dropped if neither, and is revoked with the recipe.
 
@@ -1229,7 +1229,7 @@ states (`Scope.states`; `assertAssignable` checks scope membership, not
 lineage; `resolve` and `adopt` finalise a draft wherever the walk meets
 it), so a second root costs the guards only: identity on a draft of this
 scope, an error on one from another, pass-through for leaves. The one rule
-that shifts is D36's "foreign material stays raw": raw by default, `draft`
+that shifts is D36's "foreign material stays raw": raw by default, `draftOf`
 opts in. Independence from a child draft over the same base follows from
 D36's per-location wrappers and is the immer `createDraft` semantics.
 **Rejected:** immer's `createDraft`/`finishDraft`, a draft whose lifetime
@@ -1381,6 +1381,30 @@ nothing here closes the door. **Rejected:** `find` on the sets, until set
 members can be drafted at all (D53). **Cost.** Seven methods on the list, five on
 each set, and as many on the drafts, over four shared helpers; their size in
 a bundle is not measured here.
+### D55. Four names settled before 1.0: `draftOf`, `ValueDate.from`, `fastEqual`, `getOrInsertComputed`
+
+The last pass over the public names, while renaming still costs nothing.
+
+- **`draft(value)` is `draftOf(value)`.** Every recipe in every immer
+  tutorial, and `produce`'s own signature, names its parameter `draft`, and
+  inside `(draft) => { … }` the function could not be called: the parameter
+  shadows the import. The internal helper that had the name is
+  `draftStateFor`.
+- **`ValueDate.of(x)` is `ValueDate.from(x)`.** Everywhere else in valsem `of`
+  takes the elements (`ValueList.of(1, 2)`) and `from` converts something
+  (`ValueList.from(array)`), as on `Array`; a date, a string or an epoch is
+  converted. `Temporal` says `from` too.
+- **`fastEquals` is `fastEqual`.** It stands beside `deepEqual`, and one
+  library should not spell the word two ways.
+- **`HashMap.getOrCreate` is `getOrInsertComputed`, and `getOrInsert` joins
+  it.** `HashMap` is documented as `Map`'s twin, and `Map.prototype` now has
+  both under those names (Node 26 ships them), with the semantics `getOrCreate`
+  already had.
+
+**Considered and left.** `InternPool.size()` stays a method though every other
+`size` is a getter: it walks every bucket and dereferences every weak
+reference, and a property should not cost O(n). **Cost.** Breaking, four
+times; nothing is published under the old names that anyone depends on.
 
 ## Non-goals
 

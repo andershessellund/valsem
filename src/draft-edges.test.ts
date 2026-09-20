@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { inspect } from 'node:util';
-import { produce, draft } from './produce.js';
+import { produce, draftOf } from './produce.js';
 import { current } from './current.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
@@ -116,7 +116,7 @@ describe('a draft cannot be assigned into itself', () => {
     expect(() => produce(intern([1] as unknown[]), (d) => void d.push(d))).toThrow(CYCLE);
     expect(() => produce(ValueMap.from<string, unknown>([['k', 1]]), (m) => void m.set('me', m))).toThrow(CYCLE);
     expect(() => produce(ValueList.of<unknown>(1), (l) => void l.push(l))).toThrow(CYCLE);
-    expect(() => produce(intern({ a: 1 }), () => { const f = draft(intern({ q: 1 } as Record<string, unknown>)); f.me = f; return f as never; })).toThrow(CYCLE);
+    expect(() => produce(intern({ a: 1 }), () => { const f = draftOf(intern({ q: 1 } as Record<string, unknown>)); f.me = f; return f as never; })).toThrow(CYCLE);
   });
 
   it('current() names the same mistake where it used to overflow the stack', () => {

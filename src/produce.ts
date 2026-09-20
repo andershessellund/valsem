@@ -47,7 +47,7 @@ import {
   toDraft,
   DRAFT_STATE,
   createDraftState,
-  draftOf,
+  draftStateFor,
   stateOf,
   isDraftable,
   same,
@@ -738,7 +738,7 @@ function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
   return state;
 }
 
-// The two built-in kinds, registered with the core so draftOf()/createChildDraft()
+// The two built-in kinds, registered with the core so draftStateFor()/createChildDraft()
 // reach them without draft-core depending on this module. (A top-level call,
 // but not a side effect a bundler must preserve: it only matters once
 // `produce` is called, and then this module is in the bundle anyway — so the
@@ -1270,7 +1270,7 @@ function runProduce<T>(
     let rootState: DraftState | undefined;
     let draft: unknown = base;
     if (isDraftable(base)) {
-      rootState = draftOf(base);
+      rootState = draftStateFor(base);
       draft = rootState.draft;
     }
 
@@ -1361,8 +1361,8 @@ export function produce<T, Args extends unknown[]>(
  * Meant for material the recipe brings in from elsewhere — another store's
  * value, a signal read inside a computed — that needs editing before it
  * has a slot. Material already reachable through the draft needs no
- * `draft()`: reads through the draft hand out child drafts, and an assigned
- * canonical is drafted on read-back. `draft(x)` and `d.k` (with `base.k ===
+ * `draftOf()`: reads through the draft hand out child drafts, and an assigned
+ * canonical is drafted on read-back. `draftOf(x)` and `d.k` (with `base.k ===
  * x`) are two independent states over one base: edits to one do not appear
  * in the other.
  *
@@ -1371,20 +1371,20 @@ export function produce<T, Args extends unknown[]>(
  *
  * @throws outside a recipe, or given a draft from another `produce()` call.
  */
-export function draft<T>(value: T): Draft<T> {
+export function draftOf<T>(value: T): Draft<T> {
   const scope = _currentScope();
   if (scope === undefined) {
-    throw new Error('valsem: draft() can only be called inside a produce() recipe');
+    throw new Error('valsem: draftOf() can only be called inside a produce() recipe');
   }
   const state = stateOf(value);
   if (state !== undefined) {
     if (state.scope !== scope) {
-      throw new Error('valsem: draft() was given a draft from a different produce() call.');
+      throw new Error('valsem: draftOf() was given a draft from a different produce() call.');
     }
     return value as Draft<T>;
   }
   if (!isDraftable(value)) return value as Draft<T>;
-  return draftOf(value).draft as Draft<T>;
+  return draftStateFor(value).draft as Draft<T>;
 }
 
 /**

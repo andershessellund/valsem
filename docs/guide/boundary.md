@@ -10,7 +10,7 @@ immutable replacement:
 
 | Instead of | Use |
 | --- | --- |
-| `Date` | `ValueDate.of(d)` — an immutable, canonical timestamp with `toDate()` for a mutable copy; or `Temporal.Instant` with [`valsem/temporal`](/guide/extending#temporal-valsem-temporal) |
+| `Date` | `ValueDate.from(d)` — an immutable, canonical timestamp with `toDate()` for a mutable copy; or `Temporal.Instant` with [`valsem/temporal`](/guide/extending#temporal-valsem-temporal) |
 | `RegExp` | a plain `{ source, flags }` record — a regex is behavior, not data |
 | `Map` | [`ValueMap`](/guide/collections) |
 | `Set` | [`ValueSet`](/guide/collections) |
@@ -21,7 +21,7 @@ immutable replacement:
 gated on that check.)
 
 ```ts
-deepHash(new Date(0));        // throws — names ValueDate.of (and Temporal.Instant)
+deepHash(new Date(0));        // throws — names ValueDate.from (and Temporal.Instant)
 intern({ at: new Date(0) });  // throws
 intern(new Set([1]));         // throws — names ValueSet.from
 ```
@@ -35,15 +35,15 @@ serialisable the way a `Date` is:
 ```ts
 import { ValueDate } from 'valsem';
 
-const at = ValueDate.of('2026-09-05T10:00:00Z');  // accepts what new Date(x) accepts
-at === ValueDate.of(new Date(at.epochMs));         // true — one instant, one instance
-at < ValueDate.of(Date.now());                     // valueOf() is the epoch: comparisons work
+const at = ValueDate.from('2026-09-05T10:00:00Z');  // accepts what new Date(x) accepts
+at === ValueDate.from(new Date(at.epochMs));         // true — one instant, one instance
+at < ValueDate.from(Date.now());                     // valueOf() is the epoch: comparisons work
 at.toDate().setHours(0);                           // a fresh mutable Date; `at` is unchanged
 JSON.stringify({ at });                            // {"at":"2026-09-05T10:00:00.000Z"} — as with a Date
 ```
 
 Inside `produce` a `ValueDate` is an opaque leaf: assign a new one into its
-slot (`d.at = ValueDate.of(later)`) rather than editing it.
+slot (`d.at = ValueDate.from(later)`) rather than editing it.
 
 `Object.freeze` is not a way around this. It does not reach the internal slots
 of a `Date` or a `Map`; on a `RegExp` it makes `lastIndex` read-only, which

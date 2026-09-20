@@ -100,7 +100,7 @@ one explanation wherever a user meets it. Why: D1, D24.
 
 | Instead of | Use |
 | --- | --- |
-| `Date` | `ValueDate.of(d)`, or `Temporal.Instant` with `valsem/temporal` |
+| `Date` | `ValueDate.from(d)`, or `Temporal.Instant` with `valsem/temporal` |
 | `RegExp` | a plain `{ source, flags }` record |
 | `Map` / `Set` | `ValueMap` / `ValueSet` (or the ordered twins) |
 | TypedArrays / buffers | hex or base64 strings |
@@ -323,7 +323,7 @@ it `[interned]`, freezes it, and registers it.
 - `isCanonical(v)`: a primitive (not a function), or an object in the hash
   cache, or a class instance marked `[interned]`. The probe behind every
   canonical short-circuit.
-- `fastEquals(a, b)`: `a === b`, after verifying both sides canonical while
+- `fastEqual(a, b)`: `a === b`, after verifying both sides canonical while
   checks are on (a raw argument throws rather than yielding a silent
   `false`).
 - `internHash(v)`: the cached hash in O(1) for canonical objects, `deepHash`
@@ -336,7 +336,7 @@ own classes (the collections, `ValueDate`, `InternedString`, `RawArray`)
 freeze their instances unconditionally; user value-type instances pooled
 through `intern` are not frozen. Two one-way,
 process-wide switches, read live and independent of the environment:
-`skipChecks()` stops the *canonical only* verification in `fastEquals`;
+`skipChecks()` stops the *canonical only* verification in `fastEqual`;
 `skipFreezing()` stops freezing canonical records and arrays. Drafts
 copy-on-write through a canonical whether or not it is frozen
 (`isImmutable` is "frozen or canonical"). Why: D16.
@@ -589,7 +589,7 @@ no single natural order); `ValueSet.from(orderedSet)` for that. Why: D23.
 
 `HashMap` is a native `Map` keyed by canonical keys: every key is
 `intern`ed on `set` and on every lookup, values are stored as-is,
-`getOrCreate` avoids the has/get/set dance, and iteration yields canonical
+`getOrInsertComputed` avoids the has/get/set dance, and iteration yields canonical
 keys. `HashSet` is its twin. Values stored as-is is the point: `HashMap` is
 where value keys meet live mutable objects (D15).
 
@@ -609,7 +609,7 @@ the memoized function. Why: D14.
 string, public because a primitive is genuinely immutable) and its hash,
 paid once per distinct text; `toJSON` returns the text (D17).
 
-`ValueDate.of(x)` accepts what `new Date(x)` accepts, parses it the same
+`ValueDate.from(x)` accepts what `new Date(x)` accepts, parses it the same
 way, rejects an invalid date, and pools on epoch milliseconds. `epochMs`,
 `toDate()` (a fresh mutable `Date`), `valueOf()` (the epoch, so `<` and
 subtraction work), `toJSON()` (the ISO string, as with a `Date`).
@@ -655,13 +655,13 @@ called from inside another recipe gets the value the draft is right now, and
 returns a value, editing nothing (D47).
 
 A scope is a set of states, not a tree: the recipe's draft is one root, and
-`draft(value)` adds a **detached** root over any draftable — no parent, no
+`draftOf(value)` adds a **detached** root over any draftable — no parent, no
 location. `markChanged` has nothing to bubble to, which is harmless:
 attaching the draft is itself a change that marks the container. Finalize
 meets it wherever it landed (`resolve` through a slot, `adopt` through a
 grafted literal, the replacement path when returned) and memoises it, so
 every attachment receives the one canonical; an unattached draft is revoked
-with the scope and never finalised. `draft` of a draft in this scope is the
+with the scope and never finalised. `draftOf` of a draft in this scope is the
 identity; of a draft from another scope, an error. Why: D42.
 
 A value becomes draftable by implementing `[toDraft](parent)` on its
@@ -699,7 +699,7 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   canonical nested inside the recipe's own raw literal (`d.k = { inner: c }`)
   is reached through that raw object, not through a draft, so `d.k.inner.y =
   2` is a write to a frozen object and throws the engine's `TypeError`:
-  loud, and `c` is safe; `draft(c)` opts it in. Writing a protocol symbol is
+  loud, and `c` is safe; `draftOf(c)` opts it in. Writing a protocol symbol is
   rejected.
 - **Plain arrays: `Proxy`** with a **virtual mode**: point edits
   (`vEdits`) plus an appended tail (`vTail`) over the base; index reads and
@@ -933,7 +933,7 @@ a binding calls `intern` and learns the answer per instance (D41).
 | `deep-equal.ts` | protocol symbols, the registry, the mutable-built-in table, `deepEqual`, the dev warning |
 | `deep-hash.ts` | the hash cache and canonical meta, accumulators, symbol hashes, `deepHash` |
 | `intern-pool.ts` | `InternPool`, slots, the registry and idle drain, `createInternPool` |
-| `intern.ts` | `intern`, `isCanonical`, `fastEquals`, `internHash`, `_internPrehashed` |
+| `intern.ts` | `intern`, `isCanonical`, `fastEqual`, `internHash`, `_internPrehashed` |
 | `hamt.ts` | the consed CHAMP trie at strides 1–3, node-level set algebra |
 | `value-map.ts`, `value-set.ts` | wrappers over the trie |
 | `value-list.ts` | the content-chunked tree, `merge`, `diff`, anchors |

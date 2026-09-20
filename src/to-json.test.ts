@@ -42,7 +42,7 @@ describe('a state tree stringifies whole', () => {
       todos: ValueList.of({ id: 1, text: 'a' }, { id: 2, text: 'b' }),
       tags: OrderedSet.from(['x', 'y']),
       index: OrderedMap.from([['x', 1]]),
-      at: ValueDate.of(0),
+      at: ValueDate.from(0),
     });
     expect(JSON.stringify(state)).toBe(
       '{"user":{"id":1,"name":"ada"},' +
@@ -56,7 +56,7 @@ describe('a state tree stringifies whole', () => {
   it('collections nest, and the leaf value types keep their own form', () => {
     const m = OrderedMap.from([
       ['list', ValueList.of<unknown>(1, ValueList.of(2, 3))],
-      ['when', ValueDate.of(0)],
+      ['when', ValueDate.from(0)],
       ['name', InternedString.for('n')],
     ] as [string, unknown][]);
     expect(roundTrip(m)).toEqual([
