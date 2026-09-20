@@ -37,7 +37,11 @@ that become equal are one member, as `map` on a set always gives; for one,
 `d.tags.delete(t); d.tags.add({ ...t, n: 0 })`. In a loop, walk a copy
 (`for (const t of [...d.tags])`): a member added to the set being walked is
 visited too, as on a native `Set`, and a loop that re-adds what it visits
-does not end. Records you mean to edit in place have an id, and belong in a map
+does not end. Going in, it is the same rule from the other side: `add(x)`
+takes the value `x` has at that moment, a draft included, so
+`d.seen.add(t); t.done = true` leaves the set holding `t` as it was, where a
+list slot given the same draft follows it to the end of the recipe. Finish
+the edit, then add. Records you mean to edit in place have an id, and belong in a map
 keyed by it. A draft costs about 0.3 µs, so a loop that only reads a
 large collection is cheaper over `current(d.todos)` or `d.todos.slice()`,
 which draft nothing, and so are the functional reads: `map`, `filter`,

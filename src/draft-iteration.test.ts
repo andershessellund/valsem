@@ -170,6 +170,19 @@ describe('set members stay values (D57)', () => {
     expectPatchRoundTrip(base, all, patches, inverse);
   });
 
+  it('going in: add takes the value its argument has at that moment, where a list slot follows the draft', () => {
+    const state = intern({ seen: ValueSet.empty<Todo>(), log: ValueList.empty<Todo>(), todos: ValueList.of<Todo>({ id: 1, done: false }) });
+    const next = produce(state, (d) => {
+      const t = d.todos.get(0);
+      d.seen.add(t); // a snapshot: { id: 1, done: false }
+      d.log.push(t); // a slot: resolves when the recipe ends
+      t.done = true;
+    });
+    expect(next.seen).toBe(ValueSet.from([{ id: 1, done: false }]));
+    expect(next.log).toBe(ValueList.of({ id: 1, done: true }));
+    expect(next.todos).toBe(ValueList.of({ id: 1, done: true }));
+  });
+
   it('a set that is a member of a set changes identity with its content, all the way up', () => {
     const inner = ValueSet.from([1, 2]);
     const outer = intern({ s: ValueSet.from([inner, ValueSet.from([1, 2, 3])]) });

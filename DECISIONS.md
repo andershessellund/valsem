@@ -1361,7 +1361,14 @@ values they are, the one exception to D53. A member is edited by saying what
 that is: for every member, `d.tags = castDraft(d.tags.map((t) => ({ ...t, n:
 0 })))`; for one, `d.s.delete(m); d.s.add({ ...m, n: 0 })`, over a copy when
 in a loop, since a member added to a set being walked is visited too, as on
-a native `Set`.
+a native `Set`. Going in, `add(x)` takes the value `x` has at that moment
+(D36: a set member has no location), a draft of a plain record or array
+included; later edits to that draft do not reach the set, where a list slot
+holding the same draft follows it to the end of the recipe. A map key is
+the same. A collection draft is refused there instead (`intern` takes it
+for a class without a hash, and says to pass `current(draft)`), which asks
+the caller for the snapshot a plain draft gets without asking: uneven, and
+left so, since both answers are safe and neither loses an edit.
 
 **Why.** A set holds its members by content, so there is no editing one in
 place: changing a member is removing it and adding another, and the other
