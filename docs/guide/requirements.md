@@ -11,7 +11,7 @@ Versions are from [MDN's browser-compat-data](https://github.com/mdn/browser-com
 
 | Feature | What valsem uses it for | Chrome, Edge | Firefox | Safari | Deno | Bun |
 | --- | --- | --- | --- | --- | --- | --- |
-| `WeakRef` | the weak intern pools: a canonical value nobody holds is collected | 84 | 79 | 14.1 | 1.0 | 1.0 |
+| `WeakRef` (and, where present, `FinalizationRegistry`: one sentinel, to clean pools in idle time) | the weak intern pools: a canonical value nobody holds is collected | 84 | 79 | 14.1 | 1.0 | 1.0 |
 | `Proxy.revocable` | drafts of plain objects and arrays in `produce` | 63 | 34 | 10 | 1.0 | 1.0 |
 | `globalThis.crypto.getRandomValues` | the per-process hash seed | 11 | 21 | 5 | 1.0 | 1.0 |
 | ES2022: class fields, private members, `Object.hasOwn` | throughout | 93 | 92 | 16 | 1.13 | 1.0 |

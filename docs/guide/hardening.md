@@ -64,23 +64,24 @@ Size limits are deliberately absent: admission is O(n) with no amplification,
 and byte budgets belong to the transport layer (a JSON body limit), not the
 value layer.
 
-## Weak pools, cleanup without finalizers
+## Weak pools, swept as you go
 
 The global pool holds canonical instances via `WeakRef` — values are reclaimed
 by GC the moment your program stops referencing them, so interning cannot grow
-memory without bound. The pool's own bookkeeping is dropped as interning goes
-on: its index is never edited in place but replaced, one entry per
-registration, and an entry whose value has been collected is simply not
-carried over — so neither growing the index nor cleaning it is ever one long
-task on the main thread. The pool notices a collection through a canary (a
-`WeakRef` to an object nothing holds), and ignores one that left more than
-half of the pool alive, so the dead number about the living at most. There is
-no `FinalizationRegistry`, no timer and no idle callback, which matters on
-hosts that run finalizers without an I/O context or not at all. The cost: a
-pool that stops interning stops cleaning — what it keeps is a cleared
-`WeakRef` and eight bytes of index per dead value, never the values — until
-interning resumes. The measurements behind this choice are in the repository's
-`DECISIONS.md` (D2) and reproducible with `pnpm bench:mix`.
+memory without bound. The pool's own bookkeeping is swept as interning goes
+on. It notices a collection by finding one of its own entries dead (it probes
+one every 32 registrations), ignores a collection that left more than a third
+of what it checked alive, and otherwise sweeps its index in place, a few slots
+per registration — so neither growing the index nor cleaning it is ever one
+long task on the main thread, and the dead number about twice the living at
+most. Where the host offers them, one `FinalizationRegistry` sentinel and
+`requestIdleCallback` (browser windows) or `setImmediate` (Node, Bun) move
+that work into idle time, in bounded slices. Neither is required, which
+matters on hosts that run finalizers without an I/O context or not at all:
+there, a pool that stops interning stops cleaning — what it keeps is a
+cleared `WeakRef` and a slot of index per dead value, never the values —
+until interning resumes. The measurements behind this choice are in the
+repository's `DECISIONS.md` (D2) and reproducible with `pnpm bench:mix`.
 What the pool and its bookkeeping cost when a state gets large is on the
 [Performance and scale](/guide/performance#large-states-memory-and-pauses) page.
 

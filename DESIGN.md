@@ -56,7 +56,8 @@ not part of the model.
 | `valsem/binding` | the two helpers a wire or storage binding needs (§10.1); semver-covered |
 
 Ships as ES modules with declarations, dependency-free. Requires `WeakRef`
-and `globalThis.crypto`; uses the global `Iterator`
+and `globalThis.crypto`; uses `FinalizationRegistry`, `requestIdleCallback`
+and `setImmediate` where the runtime has them (idle-time pool cleanup, §4.2); uses the global `Iterator`
 as an iterator base class where the runtime has it. The declared floor is a
 list of language features, not of runtimes: ES2022, plus symbols as `WeakMap`
 keys for values that hold a unique symbol. It is stated with engine versions
@@ -304,20 +305,24 @@ full-hash equality: `lookup(hash, predicate)` offers the predicate exactly
 what was registered under that hash, and a miss reads the `Int32Array`
 alone. Why: D3, D48.
 
-Cleanup is the index's own growth. Nothing is deleted from a table; a
-table is replaced, incrementally: registrations go to the current table,
-each also moves one live entry across from the old one, and a dead entry
-is not moved. A lookup probes the current table, then the old. Whether an
-entry is dead can only be asked (`deref()`), and two things keep the
-asking rare. A canary — a `WeakRef` to an object nothing holds, looked at
-every 64th registration — advances an epoch each time it is found
-collected; a slot stamped with the current epoch (registered, found or
-verified since) is moved unasked. And a collection is ignored unless a
-64-slot sample, taken once per pool per epoch, finds half of it dead; below
-that, growth is a plain copy. So the dead number about the living at most, and cleanup rides
-on registration: a pool that stops registering keeps its husks (a cleared
-`WeakRef` and eight bytes of table each) until it resumes or is dropped.
-There are no finalization callbacks, timers or idle callbacks, and the
+Cleanup rides on registration. Whether an entry is dead can only be asked
+(`deref()`), and asking pins: what is looked at does not die while it is
+being looked at. So the pool watches its own entries. Every 32nd
+registration probes one, whatever its stamp; a stamp is the pool's epoch
+when the target was last known alive (registered, found, or probed), so an
+entry found dead while carrying the current stamp proves a collection in
+this epoch, and the epoch advances. The dead fraction of the last 64 checks
+is a gate: below two thirds the collection is ignored; otherwise each shard
+is swept in place, once, a few slots per registration — entries of the
+current epoch passed untouched, the living restamped, the dead removed by
+backward shift. A table is replaced only to grow, or to shrink when a sweep
+both found and left it nearly empty: incrementally, four entries per
+registration, into a table sized exactly; a lookup probes the current
+table, then the old; the copy dereferences nothing and a shard does no
+cleaning while it copies. Where the host has them, a single
+`FinalizationRegistry` sentinel (never dereferenced, so it does die)
+reports collections, and `requestIdleCallback` or `setImmediate` slices
+finish copies, probe, and run the sweeps owed; neither is required. The
 pool holds nothing alive. Why: D2.
 
 `pool.intern(object)` is the high-level entry: returns `object` if marked,

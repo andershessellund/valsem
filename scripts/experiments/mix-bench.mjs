@@ -1,9 +1,12 @@
 // ---------------------------------------------------------------------------
 // mix-bench — intern-pool indexes over mixes of inserts, lookup hits and deaths.
-// The measurements behind D2 and D3.
+// The measurements behind D2 and D3. The contenders below `fr` are the road
+// there, kept so that what was rejected can be re-run.
 //
 // Contenders (same lookup(hash, predicate) / register(value, hash) interface):
-//   shipped        dist/intern-pool.js as built: the semispace index
+//   shipped        dist/intern-pool.js as built: the open table swept in place (its
+//                  probes, epochs and gate are `psweep pause w64` below; plus the
+//                  idle driver and the shrink hysteresis, which only it has)
 //   fr             fr-pool.mjs, the pool it replaced: 64 Map shards, WeakRef
 //                  slots, one FinalizationRegistry, idle-time reclaim
 //   semi K [opts]  the prototype the shipped index was developed as, kept so the
