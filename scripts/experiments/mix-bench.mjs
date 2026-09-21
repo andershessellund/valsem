@@ -783,7 +783,9 @@ function makeGatedSweepPool(theta, LIVE = 2, shrink = true) {
 
 // --- probes instead of a canary -----------------------------------------------
 
-function makeProbeSweepPool(theta, cursorMode = 'rand') {
+function makeProbeSweepPool(theta, cursorMode = 'rand', WINDOW = 16) {
+  // WINDOW — the checks the dead-fraction gate looks back over. A noticed collection is followed
+  // by WINDOW probes, so that the estimate the gate then uses is wholly from after it.
   // cursorMode — where a probe looks: 'rand' a random slot each time; 'restart' the shard's
   // sweep cursor, set to a random slot after each table copy; 'scaled' the sweep cursor,
   // carried across a copy by scaling it (high-bit indexing preserves order: slot i → ~2i);
@@ -798,18 +800,20 @@ function makeProbeSweepPool(theta, cursorMode = 'rand') {
   const SLOTS = 16;
   const LIVE = 1;
   const PROBE_EVERY = 32;
-  const BURST = 16;
+  const BURST = WINDOW;
+  const ring = new Uint8Array(WINDOW);
+  let ringAt = 0;
   const shards = new Array(64).fill(undefined);
   let epoch = 1;
   let stamp = 1;
   let tick = 0;
-  let hist = 0;
   let dead16 = 0;
   const st = { copies: 0, laps: 0, skipped: 0, checkedLive: 0, removed: 0, probes: 0 };
   const newShard = () => ({ bits: MIN_BITS, words: new Int32Array(1 << MIN_BITS), refs: new Array(1 << MIN_BITS).fill(undefined), used: 0, oldBits: 0, oldWords: null, oldRefs: null, cursor: 0, verify: false, answered: epoch, at: 0, sweepLeft: 0 });
   function record(dead) {
-    dead16 += dead - ((hist >>> 15) & 1);
-    hist = ((hist << 1) | dead) & 0xffff;
+    dead16 += dead - ring[ringAt];
+    ring[ringAt] = dead;
+    ringAt = (ringAt + 1) & (WINDOW - 1);
   }
   function place(t, word, ref) {
     const words = t.words;
@@ -992,14 +996,14 @@ function makeProbeSweepPool(theta, cursorMode = 'rand') {
       if (t.oldWords !== null) {
         copy(t);
         if (cursorMode === 'follow' && t.oldWords !== null && !t.verify) {
-          if (t.answered !== epoch) { t.answered = epoch; if (dead16 >= theta * 16) { t.sweepLeft = t.words.length; st.laps++; } }
+          if (t.answered !== epoch) { t.answered = epoch; if (dead16 >= theta * WINDOW) { t.sweepLeft = t.words.length; st.laps++; } }
           if (t.sweepLeft > 0) sweep(t);
         }
       } else {
         const full = t.used >= t.words.length >> 1;
         if (t.answered !== epoch && (full || t.used > 32)) {
           t.answered = epoch; // a shard answers a detected collection once
-          if (dead16 >= theta * 16) { t.sweepLeft = t.words.length; st.laps++; }
+          if (dead16 >= theta * WINDOW) { t.sweepLeft = t.words.length; st.laps++; }
         }
         if (full) beginCopy(t, cursorMode === 'pause' ? false : t.sweepLeft > 0);
         else if (t.sweepLeft > 0) sweep(t);
@@ -1046,7 +1050,7 @@ async function child(poolName, scenarioName) {
     pool = makeChainPool(c ? Number(c.slice(3)) : 2, opts.includes('+reads'), g ? Number(g.slice(4)) : 4, opts.includes('presize'));
   } else if (poolName.startsWith('psweep')) {
     const g = poolName.split(' ').find((o) => o.startsWith('gate'));
-    pool = makeProbeSweepPool(g ? Number(g.slice(4)) : 0.67, poolName.includes('restart') ? 'restart' : poolName.includes('scaled') ? 'scaled' : poolName.includes('follow') ? 'follow' : poolName.includes('pause') ? 'pause' : 'rand');
+    pool = makeProbeSweepPool(g ? Number(g.slice(4)) : 0.67, poolName.includes('restart') ? 'restart' : poolName.includes('scaled') ? 'scaled' : poolName.includes('follow') ? 'follow' : poolName.includes('pause') ? 'pause' : 'rand', Number(poolName.split(' ').find((o) => /^w\d+$/.test(o))?.slice(1) ?? 16));
   } else if (poolName.startsWith('gsweep')) {
     const g = poolName.split(' ').find((o) => o.startsWith('gate'));
     const l = poolName.split(' ').find((o) => o.startsWith('live'));
