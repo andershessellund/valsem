@@ -3,11 +3,13 @@
 //
 // Placement, exact-hash matching and growth are deterministic. Reclamation
 // needs real GC — a WeakRef is cleared only by a collection, and the pool
-// learns of one through its canary — and those tests skip themselves when
-// globalThis.gc is unavailable (vitest.config.ts passes --expose-gc to
-// workers, so normally they run).
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createInternPool, _poolStats, _epoch } from './intern-pool.js';
+// learns of one by finding one of its own entries dead — and those tests skip
+// themselves when globalThis.gc is unavailable (vitest.config.ts passes
+// --expose-gc to workers, so normally they run). The last of them forces
+// nothing: the engine's own collections, mid-job and incremental, are the
+// normal case, and a mechanism that only works between forced ones does not work.
+import { describe, it, expect } from 'vitest';
+import { createInternPool, _poolStats } from './intern-pool.js';
 import { equals, hashCode, interned } from './deep-equal.js';
 
 const gc = (globalThis as { gc?: () => void }).gc;
@@ -32,23 +34,6 @@ async function collectUntil(cond: () => boolean, rounds = 20): Promise<boolean> 
   return cond();
 }
 
-/**
- * Collect until the pools have NOTICED: the canary is looked at every 64th
- * registration (in any pool), and a collection it did not survive starts a
- * new epoch.
- */
-async function nextEpoch(): Promise<void> {
-  const before = _epoch();
-  const scratch = createInternPool<object>();
-  for (let round = 0; round < 20 && _epoch() === before; round++) {
-    await turn();
-    gc!();
-    await turn();
-    for (let i = 0; i < 64; i++) scratch.register({}, i);
-  }
-  expect(_epoch()).toBeGreaterThan(before);
-}
-
 // The pool multiplies a hash by G and reads the product: its top 6 bits are
 // the shard, the 26 below them the slot order and the tag. G is odd, so the
 // multiplication has an inverse, and a test can ask for the product it wants.
@@ -71,10 +56,6 @@ class Point {
     return other instanceof Point && other.x === this.x && other.y === this.y;
   }
 }
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('InternPool — the index is sharded', () => {
   it('finds every member again, whatever bits its hash has', () => {
@@ -201,27 +182,26 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
       for (let i = 0; i < 25_600; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
     })();
     expect(await collectUntil(() => pool.size() === 0)).toBe(true);
-    expect(_poolStats(pool)).toMatchObject({ slots: 25_600, migrating: 0, sweeping: 0 }); // cleared, and still stored
+    // Cleared, and still stored; and nobody has noticed: cleanup rides on registration.
+    expect(_poolStats(pool)).toMatchObject({ slots: 25_600, migrating: 0, sweeping: 0, epoch: 1 });
 
-    await nextEpoch();
     const held: object[] = [];
     const capacity = _poolStats(pool).capacity;
     for (let i = 0; i < 2_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-    // Under way in every shard, and in place: no table has been replaced, none allocated.
+    // A probe found an entry of this epoch dead; the probes after it found nearly everything
+    // dead; every shard is being swept — in place: no table has been replaced, none allocated.
     const during = _poolStats(pool);
-    expect(during.sweeping).toBe(64);
-    expect(during).toMatchObject({ migrating: 0, capacity });
+    expect(during).toMatchObject({ epoch: 2, sweeping: 64, migrating: 0, capacity });
     expect(during.slots).toBeLessThan(22_000);
 
     for (let i = 2_000; i < 14_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-    expect(_poolStats(pool)).toMatchObject({ slots: 14_000, sweeping: 0 });
+    expect(_poolStats(pool)).toMatchObject({ slots: 14_000, sweeping: 0, epoch: 2 });
     expect(pool.size()).toBe(14_000);
     expect(held.length).toBe(14_000);
   });
 
-  it('a collection that took less than two thirds of the pool is ignored', async () => {
-    // About 400 to a shard: past the copy that began at 256 and short of the
-    // next at 512. A shard whose table is being copied answers a collection afterwards.
+  it('a collection that took less than two thirds of what was checked is noticed, and ignored', async () => {
+    // About 400 to a shard: past the copy that began at 256 and short of the next at 512.
     const pool = createInternPool<{ v: number }>();
     const held: object[] = [];
     (function registerSome() {
@@ -232,10 +212,11 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     })();
     expect(_poolStats(pool).migrating).toBe(0);
     expect(await collectUntil(() => pool.size() === 12_800)).toBe(true);
-    await nextEpoch();
     for (let i = 0; i < 2_000; i++) held.push(pool.register({ v: -i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-    // Half dead is not worth dereferencing the other half.
-    expect(_poolStats(pool)).toMatchObject({ slots: 27_600, migrating: 0, sweeping: 0 });
+    // Half dead is not worth dereferencing the other half. (What the probes themselves met dead is gone.)
+    const stats = _poolStats(pool);
+    expect(stats).toMatchObject({ epoch: 2, migrating: 0, sweeping: 0 });
+    expect(stats.slots).toBeGreaterThan(27_400);
     expect(pool.size()).toBe(14_800);
   });
 
@@ -246,29 +227,36 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
       for (let i = 0; i < 5_000; i++) pool.intern(new Point(i, 1000));
     })();
     expect(await collectUntil(() => pool.size() === 1)).toBe(true);
-    await nextEpoch();
-    expect(pool.intern(new Point(9, 9))).toBe(keep); // found since the collection: the sweep will not ask again
     const held: Point[] = [];
     for (let i = 0; i < 6_000; i++) held.push(pool.intern(new Point(i, 2000)));
+    expect(_poolStats(pool).epoch).toBeGreaterThan(1);
     expect(pool.intern(new Point(9, 9))).toBe(keep);
     expect(pool.size()).toBe(6_001);
     for (let i = 0; i < 6_000; i += 97) expect(pool.intern(new Point(i, 2000))).toBe(held[i]);
   });
 
-  // The next three build ONE shard (products below 2^26) and choose where its
-  // members sit: a member's home slot is the top bits of its product.
-  const inShardZero = async (doomed: number[], heldProducts: number[]) => {
-    const pool = createInternPool<{ m: number }>();
+  // The next three choose where members sit: the top 6 bits of a product are
+  // its shard, and a member's home slot is the top bits of the rest.
+  type Crafted = ReturnType<typeof createInternPool<{ m: number }>>;
+  const crafted = async (doomed: number[], heldProducts: number[], heldFirst = false) => {
+    const pool: Crafted = createInternPool<{ m: number }>();
     const held = new Map<number, { m: number }>();
     (function registerAll() {
+      if (heldFirst) for (const m of heldProducts) held.set(m, pool.register({ m }, hashWithProduct(m)));
       for (const m of doomed) pool.register({ m }, hashWithProduct(m));
-      for (const m of heldProducts) held.set(m, pool.register({ m }, hashWithProduct(m)));
+      if (!heldFirst) for (const m of heldProducts) held.set(m, pool.register({ m }, hashWithProduct(m)));
     })();
     expect(await collectUntil(() => pool.size() === heldProducts.length)).toBe(true);
-    await nextEpoch();
     return { pool, held };
   };
-  const expectAllFound = (pool: ReturnType<typeof createInternPool<{ m: number }>>, held: Map<number, { m: number }>) => {
+  /** `count` more held members, spread over one shard (a product's top 6 bits), `salt` keeping batches apart. */
+  const registerHeld = (pool: Crafted, held: Map<number, { m: number }>, shard: number, salt: number, count: number) => {
+    for (let k = 0; k < count; k++) {
+      const m = (shard << 26) | (Math.imul(k + salt, 0x85ebca6b) >>> 6);
+      if (!held.has(m)) held.set(m, pool.register({ m }, hashWithProduct(m)));
+    }
+  };
+  const expectAllFound = (pool: Crafted, held: Map<number, { m: number }>) => {
     for (const [m, member] of held) expect(pool.lookup(hashWithProduct(m), (c) => c.m === m)).toBe(member);
   };
 
@@ -277,9 +265,11 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     // so they sit in a run: the first and third die, the others must move back.
     const cluster = [1, 2, 3, 4, 5, 6].map((k) => (5 << 20) | k);
     const fillers = Array.from({ length: 120 }, (_, j) => (j + 10) << 16);
-    const { pool, held } = await inShardZero([cluster[0]!, cluster[2]!, ...fillers], [cluster[1]!, cluster[3]!, cluster[4]!, cluster[5]!]);
-    for (let k = 0; k < 80; k++) held.set(0x2000000 + k, pool.register({ m: 0x2000000 + k }, hashWithProduct(0x2000000 + k)));
-    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0 });
+    const { pool, held } = await crafted([cluster[0]!, cluster[2]!, ...fillers], [cluster[1]!, cluster[3]!, cluster[4]!, cluster[5]!]);
+    // The shard grows first, and cleans nothing while it does; then its sweep takes one
+    // registration for each of the living that were registered before the collection.
+    registerHeld(pool, held, 0, 1, 240);
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0, epoch: 2 });
     expectAllFound(pool, held);
     expect(pool.lookup(hashWithProduct(cluster[0]!), () => true)).toBeUndefined();
   });
@@ -288,23 +278,35 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     // Home is the LAST slot, so the run continues at slot 0.
     const cluster = [1, 2, 3, 4, 5].map((k) => 0x3ffff00 | k);
     const fillers = Array.from({ length: 120 }, (_, j) => (j + 10) << 16);
-    const { pool, held } = await inShardZero([cluster[0]!, cluster[1]!, ...fillers], [cluster[2]!, cluster[3]!, cluster[4]!]);
-    for (let k = 0; k < 80; k++) held.set(0x2000000 + k, pool.register({ m: 0x2000000 + k }, hashWithProduct(0x2000000 + k)));
-    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0 });
+    const { pool, held } = await crafted([cluster[0]!, cluster[1]!, ...fillers], [cluster[2]!, cluster[3]!, cluster[4]!]);
+    registerHeld(pool, held, 0, 1, 240);
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0, epoch: 2 });
     expectAllFound(pool, held);
   });
 
-  it('a table that fills while a sweep is due is copied at the size it has, the copy doing the sweep', async () => {
-    // 256 members in 512 slots: exactly at the brink, so the first registration
-    // after the collection both answers it and finds the table full.
-    const doomed = Array.from({ length: 250 }, (_, j) => (j + 1) << 16);
-    const heldProducts = Array.from({ length: 6 }, (_, j) => (j + 300) << 16);
-    const { pool, held } = await inShardZero(doomed, heldProducts);
-    expect(_poolStats(pool)).toMatchObject({ slots: 256, capacity: 512, migrating: 0 });
-    held.set(0x2000000, pool.register({ m: 0x2000000 }, hashWithProduct(0x2000000)));
-    expect(_poolStats(pool)).toMatchObject({ capacity: 1024, migrating: 1, sweeping: 0 }); // two tables of 512
-    for (let k = 1; k < 200; k++) held.set(0x2000000 + k, pool.register({ m: 0x2000000 + k }, hashWithProduct(0x2000000 + k)));
-    expect(_poolStats(pool)).toMatchObject({ slots: held.size, capacity: 512, migrating: 0 });
+  it('a shard that must grow in the middle of a sweep does no cleaning while it copies, and resumes after', async () => {
+    // Shard 0: 600 held at low slots, 1,300 doomed at high ones, in 4,096 slots — 148 short
+    // of growing. The held go in first, so the probes made on the way leave the cursor
+    // among them: the sweep then crawls (one living entry per registration) through
+    // hundreds of the living before it meets the dead, and the table fills first.
+    // Shard 1 is all doomed: it is where the collection gets noticed (a probe looks
+    // where registration happens).
+    const heldLow = Array.from({ length: 600 }, (_, j) => (j + 1) << 14); // home slots 1…600 of 4,096
+    const doomedHigh = Array.from({ length: 1_300 }, (_, j) => (2_048 + Math.floor(j * 1.5)) << 14); // 2,048…3,997
+    const doomedElsewhere = Array.from({ length: 200 }, (_, j) => (1 << 26) | ((j + 1) << 17));
+    const { pool, held } = await crafted([...doomedHigh, ...doomedElsewhere], heldLow, true);
+    expect(_poolStats(pool)).toMatchObject({ slots: 2_100, migrating: 0, epoch: 1 });
+
+    registerHeld(pool, held, 1, 1, 40); // into shard 1: noticed, measured, worth a sweep
+    expect(_poolStats(pool).epoch).toBe(2);
+    registerHeld(pool, held, 0, 1, 200); // into shard 0: its sweep begins, and then it has to grow
+    expect(_poolStats(pool)).toMatchObject({ migrating: 1, sweeping: 2 }); // shard 0's is owed, not dropped
+    expectAllFound(pool, held); // in either table — and being found alive is noted, so the sweep will not ask
+
+    registerHeld(pool, held, 0, 10_000, 4_000);
+    registerHeld(pool, held, 1, 10_000, 200);
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0 });
+    expect(pool.size()).toBe(held.size);
     expectAllFound(pool, held);
   });
 
@@ -315,11 +317,32 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     })();
     const before = _poolStats(pool).capacity;
     expect(await collectUntil(() => pool.size() === 0)).toBe(true);
-    await nextEpoch();
     const held: object[] = [];
     for (let i = 0; i < 20_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
     expect(_poolStats(pool).slots).toBe(20_000);
     expect(_poolStats(pool).capacity).toBeLessThan(before);
     for (let i = 0; i < 20_000; i += 101) expect(pool.lookup(Math.imul(i + 1, 0xc2b2ae35) >>> 0, (c) => c === held[i])).toBe(held[i]);
+  });
+
+  it('notices the engine’s own collections — nothing here is forced', async () => {
+    // 20k live, everything older dying, in jobs of 2,000 registrations with
+    // other garbage alongside. Collections now happen when the engine chooses,
+    // mostly in the middle of a job. The pool must notice some and clean up
+    // after them, or it holds every entry it was ever given.
+    const pool = createInternPool<{ v: number }>();
+    const live = new Array<object>(20_000);
+    let junk: number[][] = [];
+    let registered = 0;
+    while (registered < 3_000_000 && !(_poolStats(pool).epoch > 2 && _poolStats(pool).slots < registered / 2)) {
+      for (let i = 0; i < 2_000; i++, registered++) {
+        live[registered % live.length] = pool.register({ v: registered }, Math.imul(registered + 1, 0x85ebca6b) >>> 0);
+        if ((registered & 7) === 0) junk.push(new Array<number>(16).fill(registered));
+      }
+      if (junk.length > 20_000) junk = [];
+      await turn();
+    }
+    const stats = _poolStats(pool);
+    expect(stats.epoch).toBeGreaterThan(2);
+    expect(stats.slots).toBeLessThan(registered / 2);
   });
 });

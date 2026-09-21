@@ -16,42 +16,42 @@
 //
 // Whether an entry is dead can only be asked (`deref()`), and asking is what
 // costs: ~5 ns of a cleared ref, ~40 ns of a live one in a warm cache, several
-// times that in a cold one. Two things keep the asking rare:
+// times that in a cold one. It also PINS: a dereferenced (or freshly made)
+// WeakRef keeps its target alive until the job ends, and through the marking
+// cycle of an incremental collector. So the pool never watches an object whose
+// death it is waiting for — a canary that is looked at never dies — it watches
+// its own entries, of which it does not care:
 //
-//   * a CANARY — a WeakRef to an object nothing holds — is looked at every 64th
-//     registration. Engines clear WeakRefs only when they collect, so until the
-//     canary is gone nothing else can have died either. Each time it goes, the
-//     EPOCH advances. A word's stamp is the epoch in which its target was last
-//     known alive (registered, found, or verified), and an entry stamped with
-//     the current epoch is passed over untouched;
-//   * a collection is otherwise IGNORED unless a 64-slot sample finds at least
-//     two thirds of the pool dead. The sample is taken once per pool per epoch,
-//     from whichever shard is registered into first: shards are random
-//     partitions of one population, so its answer is every shard's.
+//   * every 32nd registration PROBES one entry, whatever its stamp says. A
+//     word's stamp is the pool's epoch when its target was last known alive
+//     (registered, found, or probed). A probe that finds an entry dead while it
+//     carries the CURRENT stamp has proof that a collection happened in this
+//     epoch: the epoch advances, and 64 more probes measure what it left;
+//   * the dead fraction of the last 64 checks is the gate. A noticed collection
+//     is IGNORED unless at least two thirds of what was checked was dead;
+//     otherwise each shard is swept, once, a few slots per registration into
+//     it: entries stamped with the current epoch are passed over untouched, the
+//     living restamped, the dead removed by backward shift (linear probing's
+//     deletion without tombstones — measured, under one slot scanned and 0.2
+//     entries moved per removal). Nothing is allocated because of a collection.
 //
-// When a collection is answered, each shard is swept IN PLACE, a few slots per
-// registration into it: the living are restamped, the dead removed by backward
-// shift (linear probing's deletion without tombstones — measured, under one
-// slot scanned and 0.2 entries moved per removal). Nothing is allocated because
-// of a collection. A table is replaced only to grow (or, after a sweep has left
-// it under an eighth full, to shrink): incrementally, four entries per
-// registration, into a table sized exactly for what it will receive, the old
-// one left unwritten so that its probe chains stay valid and a lookup probes
-// the current table, then the old. A copy that begins while a sweep is due
-// does the verifying itself.
+// A table is replaced only to grow (or, after a sweep has left it under an
+// eighth full, to shrink): incrementally, four entries per registration, into
+// a table sized exactly for what it will receive, the old one left unwritten
+// so that its probe chains stay valid and a lookup probes the current table,
+// then the old. The copy never dereferences, and a shard that is copying does
+// no cleaning; its cursor is carried across by scaling (slots are in tag order,
+// so slot i becomes about 2i), and an unfinished sweep starts over in the new
+// table, where everything already verified is passed by its stamp.
 //
-// The canary is a hint, not a requirement on the runtime: if it never clears
-// there are no sweeps (and nothing was cleared); if it clears often there are
-// more of them. A lookup always dereferences what it returns, so no answer
-// ever depends on it.
+// None of this is a requirement on the runtime's collector: if nothing is ever
+// found dead there are no sweeps (and nothing was cleared). A lookup always
+// dereferences what it returns, so no answer depends on it.
 //
 // What this replaced, and why (D2, D3): a Map per shard with a
 // FinalizationRegistry reporting each death and the bucket surgery deferred to
-// idle time; and, between that and this, a version that verified by copying
-// each shard into a fresh table. Measured side by side
-// (scripts/experiments/mix-bench.mjs). It also asks less of the host: no
-// finalization callbacks (which some runtimes run without an I/O context, or
-// not at all), no timers, no idle callbacks.
+// idle time. Measured side by side (scripts/experiments/mix-bench.mjs), with
+// forced collections and with the engine's own.
 //
 // What it costs: cleanup rides on registration. A pool that stops registering
 // stops burying its dead — the husks (a cleared WeakRef and a slot of table
@@ -83,49 +83,55 @@ const GROW_AT = 0.5;
 const SHRINK_BELOW = 1 / 8;
 /** …in both cases by one sized to end its copy under this load. */
 const TARGET_LOAD = 0.45;
-/** A verifying copy is sized on the hope that most of it is dead, but never so that it could end above this load if none is. */
-const SAFE_LOAD = 0.8;
-/** Occupied slots dereferenced to estimate a pool's survivors. */
-const SAMPLE = 64;
+/** One registration in this many probes an entry. */
+const PROBE_EVERY = 32;
+/** The checks the gate looks back over; and the probes that follow a noticed collection, so that the estimate is wholly from after it. */
+const WINDOW = 64;
 /**
- * A collection is answered only when the sample finds at least this fraction
- * dead. It sets the equilibrium: at two thirds the dead number about twice the
- * living at most, a sweep wastes at most one live dereference for every two
- * entries it frees, and (measured on a million live entries under steady churn)
- * operations cost a fifth less than at one half, for more time in collections.
+ * A noticed collection is answered only when at least this fraction of the
+ * window was dead. It sets the equilibrium: at two thirds the dead number about
+ * twice the living at most, a sweep wastes at most one live dereference for
+ * every two entries it frees, and (measured on a million live entries under
+ * steady churn) operations cost a fifth less than at one half, for more time in
+ * collections.
  */
 const DEAD_FRACTION = 0.67;
 /**
  * What one registration may spend on its shard's sweep or copy. It is paid
- * inside `register`, in the registrations that follow a collection, where a
- * short operation feels it: slots passed (dead and empty ones are cheap)…
+ * inside `register`, where a short operation feels it: slots passed (dead and
+ * empty ones are cheap)…
  */
 const SLOTS_PER_STEP = 16;
 /** …living entries dereferenced by a sweep (each a cache miss or two)… */
 const LIVE_PER_STEP = 1;
-/** …or entries copied to a new table (a verified one counts double). */
+/** …or entries copied to a new table. */
 const COPIED_PER_STEP = 4;
-/** A shard this small is left alone by a collection; it is looked at when it next grows. */
-const IGNORE_BELOW = 32;
 
 // ---------------------------------------------------------------------------
-// The GC epoch — one for every pool
+// A pool's census: its epoch, and how dead its recent checks were
 // ---------------------------------------------------------------------------
 
-let canary = new WeakRef<object>({});
-let epoch = 1;
-/** The epoch as a stamp: 1…63, never 0, so that a zero word is an empty slot. */
-let stamp = 1;
-let tick = 0;
+class Census {
+  epoch = 1;
+  /** The epoch as a stamp: 1…63, never 0, so that a zero word is an empty slot. */
+  stamp = 1;
+  tick = 0;
+  /** The last WINDOW checks, one byte each: 1 found dead. */
+  readonly #ring = new Uint8Array(WINDOW);
+  #at = 0;
+  dead = 0;
 
-/** Every 64th registration: has the canary been collected? Then so may anything else have been. */
-function observeCollections(): void {
-  if ((++tick & 63) !== 0 || canary.deref() !== undefined) return;
-  canary = new WeakRef<object>({});
-  epoch++;
-  // A stamp that survives 63 epochs unrefreshed reads as current again: one
-  // entry is moved once more without being asked, and asked the epoch after.
-  stamp = ((epoch - 1) % STAMP_MASK) + 1;
+  record(dead: 0 | 1): void {
+    this.dead += dead - this.#ring[this.#at]!;
+    this.#ring[this.#at] = dead;
+    this.#at = (this.#at + 1) & (WINDOW - 1);
+  }
+
+  /** A collection has been proven. A stamp that survives 63 epochs unrefreshed reads as current again: one entry is passed over once more, and asked the epoch after. */
+  advance(): void {
+    this.epoch++;
+    this.stamp = ((this.epoch - 1) % STAMP_MASK) + 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,16 +147,14 @@ class Shard {
   oldBits = 0;
   oldWords: Int32Array | null = null;
   oldRefs: (WeakRef<object> | undefined)[] = [];
-  /** Next slot of the old table to copy; everything below it has been copied or dropped. */
+  /** Next slot of the old table to copy; everything below it has been copied. */
   cursor = 0;
-  /** Does this copy dereference (a sweep was due when it began), or just copy? */
-  verify = false;
 
-  /** Where the sweep stands, and the slots it has yet to pass; zero when none is due. */
-  sweepAt = 0;
+  /** Where the probes and the sweep stand, and the slots a sweep has yet to pass; zero when none is due. */
+  at = 0;
   sweepLeft = 0;
   /** The epoch of the last collection this shard has answered, by a sweep or by deciding against one. */
-  answered = epoch;
+  answered = 1;
 }
 
 /** Store `word` (tag and stamp) and its ref in the current table. The table is never full: see `beginCopy`. */
@@ -187,89 +191,42 @@ function removeAt(s: Shard, i: number): void {
   s.used--;
 }
 
-/** The fraction of a shard's entries that are alive, from SAMPLE occupied slots at a random place. The shard is not empty: see `register`. */
-function sampleSurvivors(s: Shard): number {
+/**
+ * Dereference `n` entries from the shard's cursor on, whatever their stamps
+ * say. The shard is not empty and not being copied: see `register`.
+ */
+function probe(s: Shard, census: Census, n: number): void {
   const words = s.words;
   const mask = words.length - 1;
-  let live = 0;
-  let seen = 0;
-  let i = (Math.random() * words.length) | 0;
-  for (let passed = 0; seen < SAMPLE && passed <= mask; passed++, i = (i + 1) & mask) {
-    const w = words[i]!;
-    if (w === 0) continue;
-    seen++;
-    if ((w & STAMP_MASK) === stamp || s.refs[i]!.deref() !== undefined) live++;
-  }
-  return live / seen;
-}
-
-/** log2 of the smallest table that holds `entries` under `load`. */
-function bitsFor(entries: number, load: number): number {
-  let bits = MIN_BITS;
-  while ((1 << bits) * load < entries) bits++;
-  return bits;
-}
-
-/**
- * Retire the current table and begin copying it into a fresh one, sized for
- * what that one will receive: what is copied, and the registrations that
- * arrive meanwhile (one per COPIED_PER_STEP entries, or per SLOTS_PER_STEP
- * slots, whichever is more). A verifying copy is begun because most of the
- * table is believed dead, so it keeps the size it has — unless that could not
- * hold everything should the belief be wrong.
- */
-function beginCopy(s: Shard, verify: boolean): void {
-  const size = s.words.length;
-  const arriving = Math.max(s.used / (verify ? COPIED_PER_STEP / 2 : COPIED_PER_STEP), size / SLOTS_PER_STEP) + 16;
-  const bits = verify ? Math.max(s.bits, bitsFor(s.used + arriving, SAFE_LOAD)) : bitsFor(s.used + arriving, TARGET_LOAD);
-  if (bits === s.bits && !verify) return; // asked to shrink, and it would not
-  s.oldBits = s.bits;
-  s.oldWords = s.words;
-  s.oldRefs = s.refs;
-  s.cursor = 0;
-  s.verify = verify;
-  s.sweepLeft = 0;
-  s.sweepAt = 0;
-  s.bits = bits;
-  s.words = new Int32Array(1 << bits);
-  s.refs = new Array<WeakRef<object> | undefined>(1 << bits).fill(undefined);
-  s.used = 0;
-}
-
-/** One registration's worth of copying. */
-function copy(s: Shard): void {
-  const oldWords = s.oldWords!;
-  const end = oldWords.length;
-  let c = s.cursor;
-  let entries = COPIED_PER_STEP;
-  let slots = SLOTS_PER_STEP;
-  while (entries > 0 && slots-- > 0 && c < end) {
-    const w = oldWords[c]!;
+  let at = s.at & mask;
+  while (n > 0 && s.used > 0) {
+    const w = words[at]!;
     if (w !== 0) {
-      const ref = s.oldRefs[c]!;
-      if (!s.verify || (w & STAMP_MASK) === stamp) {
-        place(s, w, ref);
-        entries--;
-      } else if (ref.deref() !== undefined) {
-        place(s, (w & ~STAMP_MASK) | stamp, ref);
-        entries -= 2;
+      n--;
+      if (s.refs[at]!.deref() === undefined) {
+        removeAt(s, at);
+        census.record(1);
+        if ((w & STAMP_MASK) === census.stamp) {
+          // It was alive in this epoch and is dead now: there has been a collection.
+          census.advance();
+          n = WINDOW;
+        }
+        continue; // stay: what moved back into this slot has not been looked at
       }
-      // else: dead, and not copying it is the whole of its burial
+      words[at] = (w & ~STAMP_MASK) | census.stamp;
+      census.record(0);
     }
-    c++;
+    at = (at + 1) & mask;
   }
-  s.cursor = c;
-  if (c < end) return;
-  s.oldWords = null;
-  s.oldRefs = [];
-  if (s.used < s.words.length * SHRINK_BELOW && s.bits > MIN_BITS) beginCopy(s, false);
+  s.at = at;
 }
 
 /** One registration's worth of sweeping the current table in place. */
-function sweep(s: Shard): void {
+function sweep(s: Shard, census: Census): void {
   const words = s.words;
   const mask = words.length - 1;
-  let at = s.sweepAt & mask;
+  const stamp = census.stamp;
+  let at = s.at & mask;
   let left = s.sweepLeft;
   let live = LIVE_PER_STEP;
   for (let slots = SLOTS_PER_STEP; slots > 0 && live > 0 && left > 0; slots--) {
@@ -277,17 +234,64 @@ function sweep(s: Shard): void {
     if (w !== 0 && (w & STAMP_MASK) !== stamp) {
       if (s.refs[at]!.deref() === undefined) {
         removeAt(s, at);
-        continue; // stay: what moved back into this slot has not been looked at
+        census.record(1);
+        continue; // stay, as above
       }
       words[at] = (w & ~STAMP_MASK) | stamp;
+      census.record(0);
       live--;
     }
     at = (at + 1) & mask;
     left--;
   }
-  s.sweepAt = at;
+  s.at = at;
   s.sweepLeft = left;
-  if (left <= 0 && s.used < words.length * SHRINK_BELOW && s.bits > MIN_BITS) beginCopy(s, false);
+  if (left <= 0 && s.used < words.length * SHRINK_BELOW) beginCopy(s);
+}
+
+/**
+ * Retire the current table and begin copying it into a fresh one, sized for
+ * what that one will receive: what is copied, and the registrations that
+ * arrive meanwhile (one per COPIED_PER_STEP entries, or per SLOTS_PER_STEP
+ * slots, whichever is more). Does nothing if that is the size it has.
+ */
+function beginCopy(s: Shard): void {
+  const size = s.words.length;
+  const entries = s.used + Math.max(s.used / COPIED_PER_STEP, size / SLOTS_PER_STEP) + 16;
+  let bits = MIN_BITS;
+  while ((1 << bits) * TARGET_LOAD < entries) bits++;
+  if (bits === s.bits) return;
+  s.oldBits = s.bits;
+  s.oldWords = s.words;
+  s.oldRefs = s.refs;
+  s.cursor = 0;
+  // Slots are in tag order, so the cursor keeps its place in it. An unfinished sweep starts
+  // over in the new table: an entry displaced past the cursor here may sit before it there,
+  // and what has been verified is stamped, so passing it again asks nothing.
+  s.at = bits > s.bits ? s.at << (bits - s.bits) : s.at >> (s.bits - bits);
+  if (s.sweepLeft > 0) s.sweepLeft = 1 << bits;
+  s.bits = bits;
+  s.words = new Int32Array(1 << bits);
+  s.refs = new Array<WeakRef<object> | undefined>(1 << bits).fill(undefined);
+  s.used = 0;
+}
+
+/** One registration's worth of copying. Nothing is dereferenced. */
+function copy(s: Shard): void {
+  const oldWords = s.oldWords!;
+  const end = oldWords.length;
+  let c = s.cursor;
+  let entries = COPIED_PER_STEP;
+  for (let slots = SLOTS_PER_STEP; entries > 0 && slots > 0 && c < end; slots--, c++) {
+    const w = oldWords[c]!;
+    if (w === 0) continue;
+    place(s, w, s.oldRefs[c]!);
+    entries--;
+  }
+  s.cursor = c;
+  if (c < end) return;
+  s.oldWords = null;
+  s.oldRefs = [];
 }
 
 // ---------------------------------------------------------------------------
@@ -344,11 +348,10 @@ export interface InternPool<T extends object> {
 
 class InternPoolImpl<T extends object> implements InternPool<T> {
   readonly #shards: (Shard | undefined)[] = new Array<Shard | undefined>(SHARDS).fill(undefined);
-  /** The epoch whose collection this pool has sampled, and the fraction it found alive. */
-  #sampled = 0;
-  #survivors = 1;
+  readonly #census = new Census();
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
+    const stamp = this.#census.stamp;
     const m = Math.imul(hash, 0x9e3779b1);
     const s = this.#shards[m >>> (32 - SHARD_BITS)];
     if (s === undefined) return undefined;
@@ -383,27 +386,23 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   }
 
   register(value: T, hash: number): T {
-    observeCollections();
+    const census = this.#census;
     const m = Math.imul(hash, 0x9e3779b1);
     const s = (this.#shards[m >>> (32 - SHARD_BITS)] ??= new Shard());
 
     if (s.oldWords !== null) {
-      copy(s);
+      copy(s); // and no cleaning meanwhile
     } else {
-      const full = s.used >= s.words.length * GROW_AT;
-      if (s.answered !== epoch && (full || s.used > IGNORE_BELOW)) {
-        // A shard answers a collection once: until the next one, nothing more can be found dead.
-        s.answered = epoch;
-        if (this.#sampled !== epoch) {
-          this.#sampled = epoch;
-          this.#survivors = sampleSurvivors(s);
-        }
-        if (1 - this.#survivors >= DEAD_FRACTION) s.sweepLeft = s.words.length;
+      if ((++census.tick & (PROBE_EVERY - 1)) === 0 && s.used > 0) probe(s, census, 1);
+      if (s.answered !== census.epoch) {
+        // A shard answers a noticed collection once: until the next one, nothing more can be found dead.
+        s.answered = census.epoch;
+        if (census.dead >= DEAD_FRACTION * WINDOW) s.sweepLeft = s.words.length;
       }
-      if (full) beginCopy(s, s.sweepLeft > 0); // growing anyway: the copy does the sweep's work
-      else if (s.sweepLeft > 0) sweep(s);
+      if (s.used >= s.words.length * GROW_AT) beginCopy(s);
+      else if (s.sweepLeft > 0) sweep(s, census);
     }
-    place(s, (m << SHARD_BITS) | stamp, new WeakRef<object>(value));
+    place(s, (m << SHARD_BITS) | census.stamp, new WeakRef<object>(value));
     return value;
   }
 
@@ -433,7 +432,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   }
 
   /** @internal Test-only: entries stored (live, or dead and not yet dropped), the slots of every table, and the shards with a table being copied or a sweep under way. */
-  _stats(): { slots: number; capacity: number; migrating: number; sweeping: number } {
+  _stats(): { slots: number; capacity: number; migrating: number; sweeping: number; epoch: number } {
     let slots = 0;
     let capacity = 0;
     let migrating = 0;
@@ -448,7 +447,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       capacity += s.oldWords.length;
       for (let i = s.cursor; i < s.oldWords.length; i++) if (s.oldWords[i] !== 0) slots++;
     }
-    return { slots, capacity, migrating, sweeping };
+    return { slots, capacity, migrating, sweeping, epoch: this.#census.epoch };
   }
 }
 
@@ -490,11 +489,6 @@ export function createInternPool<T extends object>(): InternPool<T> {
 // ---------------------------------------------------------------------------
 
 /** @internal Test-only: entries a pool stores (live, or dead and not yet dropped), the slots of all its tables, and how many shards have a table being copied, or a sweep under way. */
-export function _poolStats(pool: InternPool<object>): { slots: number; capacity: number; migrating: number; sweeping: number } {
+export function _poolStats(pool: InternPool<object>): { slots: number; capacity: number; migrating: number; sweeping: number; epoch: number } {
   return (pool as InternPoolImpl<object>)._stats();
-}
-
-/** @internal Test-only: the GC epoch — how many times the canary has been seen gone, plus one. */
-export function _epoch(): number {
-  return epoch;
 }

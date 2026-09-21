@@ -420,7 +420,7 @@ export function _internPoolSize(): number {
 }
 
 /** @internal Entries the global pool stores (live, or dead and not yet dropped) and the slots of all its tables — for the soak harness. */
-export function _internPoolStats(): { slots: number; capacity: number; migrating: number; sweeping: number } {
+export function _internPoolStats(): { slots: number; capacity: number; migrating: number; sweeping: number; epoch: number } {
   return _poolStats(pool);
 }
 
