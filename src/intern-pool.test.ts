@@ -317,18 +317,45 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     expectAllFound(pool, held);
   });
 
-  it('a sweep that leaves a table nearly empty lets it shrink', async () => {
-    const pool = createInternPool<{ v: number }>();
-    (function registerDoomed() {
-      for (let i = 0; i < 50_000; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
-    })();
-    const before = _poolStats(pool).capacity;
+  it('a table shrinks when a sweep both finds and leaves it nearly empty — not merely because it was swept', async () => {
+    // One shard, so the counts are exact.
+    const pool: Crafted = createInternPool<{ m: number }>();
+    const held = new Map<number, { m: number }>();
+    const doom = (salt: number, count: number): void => {
+      for (let k = 0; k < count; k++) {
+        const m = Math.imul(k + salt, 0xc2b2ae35) >>> 6;
+        pool.register({ m }, hashWithProduct(m));
+      }
+    };
+    doom(1, 1_600); // 4,096 slots
+    expect(_poolStats(pool)).toMatchObject({ slots: 1_600, capacity: 4_096, migrating: 0 });
     expect(await collectUntil(() => pool.size() === 0)).toBe(true);
-    const held: object[] = [];
-    for (let i = 0; i < 20_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-    expect(_poolStats(pool).slots).toBe(20_000);
-    expect(_poolStats(pool).capacity).toBeLessThan(before);
-    for (let i = 0; i < 20_000; i += 101) expect(pool.lookup(Math.imul(i + 1, 0xc2b2ae35) >>> 0, (c) => c === held[i])).toBe(held[i]);
+
+    (function nextBurst() {
+      doom(100_000, 400);
+      registerHeld(pool, held, 0, 1, 40);
+    })();
+    // Swept: but this table was the size its contents needed, and the next burst may need it again.
+    expect(_poolStats(pool)).toMatchObject({ slots: 440, sweeping: 0, migrating: 0, capacity: 4_096 });
+
+    // 440 in 4,096 slots, most of them about to die: under a quarter full before the sweep…
+    expect(await collectUntil(() => pool.size() === 40)).toBe(true);
+    registerHeld(pool, held, 0, 10_000, 700);
+    // …and under an eighth after it: now it is replaced by a smaller one.
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0, migrating: 0, capacity: 2_048 });
+    expectAllFound(pool, held);
+  });
+
+  it('a table of the smallest size has nothing smaller to shrink to', async () => {
+    // Shard 0 holds eleven members in its first 64 slots; shard 1 is where the collection is noticed.
+    const few = Array.from({ length: 10 }, (_, j) => (j + 1) << 20);
+    const elsewhere = Array.from({ length: 200 }, (_, j) => (1 << 26) | ((j + 1) << 17));
+    const { pool, held } = await crafted([...few, ...elsewhere], [11 << 20]);
+    const capacity = _poolStats(pool).capacity;
+    registerHeld(pool, held, 1, 1, 120); // noticed, worth a sweep — and shard 1 is done with its own
+    registerHeld(pool, held, 0, 1, 7); // shard 0: swept down to 8 of its 64 slots, and left at that
+    expect(_poolStats(pool)).toMatchObject({ slots: held.size, sweeping: 0, migrating: 0, capacity });
+    expectAllFound(pool, held);
   });
 
   it('notices the engine’s own collections — nothing here is forced', async () => {
@@ -376,11 +403,9 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
       registerDoomed(createInternPool<{ v: number }>(), 100); // a pool nobody keeps: its chores must not keep it
     })();
     registerDoomed(pool, 25_600);
-    const before = _poolStats(pool).capacity;
     expect(await collectUntil(() => _poolStats(pool).slots === 0 && _poolStats(pool).migrating === 0, 40)).toBe(true);
     expect(_poolStats(pool)).toMatchObject({ slots: 0, sweeping: 0 });
     expect(_poolStats(pool).epoch).toBeGreaterThan(1);
-    expect(_poolStats(pool).capacity).toBeLessThan(before); // swept, and then shrunk
   });
 
   it('idle time finishes the copies that registration began, once a collection (a scavenge will do) brings it', async () => {

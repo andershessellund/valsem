@@ -35,8 +35,8 @@
 //     deletion without tombstones — measured, under one slot scanned and 0.2
 //     entries moved per removal). Nothing is allocated because of a collection.
 //
-// A table is replaced only to grow (or, after a sweep has left it under an
-// eighth full, to shrink): incrementally, four entries per registration, into
+// A table is replaced only to grow (or to shrink, when a sweep began with it
+// under a quarter full and left it under an eighth): incrementally, four entries per registration, into
 // a table sized exactly for what it will receive, the old one left unwritten
 // so that its probe chains stay valid and a lookup probes the current table,
 // then the old. The copy never dereferences, and a shard that is copying does
@@ -91,7 +91,14 @@ const STAMP_MASK = SHARDS - 1;
 const MIN_BITS = 6;
 /** A table is replaced by a larger one when half full… */
 const GROW_AT = 0.5;
-/** …and by a smaller one when a sweep has left it this empty… */
+/**
+ * …and by a smaller one when a sweep has left it this empty — provided it was
+ * under twice this when the sweep BEGAN, its dead included. A table filled by
+ * the churn between two collections is the size that churn needs: shrinking it
+ * after every sweep made the next burst of work grow it again inside its own
+ * operations (measured: ×1.9–2.7 on a short one). A pool that has really
+ * collapsed shrinks one answered collection later…
+ */
 const SHRINK_BELOW = 1 / 8;
 /** …in both cases by one sized to end its copy under this load. */
 const TARGET_LOAD = 0.45;
@@ -165,6 +172,8 @@ class Shard {
   /** Where the probes and the sweep stand, and the slots a sweep has yet to pass; zero when none is due. */
   at = 0;
   sweepLeft = 0;
+  /** Was the table under a quarter full, its dead included, when this sweep began? */
+  sparse = false;
   /** The epoch of the last collection this shard has answered, by a sweep or by deciding against one. */
   answered = 1;
 }
@@ -237,7 +246,9 @@ function probe(s: Shard, census: Census, n: number): void {
 function answer(s: Shard, census: Census): void {
   if (s.answered === census.epoch) return;
   s.answered = census.epoch;
-  if (census.dead >= DEAD_FRACTION * WINDOW) s.sweepLeft = s.words.length;
+  if (census.dead < DEAD_FRACTION * WINDOW) return;
+  s.sweepLeft = s.words.length;
+  s.sparse = s.used < s.words.length * SHRINK_BELOW * 2;
 }
 
 /** One registration's worth of sweeping the current table in place. */
@@ -265,7 +276,7 @@ function sweep(s: Shard, census: Census): void {
   }
   s.at = at;
   s.sweepLeft = left;
-  if (left <= 0 && s.used < words.length * SHRINK_BELOW) beginCopy(s);
+  if (left <= 0 && s.sparse && s.used < words.length * SHRINK_BELOW) beginCopy(s);
 }
 
 /**
