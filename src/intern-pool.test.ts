@@ -8,13 +8,20 @@
 // --expose-gc to workers, so normally they run). The last of them forces
 // nothing: the engine's own collections, mid-job and incremental, are the
 // normal case, and a mechanism that only works between forced ones does not work.
-import { describe, it, expect } from 'vitest';
-import { createInternPool, _poolStats } from './intern-pool.js';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { createInternPool, _poolStats, _idleDriver, _idleState } from './intern-pool.js';
 import { equals, hashCode, interned } from './deep-equal.js';
 
 const gc = (globalThis as { gc?: () => void }).gc;
 const hasGC = typeof gc === 'function';
-const turn = (): Promise<void> => new Promise((r) => setImmediate(r));
+type G = { requestIdleCallback?: unknown; setImmediate?: unknown };
+const g = globalThis as G;
+const realSetImmediate = setImmediate;
+const turn = (): Promise<void> => new Promise((r) => realSetImmediate(r));
+
+// Everything up to the last group is about what every host has: cleanup that
+// rides on registration. The idle driver would do that work first.
+beforeAll(() => _idleDriver(false));
 
 /**
  * Repeated gc + macrotask turns until `cond` holds (or rounds run out).
@@ -344,5 +351,96 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     const stats = _poolStats(pool);
     expect(stats.epoch).toBeGreaterThan(2);
     expect(stats.slots).toBeLessThan(registered / 2);
+  });
+});
+
+describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
+  beforeEach(() => _idleDriver(true));
+  afterEach(() => {
+    _idleDriver(false);
+    delete g.requestIdleCallback;
+    g.setImmediate = realSetImmediate;
+  });
+
+  const registerDoomed = (pool: ReturnType<typeof createInternPool<{ v: number }>>, count: number): void => {
+    for (let i = 0; i < count; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
+  };
+
+  it('a collection is answered with no registration at all: the sentinel reports it, idle turns do the rest', async () => {
+    const pool = createInternPool<{ v: number }>();
+    (function dropAPool() {
+      registerDoomed(createInternPool<{ v: number }>(), 100); // a pool nobody keeps: its chores must not keep it
+    })();
+    registerDoomed(pool, 25_600);
+    const before = _poolStats(pool).capacity;
+    expect(await collectUntil(() => _poolStats(pool).slots === 0 && _poolStats(pool).migrating === 0, 40)).toBe(true);
+    expect(_poolStats(pool)).toMatchObject({ slots: 0, sweeping: 0 });
+    expect(_poolStats(pool).epoch).toBeGreaterThan(1);
+    expect(_poolStats(pool).capacity).toBeLessThan(before); // swept, and then shrunk
+  });
+
+  it('idle turns finish a copy that registration began', async () => {
+    const pool = createInternPool<{ v: number }>();
+    const held: object[] = [];
+    // 300 to a shard: its copy from 512 slots to 1,024 began at 256 and moves 4 entries a registration.
+    for (let i = 0; i < 19_200; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0));
+    expect(_poolStats(pool).migrating).toBeGreaterThan(0);
+    for (let i = 0; i < 50 && _poolStats(pool).migrating > 0; i++) await turn();
+    expect(_poolStats(pool)).toMatchObject({ slots: 19_200, migrating: 0 });
+    for (let i = 0; i < held.length; i += 53) expect(pool.lookup(Math.imul(i + 1, 0x85ebca6b) >>> 0, (c) => c === held[i])).toBe(held[i]);
+  });
+
+  it('under requestIdleCallback the work is done in deadline-bounded slices', async () => {
+    const callbacks: Array<(d: { timeRemaining(): number }) => void> = [];
+    g.requestIdleCallback = (cb: (d: { timeRemaining(): number }) => void) => {
+      callbacks.push(cb);
+    };
+    const pool = createInternPool<{ v: number }>();
+    registerDoomed(pool, 25_600);
+    // The copies under way asked for idle time once; the collection's report finds it already asked for.
+    expect(await collectUntil(() => _idleState().collected, 40)).toBe(true);
+    expect(callbacks.length).toBe(1);
+    expect(_poolStats(pool).slots).toBe(25_600);
+
+    callbacks.shift()!({ timeRemaining: () => 0 }); // no time at all: the minimum slice, and asked for again
+    expect(_poolStats(pool).epoch).toBe(2);
+    expect(_poolStats(pool).slots).toBeLessThan(25_600);
+    expect(_poolStats(pool).slots).toBeGreaterThan(0);
+    expect(callbacks.length).toBe(1);
+
+    while (callbacks.length > 0) callbacks.shift()!({ timeRemaining: () => 50 });
+    expect(_poolStats(pool)).toMatchObject({ slots: 0, sweeping: 0, migrating: 0 });
+    expect(_idleState().scheduled).toBe(false);
+  });
+
+  it('on a host without FinalizationRegistry the pool is what it is everywhere: swept by its registrations', async () => {
+    vi.stubGlobal('FinalizationRegistry', undefined);
+    vi.resetModules();
+    try {
+      const host = await import('./intern-pool.js'); // a fresh copy of the module, for this host
+      const pool = host.createInternPool<{ v: number }>();
+      registerDoomed(pool, 25_600);
+      expect(await collectUntil(() => pool.size() === 0)).toBe(true);
+      for (let i = 0; i < 40; i++) await turn();
+      expect(host._poolStats(pool)).toMatchObject({ slots: 25_600, epoch: 1 }); // no report, so no idle work
+      const held: object[] = [];
+      for (let i = 0; i < 14_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
+      for (let i = 0; i < 40; i++) await turn(); // (idle turns may finish what those registrations began)
+      expect(host._poolStats(pool)).toMatchObject({ slots: 14_000, sweeping: 0, epoch: 2 });
+      expect(held.length).toBe(14_000);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it('with no scheduler, each reported collection gets one bounded slice, where it is reported', async () => {
+    g.setImmediate = undefined;
+    const pool = createInternPool<{ v: number }>();
+    registerDoomed(pool, 25_600);
+    expect(_idleState().scheduled).toBe(false);
+    expect(await collectUntil(() => _poolStats(pool).slots < 25_600, 40)).toBe(true);
+    expect(_poolStats(pool).slots).toBeGreaterThan(0); // one slice is not the whole job…
+    expect(await collectUntil(() => _poolStats(pool).slots === 0, 60)).toBe(true); // …the next collections bring the rest
   });
 });

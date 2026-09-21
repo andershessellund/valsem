@@ -53,11 +53,21 @@
 // idle time. Measured side by side (scripts/experiments/mix-bench.mjs), with
 // forced collections and with the engine's own.
 //
-// What it costs: cleanup rides on registration. A pool that stops registering
-// stops burying its dead — the husks (a cleared WeakRef and a slot of table
-// each) stay until registration resumes or the pool is dropped.
+// All of that rides on registration, and is all a pool needs. Where the host
+// offers them, two things take the work off that path (see "Idle time" below):
+// a single FinalizationRegistry SENTINEL — one cell, never dereferenced, so it
+// does die — says that a collection has happened, and requestIdleCallback or
+// setImmediate gives time to answer it: copies are finished first (they are
+// cheap, and put lookups back on one table), then the pools are probed, then
+// the sweeps that are owed are run, in bounded slices. Measured, this is what
+// an application with idle time after a collection needs: without it the dead
+// of one burst of work are still in the tables, and in the collector's way,
+// when the next begins. Without the sentinel or a scheduler, nothing is lost
+// but that: a pool that stops registering keeps its husks (a cleared WeakRef
+// and a slot of table each) until registration resumes or the pool is dropped.
 //
-// Requires WeakRef (ES2021; every supported runtime ships it).
+// Requires WeakRef (ES2021; every supported runtime ships it). Uses
+// FinalizationRegistry, requestIdleCallback and setImmediate where they exist.
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
@@ -221,6 +231,13 @@ function probe(s: Shard, census: Census, n: number): void {
   s.at = at;
 }
 
+/** A shard answers a noticed collection once: until the next one, nothing more can be found dead. */
+function answer(s: Shard, census: Census): void {
+  if (s.answered === census.epoch) return;
+  s.answered = census.epoch;
+  if (census.dead >= DEAD_FRACTION * WINDOW) s.sweepLeft = s.words.length;
+}
+
 /** One registration's worth of sweeping the current table in place. */
 function sweep(s: Shard, census: Census): void {
   const words = s.words;
@@ -295,6 +312,89 @@ function copy(s: Shard): void {
 }
 
 // ---------------------------------------------------------------------------
+// Idle time
+// ---------------------------------------------------------------------------
+
+const IMMEDIATE_SLICE = 256; // shard steps per setImmediate turn (~16 slots each: well under a millisecond)
+const IDLE_MIN_SLICE = 16; // always make progress, even on a zero-remaining deadline
+
+/** Every pool, weakly: a dropped pool is not kept by its chores. */
+const pools: WeakRef<InternPoolImpl<object>>[] = [];
+let scheduled = false;
+let collected = false;
+let idleEnabled = true;
+
+// Structural globalThis access: this module compiles against neither the
+// DOM nor the Node ambient globals. Looked up at schedule time, not import
+// time — one typeof per slice, and a test can install a fake.
+interface IdleDeadline {
+  timeRemaining(): number;
+}
+const _g = globalThis as {
+  requestIdleCallback?: (cb: (deadline: IdleDeadline) => void) => unknown;
+  setImmediate?: (cb: () => void) => unknown;
+};
+
+/** Ask for idle time, if the host has any to give. Returns whether a slice is (now) scheduled. */
+function scheduleIdle(): boolean {
+  if (scheduled) return true;
+  if (!idleEnabled) return false;
+  if (typeof _g.requestIdleCallback === 'function') {
+    scheduled = true;
+    _g.requestIdleCallback(runIdle);
+  } else if (typeof _g.setImmediate === 'function') {
+    scheduled = true;
+    _g.setImmediate(runIdle);
+  }
+  return scheduled;
+}
+
+/** One slice: bounded by the host's deadline where there is one, by a step count otherwise. */
+function runIdle(deadline?: IdleDeadline): void {
+  scheduled = false;
+  let steps = 0;
+  const spent =
+    deadline === undefined
+      ? () => ++steps >= IMMEDIATE_SLICE
+      : () => ++steps >= IDLE_MIN_SLICE && deadline.timeRemaining() <= 1;
+  const noticed = collected;
+  collected = false;
+  let more = false;
+  for (let i = pools.length - 1; i >= 0 && !more; i--) {
+    const pool = pools[i]!.deref();
+    if (pool === undefined) {
+      pools.splice(i, 1);
+      continue;
+    }
+    if (noticed) pool._notice();
+    more = pool._idle(spent);
+  }
+  if (noticed && more) collected = true; // the pools not reached yet still have to be told
+  if (more) scheduleIdle();
+}
+
+// The sentinel: an object nothing holds, registered and never looked at — so,
+// unlike anything a pool dereferences, it dies with the next collection, and
+// the engine says so. One cell, re-armed each time. The registry must be
+// reachable from a module-level binding: an unreferenced FinalizationRegistry
+// is itself collected and its callbacks silently stop (measured, not theorized).
+const sentinel =
+  typeof FinalizationRegistry === 'function'
+    ? new FinalizationRegistry<undefined>(() => {
+        armSentinel();
+        if (!idleEnabled) return;
+        collected = true;
+        // No scheduler (and a host that may run this outside any task): one bounded slice, here.
+        if (!scheduleIdle()) runIdle();
+      })
+    : undefined;
+
+function armSentinel(): void {
+  sentinel?.register({}, undefined);
+}
+armSentinel();
+
+// ---------------------------------------------------------------------------
 // Pools
 // ---------------------------------------------------------------------------
 
@@ -349,6 +449,9 @@ export interface InternPool<T extends object> {
 class InternPoolImpl<T extends object> implements InternPool<T> {
   readonly #shards: (Shard | undefined)[] = new Array<Shard | undefined>(SHARDS).fill(undefined);
   readonly #census = new Census();
+  /** Idle time: the shard to resume at, and the census tick when this pool last probed for a collection. */
+  #idleAt = 0;
+  #noticedAt = -1;
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
     const stamp = this.#census.stamp;
@@ -394,14 +497,11 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       copy(s); // and no cleaning meanwhile
     } else {
       if ((++census.tick & (PROBE_EVERY - 1)) === 0 && s.used > 0) probe(s, census, 1);
-      if (s.answered !== census.epoch) {
-        // A shard answers a noticed collection once: until the next one, nothing more can be found dead.
-        s.answered = census.epoch;
-        if (census.dead >= DEAD_FRACTION * WINDOW) s.sweepLeft = s.words.length;
-      }
+      answer(s, census);
       if (s.used >= s.words.length * GROW_AT) beginCopy(s);
       else if (s.sweepLeft > 0) sweep(s, census);
     }
+    if (s.oldWords !== null || s.sweepLeft > 0) scheduleIdle(); // what this registration leaves undone, idle time may finish
     place(s, (m << SHARD_BITS) | census.stamp, new WeakRef<object>(value));
     return value;
   }
@@ -429,6 +529,40 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       for (let i = s.cursor; i < s.oldWords.length; i++) if (s.oldWords[i] !== 0 && s.oldRefs[i]!.deref() !== undefined) n++;
     }
     return n;
+  }
+
+  /** @internal A collection has happened: probe, as a registration would have. Only a pool that has registered since it last looked. */
+  _notice(): void {
+    const census = this.#census;
+    if (census.tick === this.#noticedAt) return;
+    this.#noticedAt = census.tick;
+    for (const s of this.#shards) {
+      if (s === undefined || s.oldWords !== null || s.used === 0) continue;
+      probe(s, census, WINDOW);
+      return;
+    }
+  }
+
+  /** @internal Idle time: finish copies, answer the noticed collection, run the sweeps owed — until `spent()`. Returns whether work is left. */
+  _idle(spent: () => boolean): boolean {
+    const census = this.#census;
+    for (let n = 0; n < SHARDS; n++) {
+      const s = this.#shards[(this.#idleAt + n) & (SHARDS - 1)];
+      if (s === undefined) continue;
+      for (;;) {
+        if (s.oldWords !== null) copy(s);
+        else {
+          answer(s, census);
+          if (s.sweepLeft <= 0) break;
+          sweep(s, census);
+        }
+        if (spent()) {
+          this.#idleAt = (this.#idleAt + n) & (SHARDS - 1);
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /** @internal Test-only: entries stored (live, or dead and not yet dropped), the slots of every table, and the shards with a table being copied or a sweep under way. */
@@ -481,7 +615,9 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
  * ```
  */
 export function createInternPool<T extends object>(): InternPool<T> {
-  return new InternPoolImpl<T>();
+  const pool = new InternPoolImpl<T>();
+  pools.push(new WeakRef(pool as unknown as InternPoolImpl<object>));
+  return pool;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,4 +627,14 @@ export function createInternPool<T extends object>(): InternPool<T> {
 /** @internal Test-only: entries a pool stores (live, or dead and not yet dropped), the slots of all its tables, and how many shards have a table being copied, or a sweep under way. */
 export function _poolStats(pool: InternPool<object>): { slots: number; capacity: number; migrating: number; sweeping: number; epoch: number } {
   return (pool as InternPoolImpl<object>)._stats();
+}
+
+/** @internal Test-only: switch the idle driver off (what is left is the registration-driven path every host has) or back on. */
+export function _idleDriver(enabled: boolean): void {
+  idleEnabled = enabled;
+}
+
+/** @internal Test-only: is an idle slice scheduled, and has a collection been reported that no slice has yet acted on? */
+export function _idleState(): { scheduled: boolean; collected: boolean } {
+  return { scheduled, collected };
 }
