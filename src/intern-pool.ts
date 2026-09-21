@@ -59,7 +59,9 @@
 // does die — says that a collection has happened, and requestIdleCallback or
 // setImmediate gives time to answer it: copies are finished first (they are
 // cheap, and put lookups back on one table), then the pools are probed, then
-// the sweeps that are owed are run, in bounded slices. Measured, this is what
+// the sweeps that are owed are run, in bounded slices. A registration never
+// asks for idle time itself: on a host whose "idle" is the next turn, that put
+// a slice after every small operation (measured: ×2.7 on one of them). Measured, this is what
 // an application with idle time after a collection needs: without it the dead
 // of one burst of work are still in the tables, and in the collector's way,
 // when the next begins. Without the sentinel or a scheduler, nothing is lost
@@ -338,7 +340,6 @@ const _g = globalThis as {
 /** Ask for idle time, if the host has any to give. Returns whether a slice is (now) scheduled. */
 function scheduleIdle(): boolean {
   if (scheduled) return true;
-  if (!idleEnabled) return false;
   if (typeof _g.requestIdleCallback === 'function') {
     scheduled = true;
     _g.requestIdleCallback(runIdle);
@@ -352,12 +353,12 @@ function scheduleIdle(): boolean {
 /** One slice: bounded by the host's deadline where there is one, by a step count otherwise. */
 function runIdle(deadline?: IdleDeadline): void {
   scheduled = false;
+  if (!idleEnabled) return;
   let steps = 0;
   const spent =
     deadline === undefined
       ? () => ++steps >= IMMEDIATE_SLICE
       : () => ++steps >= IDLE_MIN_SLICE && deadline.timeRemaining() <= 1;
-  const noticed = collected;
   collected = false;
   let more = false;
   for (let i = pools.length - 1; i >= 0 && !more; i--) {
@@ -366,10 +367,9 @@ function runIdle(deadline?: IdleDeadline): void {
       pools.splice(i, 1);
       continue;
     }
-    if (noticed) pool._notice();
+    pool._notice(); // (a pool that has not registered since it last looked does not look again)
     more = pool._idle(spent);
   }
-  if (noticed && more) collected = true; // the pools not reached yet still have to be told
   if (more) scheduleIdle();
 }
 
@@ -501,7 +501,6 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       if (s.used >= s.words.length * GROW_AT) beginCopy(s);
       else if (s.sweepLeft > 0) sweep(s, census);
     }
-    if (s.oldWords !== null || s.sweepLeft > 0) scheduleIdle(); // what this registration leaves undone, idle time may finish
     place(s, (m << SHARD_BITS) | census.stamp, new WeakRef<object>(value));
     return value;
   }
@@ -632,6 +631,7 @@ export function _poolStats(pool: InternPool<object>): { slots: number; capacity:
 /** @internal Test-only: switch the idle driver off (what is left is the registration-driven path every host has) or back on. */
 export function _idleDriver(enabled: boolean): void {
   idleEnabled = enabled;
+  collected = false;
 }
 
 /** @internal Test-only: is an idle slice scheduled, and has a collection been reported that no slice has yet acted on? */

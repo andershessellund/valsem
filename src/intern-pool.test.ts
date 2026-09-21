@@ -355,7 +355,11 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
 });
 
 describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
-  beforeEach(() => _idleDriver(true));
+  beforeEach(async () => {
+    // A slice asked for by an earlier test may still be pending; switched off, it does nothing when it comes.
+    for (let i = 0; i < 50 && _idleState().scheduled; i++) await turn();
+    _idleDriver(true);
+  });
   afterEach(() => {
     _idleDriver(false);
     delete g.requestIdleCallback;
@@ -379,13 +383,14 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
     expect(_poolStats(pool).capacity).toBeLessThan(before); // swept, and then shrunk
   });
 
-  it('idle turns finish a copy that registration began', async () => {
+  it('idle time finishes the copies that registration began, once a collection (a scavenge will do) brings it', async () => {
     const pool = createInternPool<{ v: number }>();
     const held: object[] = [];
     // 300 to a shard: its copy from 512 slots to 1,024 began at 256 and moves 4 entries a registration.
     for (let i = 0; i < 19_200; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0));
     expect(_poolStats(pool).migrating).toBeGreaterThan(0);
-    for (let i = 0; i < 50 && _poolStats(pool).migrating > 0; i++) await turn();
+    expect(_idleState().scheduled).toBe(false); // a registration never asks for idle time
+    expect(await collectUntil(() => _poolStats(pool).migrating === 0, 40)).toBe(true);
     expect(_poolStats(pool)).toMatchObject({ slots: 19_200, migrating: 0 });
     for (let i = 0; i < held.length; i += 53) expect(pool.lookup(Math.imul(i + 1, 0x85ebca6b) >>> 0, (c) => c === held[i])).toBe(held[i]);
   });
@@ -397,8 +402,8 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
     };
     const pool = createInternPool<{ v: number }>();
     registerDoomed(pool, 25_600);
-    // The copies under way asked for idle time once; the collection's report finds it already asked for.
-    expect(await collectUntil(() => _idleState().collected, 40)).toBe(true);
+    expect(_idleState().scheduled).toBe(false); // registration asks for nothing
+    expect(await collectUntil(() => _idleState().collected, 40)).toBe(true); // the sentinel's report does
     expect(callbacks.length).toBe(1);
     expect(_poolStats(pool).slots).toBe(25_600);
 
