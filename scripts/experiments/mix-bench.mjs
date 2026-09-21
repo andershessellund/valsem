@@ -790,7 +790,9 @@ function makeProbeSweepPool(theta, cursorMode = 'rand') {
   // 'follow' as 'scaled', and while a table is being copied the cursor works wherever its
   // entries ARE: in the old array while the copy has not reached them (a dead entry there is
   // blanked, not shifted — its word keeps the old chains valid and the copy skips it), in
-  // the new array once it has. Sweeps do not wait for a copy to end.
+  // the new array once it has. Sweeps do not wait for a copy to end;
+  // 'pause' as 'scaled', but a shard that is copying does no cleaning at all: no probes, no
+  // sweep, and the copy is always a plain one (it never dereferences).
   const MIN_BITS = 6;
   const STAMP = 63;
   const SLOTS = 16;
@@ -908,7 +910,7 @@ function makeProbeSweepPool(theta, cursorMode = 'rand') {
     if (bits === t.bits && !verify) return;
     t.oldBits = t.bits; t.oldWords = t.words; t.oldRefs = t.refs; t.cursor = 0; t.verify = verify; t.sweepLeft = 0;
     if (cursorMode === 'restart') { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; t.at = seed & ((1 << bits) - 1); }
-    else if (cursorMode === 'scaled' || cursorMode === 'follow') t.at = bits >= t.bits ? t.at << (bits - t.bits) : t.at >> (t.bits - bits);
+    else if (cursorMode === 'scaled' || cursorMode === 'follow' || cursorMode === 'pause') t.at = bits >= t.bits ? t.at << (bits - t.bits) : t.at >> (t.bits - bits);
     else t.at = 0;
     t.bits = bits; t.words = new Int32Array(1 << bits); t.refs = new Array(1 << bits).fill(undefined); t.used = 0;
     st.copies++;
@@ -986,7 +988,7 @@ function makeProbeSweepPool(theta, cursorMode = 'rand') {
     register(value, hash) {
       const m = Math.imul(hash, 0x9e3779b1);
       const t = (shards[m >>> 26] ??= newShard());
-      if ((++tick & (PROBE_EVERY - 1)) === 0 && t.used > 0) probe(t, 1);
+      if ((++tick & (PROBE_EVERY - 1)) === 0 && t.used > 0 && !(cursorMode === 'pause' && t.oldWords !== null)) probe(t, 1);
       if (t.oldWords !== null) {
         copy(t);
         if (cursorMode === 'follow' && t.oldWords !== null && !t.verify) {
@@ -999,7 +1001,7 @@ function makeProbeSweepPool(theta, cursorMode = 'rand') {
           t.answered = epoch; // a shard answers a detected collection once
           if (dead16 >= theta * 16) { t.sweepLeft = t.words.length; st.laps++; }
         }
-        if (full) beginCopy(t, t.sweepLeft > 0);
+        if (full) beginCopy(t, cursorMode === 'pause' ? false : t.sweepLeft > 0);
         else if (t.sweepLeft > 0) sweep(t);
       }
       place(t, (m << 6) | stamp, new WeakRef(value));
@@ -1044,7 +1046,7 @@ async function child(poolName, scenarioName) {
     pool = makeChainPool(c ? Number(c.slice(3)) : 2, opts.includes('+reads'), g ? Number(g.slice(4)) : 4, opts.includes('presize'));
   } else if (poolName.startsWith('psweep')) {
     const g = poolName.split(' ').find((o) => o.startsWith('gate'));
-    pool = makeProbeSweepPool(g ? Number(g.slice(4)) : 0.67, poolName.includes('restart') ? 'restart' : poolName.includes('scaled') ? 'scaled' : poolName.includes('follow') ? 'follow' : 'rand');
+    pool = makeProbeSweepPool(g ? Number(g.slice(4)) : 0.67, poolName.includes('restart') ? 'restart' : poolName.includes('scaled') ? 'scaled' : poolName.includes('follow') ? 'follow' : poolName.includes('pause') ? 'pause' : 'rand');
   } else if (poolName.startsWith('gsweep')) {
     const g = poolName.split(' ').find((o) => o.startsWith('gate'));
     const l = poolName.split(' ').find((o) => o.startsWith('live'));
