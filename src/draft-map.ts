@@ -1,6 +1,20 @@
 // ---------------------------------------------------------------------------
 // DraftMap — the mutable draft twin of ValueMap, and its finalize.
 //
+// The base's membership lives in a persistent WORKING map — the base, with
+// every delete applied as it happens (each O(log n)); values, and the keys
+// the recipe added, live in an overlay from key to what the recipe sees
+// there — its own assignment, or a child draft made on read (the immer
+// rule: a frozen canonical is drafted copy-on-write, raw material the recipe
+// just made is handed back bare). A new key is not written into the working
+// map: order is not part of this value, so nothing needs its position, and
+// a placeholder would be a path copy paid twice (measured: sets of new keys
+// +60 %). Finalize is the working map with the overlay's resolved values set
+// into it, and the patches are the trie diff of base and result: a key
+// deleted and set back to its value is no change, and shared subtrees are
+// skipped by pointer. DraftOrderedMap's shape, less the placeholder and the
+// op log.
+//
 // ValueMap implements the `[toDraft]` protocol (see draft-core.ts) by calling
 // createMapDraft; produce never imports this module. It rides the same
 // toolkit any third-party draftable would.
@@ -32,17 +46,32 @@ import type { Draft } from './produce.js';
 
 const INTERNAL = Symbol('valsem.draftInternal');
 
+interface Entry {
+  v: unknown;
+  /** true = assigned by the recipe (its own material); false = child-drafted on read. */
+  assigned: boolean;
+}
+
+/** What finalize's patches are made of: the entries only in `a`, only in `b`, and changed between them, to visitors (the map class's diff, passed in so that this module needs no value import of it). */
+export type MapDiff = (
+  a: ValueMap<unknown, unknown>,
+  b: ValueMap<unknown, unknown>,
+  onlyA: (key: unknown, value: unknown) => void,
+  onlyB: (key: unknown, value: unknown) => void,
+  changed: (key: unknown, before: unknown, after: unknown) => void,
+) => void;
+
 export interface MapState<K = unknown, V = unknown> extends DraftState<ValueMap<K, V>> {
   kind: 'map';
   /** The canonical empty map of this kind (for `clear()`). */
   empty: () => ValueMap<unknown, unknown>;
-  /** Canonical key → current value (draft or raw). */
-  edits: Map<unknown, unknown>;
-  /** Canonical key → true (set) | false (deleted); absent = child-drafted only. */
-  assigned: Map<unknown, boolean>;
-  cleared: boolean;
-  /** Entries as the recipe sees them, kept as `set`, `delete` and `clear` go: `size` must not walk `assigned` (it was quadratic in a loop that read it). */
-  size: number;
+  diff: MapDiff;
+  /** The base with every delete applied persistently: which of the base's keys are still present. */
+  work: ValueMap<unknown, unknown>;
+  /** Canonical key → what the recipe sees there: a present base key's value, or a key the recipe added. Absent = a base value, untouched. */
+  edits: Map<unknown, Entry>;
+  /** Keys in `edits` that are not in `work`: what the recipe added, counted so that `size` is O(1). */
+  added: number;
   draft: DraftMap<K, V>;
 }
 
@@ -62,42 +91,40 @@ export class DraftMap<K, V> {
     return s;
   }
 
+  /** What the recipe currently sees under a present canonical key `k`. */
+  #current(s: MapState, k: unknown): unknown {
+    const e = s.edits.get(k);
+    return e !== undefined ? e.v : s.base.get(k);
+  }
+
   get size(): number {
-    return this.#state.size;
+    const s = this.#state;
+    return s.work.size + s.added;
   }
 
   has(key: K): boolean {
     const s = this.#state;
     const k = intern(key);
-    const assigned = s.assigned.get(k);
-    if (assigned !== undefined) return assigned;
-    return !s.cleared && s.base.has(k);
+    return s.work.has(k) || s.edits.has(k);
   }
 
   get(key: K): Draft<V> | undefined {
     const s = this.#state;
     const k = intern(key);
-    if (s.edits.has(k)) {
-      const edited = s.edits.get(k);
+    const e = s.edits.get(k);
+    if (e !== undefined) {
       // A frozen assigned value (a canonical placed into the draft) must
       // copy-on-write when read for mutation — same rule as the traps.
-      if (
-        !s.finalized &&
-        isDraftable(edited) &&
-        stateOf(edited) === undefined &&
-        isImmutable(edited)
-      ) {
-        const child = createChildDraft(edited, s);
-        s.edits.set(k, child); // stays assigned — resolves at finalize
-        return child as Draft<V>;
+      if (!s.finalized && isDraftable(e.v) && stateOf(e.v) === undefined && isImmutable(e.v)) {
+        e.v = createChildDraft(e.v, s); // stays assigned — resolves at finalize
       }
-      return edited as Draft<V>;
+      return e.v as Draft<V>;
     }
-    if (s.assigned.get(k) === false || s.cleared) return undefined;
-    const value = s.base.get(k);
+    // Not in the overlay: a base key still present holds its base value in the working map (one lookup), or it is absent.
+    const value = s.work.get(k);
     if (value !== undefined && isDraftable(value) && !s.finalized) {
       const child = createChildDraft(value, s);
-      s.edits.set(k, child); // child-drafted — deliberately NOT assigned
+      s.edits.set(k, { v: child, assigned: false }); // child-drafted — deliberately NOT assigned
       return child as Draft<V>;
     }
     return value as Draft<V> | undefined;
@@ -106,27 +133,34 @@ export class DraftMap<K, V> {
   set(key: K, value: V): this {
     const s = this.#state;
     const k = intern(key);
-    const present = this.has(key as K);
-    if (present) {
-      const current = s.edits.has(k) ? s.edits.get(k) : s.base.get(k);
-      if (same(current, value)) return this;
-    }
+    const inBase = s.work.has(k);
+    const e = s.edits.get(k);
+    if ((inBase || e !== undefined) && same(this.#current(s, k), value)) return this;
     assertAssignable(value, s);
     markChanged(s);
-    if (!present) s.size++;
-    s.edits.set(k, value);
-    s.assigned.set(k, true);
+    if (e !== undefined) {
+      e.v = value;
+      e.assigned = true;
+    } else {
+      s.edits.set(k, { v: value, assigned: true });
+      if (!inBase) s.added++;
+    }
     return this;
   }
 
   delete(key: K): boolean {
     const s = this.#state;
-    if (!this.has(key)) return false;
     const k = intern(key);
+    if (s.work.has(k)) {
+      markChanged(s);
+      s.work = s.work.delete(k);
+      s.edits.delete(k);
+      return true;
+    }
+    if (!s.edits.has(k)) return false;
     markChanged(s);
-    s.size--;
     s.edits.delete(k);
-    s.assigned.set(k, false);
+    s.added--;
     return true;
   }
 
@@ -134,10 +168,9 @@ export class DraftMap<K, V> {
     const s = this.#state;
     if (this.size === 0) return;
     markChanged(s);
-    s.cleared = true;
-    s.size = 0;
-    s.edits.clear();
-    s.assigned.clear();
+    s.work = s.empty();
+    s.edits = new Map();
+    s.added = 0;
   }
 
   /**
@@ -148,22 +181,15 @@ export class DraftMap<K, V> {
    */
   *entries(): IterableIterator<[K, Draft<V> | (V & undefined)]> {
     const s = this.#state;
-    // `get` records a child draft in `edits` as the walk goes, so the second
-    // loop takes the keys the base does not have, not "whatever is in edits".
-    if (!s.cleared) {
-      for (const k of s.base.keys()) {
-        if (s.assigned.get(k) === false) continue;
-        yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
-      }
-    }
-    for (const k of s.edits.keys()) {
-      if (s.assigned.get(k) === false || (!s.cleared && s.base.has(k))) continue;
-      yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
-    }
+    for (const k of s.work.keys()) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
+    // `get` adds child-drafted base entries to the overlay as the walk goes: the keys the working map lacks are the added ones.
+    for (const k of s.edits.keys()) if (!s.work.has(k)) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
   }
 
   *keys(): IterableIterator<K> {
-    for (const [k] of this.#peek()) yield k;
+    const s = this.#state;
+    for (const k of s.work.keys()) yield k as K;
+    for (const k of s.edits.keys()) if (!s.work.has(k)) yield k as K;
   }
 
   *values(): IterableIterator<Draft<V> | (V & undefined)> {
@@ -174,19 +200,10 @@ export class DraftMap<K, V> {
     return this.entries();
   }
 
-  /** The entries as they are held, nothing drafted: what `keys()` and inspection walk. */
+  /** The entries as they are held, nothing drafted: what inspection walks. */
   *#peek(): IterableIterator<[K, V]> {
     const s = this.#state;
-    if (!s.cleared) {
-      for (const [k, v] of s.base) {
-        if (s.assigned.get(k) === false) continue;
-        yield [k as K, (s.edits.has(k) ? s.edits.get(k) : v) as V];
-      }
-    }
-    for (const [k, v] of s.edits) {
-      if (s.assigned.get(k) === false || (!s.cleared && s.base.has(k))) continue;
-      yield [k as K, v as V];
-    }
+    for (const k of this.keys()) yield [k, this.#current(s, k) as V];
   }
 
   /** What `console.log` shows (Node's `util.inspect`): what the draft holds right now. */
@@ -216,19 +233,20 @@ export function createMapDraft<K, V>(
   base: ValueMap<K, V>,
   parent: DraftState | undefined,
   empty: () => ValueMap<unknown, unknown>,
+  diff: MapDiff,
 ): MapState<K, V> {
   const state = createDraftState<MapState>({
     kind: 'map',
     parent,
     base: base as ValueMap<unknown, unknown>,
     empty,
+    diff,
+    work: base as ValueMap<unknown, unknown>,
     edits: new Map(),
-    assigned: new Map(),
-    cleared: false,
-    size: base.size,
+    added: 0,
     draft: null as unknown as DraftMap<unknown, unknown>,
     finalize: finalizeMap,
-    snapshot: snapshotMap,
+    snapshot: (state) => withEdits(state as MapState, true, undefined, null),
     applyPatch: applyMapPatch,
     childAt: (state, segment) => (state as MapState).draft.get(segment),
     replaceChild: (state, segment, value) => void (state as MapState).draft.set(segment, value),
@@ -243,62 +261,47 @@ function applyMapPatch(state: MapState, p: Patch): void {
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a map draft`);
 }
 
-/** current()'s view: the base (or empty, if cleared) with the edits replayed persistently. */
-function snapshotMap(state: DraftState<ValueMap<unknown, unknown>>): unknown {
-  const s = state as MapState;
-  let result = s.cleared ? s.empty() : s.base;
-  for (const [key, wasSet] of s.assigned) if (wasSet === false) result = result.delete(key);
-  for (const [key, v] of s.edits) result = result.set(key, snapshotOf(v));
+/**
+ * The working map with the overlay's values set into it — the result
+ * (values resolved) or, with `snap`, current()'s view (values snapshotted,
+ * nothing finalized). O(edits · log n), with no replay. `childPath` gives the patch path for a
+ * child-drafted entry, or null when not emitting.
+ */
+function withEdits(state: MapState, snap: boolean, recorder: PatchRecorder | undefined, childPath: ((k: unknown) => PatchPath) | null): ValueMap<unknown, unknown> {
+  let result = state.work;
+  for (const [k, e] of state.edits) {
+    const v = snap ? snapshotOf(e.v) : resolve(e.v, !e.assigned && childPath !== null ? childPath(k) : null, recorder);
+    result = result.set(k, v);
+  }
   return result;
 }
 
-function finalizeMap(
-  state: MapState,
-  path: PatchPath | null,
-  recorder: PatchRecorder | undefined,
-): unknown {
-  let result = state.cleared ? state.empty() : state.base;
+function finalizeMap(state: MapState, path: PatchPath | null, recorder: PatchRecorder | undefined): unknown {
   const emitting = recorder !== undefined && path !== null;
-
-  if (emitting && state.cleared) {
-    for (const [k, v] of state.base) {
-      if (state.assigned.get(k) !== undefined) continue; // covered below
-      recorder.patches.push({ kind: 'map.delete', path: path!, key: k });
-      recorder.inverse.unshift({ kind: 'map.set', path: path!, key: k, value: v });
-    }
+  // Child-drafted entries emit their deeper patches here, under path + key.
+  const result = withEdits(state, false, recorder, emitting ? (k) => [...path!, k] : null);
+  if (emitting && result !== state.base) {
+    // The net change by content, from the diff of base and result: a key set
+    // back to its base value is no change, and a child-drafted entry's change
+    // was told deeper — the diff says nothing of it here.
+    state.diff(
+      state.base,
+      result,
+      (key, before) => {
+        recorder.patches.push({ kind: 'map.delete', path, key });
+        recorder.inverse.unshift({ kind: 'map.set', path, key, value: before });
+      },
+      (key, after) => {
+        recorder.patches.push({ kind: 'map.set', path, key, value: after });
+        recorder.inverse.unshift({ kind: 'map.delete', path, key });
+      },
+      (key, before, after) => {
+        if (state.edits.get(key)?.assigned === false) return;
+        recorder.patches.push({ kind: 'map.set', path, key, value: after });
+        recorder.inverse.unshift({ kind: 'map.set', path, key, value: before });
+      },
+    );
   }
-
-  for (const [key, wasSet] of state.assigned) {
-    const hadBefore = state.base.has(key);
-    const before = state.base.get(key);
-    if (wasSet) {
-      const after = resolve(state.edits.get(key), null, recorder);
-      result = result.set(key, after);
-      if (emitting) {
-        if (hadBefore && !state.cleared && same(before, after)) continue;
-        recorder.patches.push({ kind: 'map.set', path: path!, key, value: after });
-        recorder.inverse.unshift(
-          hadBefore
-            ? { kind: 'map.set', path: path!, key, value: before }
-            : { kind: 'map.delete', path: path!, key },
-        );
-      }
-    } else {
-      result = result.delete(key);
-      if (emitting && hadBefore) {
-        recorder.patches.push({ kind: 'map.delete', path: path!, key });
-        recorder.inverse.unshift({ kind: 'map.set', path: path!, key, value: before });
-      }
-    }
-  }
-
-  // Child-drafted (unassigned) entries: deeper patches at path + key.
-  for (const [key, value] of state.edits) {
-    if (state.assigned.has(key)) continue;
-    const childPath = emitting ? [...path!, key] : null;
-    result = result.set(key, resolve(value, childPath, recorder));
-  }
-
   state.result = result;
   return result;
 }
