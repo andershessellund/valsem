@@ -68,6 +68,19 @@ function nodeBoundary(k: CNode): boolean {
   return Math.imul(k.h ^ 0x5bd1e995, 0x9e3779b1) >>> 27 === 0;
 }
 
+// The chunking rules, in one place: the canonical shape — and so `===` of
+// equal content — rests on every construction path (`merge`, `rebuild`,
+// `chunkLevel`, `from`) closing runs by exactly these. A run is closed
+// eagerly, the moment the rule says so; the list end closes what is left.
+/** Does a leaf run of `length` elements, the last with hash `h`, end here? */
+function endsLeafRun(length: number, h: number): boolean {
+  return itemBoundary(h) || length >= MAX_RUN;
+}
+/** Does a branch run of `length` nodes, the last being `last`, end here? */
+function endsBranchRun(length: number, last: CNode): boolean {
+  return (length >= 2 && nodeBoundary(last)) || length >= MAX_RUN;
+}
+
 const cpool = createInternPool<CNode>();
 
 function consLeaf(items: unknown[], hashes: number[]): CNode {
@@ -212,7 +225,7 @@ function merge(frames: Frame[], head: unknown[], cursor: Cursor | null): CNode |
       const h = internHash(el);
       items.push(el);
       hashes.push(h);
-      if (itemBoundary(h) || items.length >= MAX_RUN) {
+      if (endsLeafRun(items.length, h)) {
         out.push(consLeaf(items, hashes));
         items = [];
         hashes = [];
@@ -254,7 +267,7 @@ function merge(frames: Frame[], head: unknown[], cursor: Cursor | null): CNode |
     let run: CNode[] = [];
     const feed = (nd: CNode): void => {
       run.push(nd);
-      if ((run.length >= 2 && nodeBoundary(nd)) || run.length >= MAX_RUN) {
+      if (endsBranchRun(run.length, nd)) {
         out.push(consBranch(run));
         run = [];
       }
@@ -312,7 +325,7 @@ export const _ANCHOR_NONE: unique symbol = Symbol('valsem.anchor.none');
 
 /** Is a leaf holding `items` closed — does its run end on its own, not merely at the list end? */
 function leafClosed(items: readonly unknown[]): boolean {
-  return items.length >= MAX_RUN || itemBoundary(internHash(items[items.length - 1]));
+  return endsLeafRun(items.length, internHash(items[items.length - 1]));
 }
 
 /**
@@ -618,7 +631,10 @@ export class ValueList<T> implements Iterable<T> {
     const ed: EditStream = { idx, vals, pos: 0 };
     const carry: Carry = [];
     let top = rebuild(root, 0, ed, carry);
-    // The list end closes every open run, bottom-up.
+    // The list end closes every open run, bottom-up. A closed node joins the
+    // run above without the rule being asked: `rebuild` closes runs eagerly,
+    // so that run is open under the rule, and the list end ends it after this
+    // node whatever the rule would say — the shape is the one the rule gives.
     for (let h = 0; h < root.ht; h++) {
       const open = carry[h];
       if (open === undefined || open === null || open.length === 0) continue;
@@ -1011,7 +1027,7 @@ function rebuild(node: CNode, start: number, ed: EditStream, carry: Carry): CNod
       const h = internHash(el);
       items.push(el);
       hashes.push(h);
-      if (itemBoundary(h) || items.length >= MAX_RUN) {
+      if (endsLeafRun(items.length, h)) {
         out.push(consLeaf(items, hashes));
         items = [];
         hashes = [];
@@ -1030,7 +1046,7 @@ function rebuild(node: CNode, start: number, ed: EditStream, carry: Carry): CNod
   carry[h] = null;
   const feed = (nd: CNode): void => {
     run.push(nd);
-    if ((run.length >= 2 && nodeBoundary(nd)) || run.length >= MAX_RUN) {
+    if (endsBranchRun(run.length, nd)) {
       out.push(consBranch(run));
       run = [];
     }
@@ -1064,7 +1080,7 @@ function chunkLevel(nodes: CNode[]): CNode[] {
   for (let i = 0; i < nodes.length; i++) {
     const nd = nodes[i]!;
     run.push(nd);
-    if ((run.length >= 2 && nodeBoundary(nd)) || run.length >= MAX_RUN) {
+    if (endsBranchRun(run.length, nd)) {
       out.push(consBranch(run));
       run = [];
     }
