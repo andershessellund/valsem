@@ -33,6 +33,7 @@ import {
   trieValues,
   trieForEach,
   trieFrom,
+  trieDiff,
   NOT_FOUND,
   _trieStats,
   type HNode,
@@ -237,6 +238,28 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   /** @internal Trie node-pool sizes — exposed for sharing tests. */
   static _nodeStats(): { bnodes: number; cnodes: number } {
     return _trieStats(CFG);
+  }
+
+  /**
+   * @internal The entries only in `a`, only in `b`, and under one key in
+   * both with different values, to visitors, without building anything:
+   * shared subtrees are skipped by pointer (see `trieDiff`).
+   */
+  static _diff(
+    a: ValueMap<unknown, unknown>,
+    b: ValueMap<unknown, unknown>,
+    onlyA: (key: unknown, value: unknown) => void,
+    onlyB: (key: unknown, value: unknown) => void,
+    changed: (key: unknown, before: unknown, after: unknown) => void,
+  ): void {
+    trieDiff(
+      CFG,
+      a.#root,
+      b.#root,
+      (s, i) => onlyA(s[i], s[i + 1]),
+      (s, i) => onlyB(s[i], s[i + 1]),
+      (sa, ai, sb, bi) => changed(sa[ai], sa[ai + 1], sb[bi + 1]),
+    );
   }
 }
 

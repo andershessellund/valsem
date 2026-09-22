@@ -28,9 +28,10 @@ export interface SetState<T = unknown> extends DraftState<ValueSet<T>> {
   kind: 'set';
   /** The canonical empty set of this kind (for `clear()`). */
   empty: () => ValueSet<unknown>;
-  added: Set<unknown>;
-  removed: Set<unknown>;
-  cleared: boolean;
+  /** The set as it stands — every edit applied persistently. */
+  work: ValueSet<unknown>;
+  /** The members only in `a` and only in `b`, to visitors: what finalize's patches are made of (the set class's diff, passed in so that this module needs no value import of it). */
+  diff: (a: ValueSet<unknown>, b: ValueSet<unknown>, onlyA: (m: unknown) => void, onlyB: (m: unknown) => void) => void;
   draft: DraftSet<T>;
 }
 
@@ -51,57 +52,40 @@ export class DraftSet<T> {
   }
 
   get size(): number {
-    const s = this.#state;
-    return (s.cleared ? 0 : s.base.size - s.removed.size) + s.added.size;
+    return this.#state.work.size;
   }
 
   has(value: T): boolean {
-    const s = this.#state;
-    const v = intern(value);
-    if (s.added.has(v)) return true;
-    if (s.removed.has(v) || s.cleared) return false;
-    return s.base.has(v);
+    return this.#state.work.has(value);
   }
 
   add(value: T): this {
     const s = this.#state;
-    if (this.has(value)) return this;
-    const v = intern(value);
+    const next = s.work.add(value);
+    if (next === s.work) return this;
     markChanged(s);
-    if (!s.cleared && s.base.has(v)) {
-      s.removed.delete(v); // re-added base member
-    } else {
-      s.added.add(v);
-    }
+    s.work = next;
     return this;
   }
 
   delete(value: T): boolean {
     const s = this.#state;
-    if (!this.has(value)) return false;
-    const v = intern(value);
+    const next = s.work.delete(value);
+    if (next === s.work) return false;
     markChanged(s);
-    if (!s.added.delete(v)) s.removed.add(v);
+    s.work = next;
     return true;
   }
 
   clear(): void {
     const s = this.#state;
-    if (this.size === 0) return;
+    if (s.work.size === 0) return;
     markChanged(s);
-    s.cleared = true;
-    s.added.clear();
-    s.removed.clear();
+    s.work = s.empty();
   }
 
-  *values(): IterableIterator<T> {
-    const s = this.#state;
-    if (!s.cleared) {
-      for (const v of s.base) {
-        if (!s.removed.has(v)) yield v as T;
-      }
-    }
-    yield* s.added as Set<T>;
+  values(): IterableIterator<T> {
+    return this.#state.work.values() as IterableIterator<T>;
   }
 
   keys(): IterableIterator<T> {
@@ -207,18 +191,18 @@ export function createSetDraft<T>(
   base: ValueSet<T>,
   parent: DraftState | undefined,
   empty: () => ValueSet<unknown>,
+  diff: SetState['diff'],
 ): SetState<T> {
   const state = createDraftState<SetState>({
     kind: 'set',
     parent,
     base: base as ValueSet<unknown>,
     empty,
-    added: new Set(),
-    removed: new Set(),
-    cleared: false,
+    diff,
+    work: base as ValueSet<unknown>,
     draft: null as unknown as DraftSet<unknown>,
     finalize: finalizeSet,
-    snapshot: currentSet,
+    snapshot: (state) => (state as SetState).work,
     applyPatch: applySetPatch,
   });
   state.draft = new DraftSet(INTERNAL, state);
@@ -231,36 +215,29 @@ function applySetPatch(state: SetState, p: Patch): void {
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a set draft`);
 }
 
-/** The set as it stands: base (or empty, if cleared) minus removals plus additions. Also current()'s view. */
-function currentSet(state: DraftState<ValueSet<unknown>>): ValueSet<unknown> {
-  const s = state as SetState;
-  let result = s.cleared ? s.empty() : s.base;
-  for (const v of s.removed) result = result.delete(v);
-  for (const v of s.added) result = result.add(v);
-  return result;
-}
-
 function finalizeSet(
   state: SetState,
   path: PatchPath | null,
   recorder: PatchRecorder | undefined,
 ): unknown {
-  const result = currentSet(state);
+  const result = state.work;
   state.result = result;
-
-  if (recorder !== undefined && path !== null) {
-    const removedAll = state.cleared
-      ? [...state.base].filter((v) => !state.added.has(v))
-      : [...state.removed];
-    for (const v of removedAll) {
-      recorder.patches.push({ kind: 'set.delete', path, value: v });
-      recorder.inverse.unshift({ kind: 'set.add', path, value: v });
-    }
-    for (const v of state.added) {
-      if (state.cleared && state.base.has(v)) continue;
-      recorder.patches.push({ kind: 'set.add', path, value: v });
-      recorder.inverse.unshift({ kind: 'set.delete', path, value: v });
-    }
+  if (recorder !== undefined && path !== null && result !== state.base) {
+    // The net change, found at node level: shared subtrees are skipped by
+    // pointer, and nothing is built to be walked. A member both removed and
+    // re-added inside the recipe is not a change.
+    state.diff(
+      state.base,
+      result,
+      (v) => {
+        recorder.patches.push({ kind: 'set.delete', path, value: v });
+        recorder.inverse.unshift({ kind: 'set.add', path, value: v });
+      },
+      (v) => {
+        recorder.patches.push({ kind: 'set.add', path, value: v });
+        recorder.inverse.unshift({ kind: 'set.delete', path, value: v });
+      },
+    );
   }
   return result;
 }

@@ -27,6 +27,7 @@ import {
   trieSymmetricDifference,
   trieIsSubset,
   trieIsDisjoint,
+  trieDiff,
   NOT_FOUND,
   type HNode,
 } from './hamt.js';
@@ -232,6 +233,15 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
     return trieIsSubset(CFG, ValueSet.#of(other).#root, this.#root);
   }
 
+  /**
+   * @internal The members only in `a` and only in `b`, to visitors, without
+   * building either difference: shared subtrees are skipped by pointer (see
+   * `trieDiff`). What a draft's netted patches are made of.
+   */
+  static _diff(a: ValueSet<unknown>, b: ValueSet<unknown>, onlyA: (member: unknown) => void, onlyB: (member: unknown) => void): void {
+    trieDiff(CFG, a.#root, b.#root, (slots, i) => onlyA(slots[i]), (slots, i) => onlyB(slots[i]));
+  }
+
   /** Whether this set shares no member with `other`. */
   isDisjointFrom(other: Iterable<unknown>): boolean {
     return trieIsDisjoint(CFG, this.#root, ValueSet.#of(other).#root);
@@ -254,7 +264,7 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
 
   /** The `produce` draft protocol: a {@link DraftSet} over this set. */
   [toDraft](parent?: DraftState): SetState<T> {
-    return createSetDraft(this, parent, ValueSet.empty);
+    return createSetDraft(this, parent, ValueSet.empty, ValueSet._diff);
   }
 
   /** Add `value` (interned on entry). Returns `this` if a structural equal is present. */
