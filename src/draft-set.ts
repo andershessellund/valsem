@@ -6,7 +6,6 @@
 // toolkit any third-party draftable would.
 // ---------------------------------------------------------------------------
 
-import { intern } from './intern.js';
 import {
   DRAFT_STATE,
   createDraftState,
