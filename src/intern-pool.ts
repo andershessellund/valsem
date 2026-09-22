@@ -50,7 +50,10 @@
 //
 // A lookup's predicate is the caller's code and may register into the pool
 // (an `[equals]` that interns while comparing): a registration made inside a
-// lookup does no probing or sweeping, so nothing moves under the lookup.
+// lookup does no probing or sweeping, so nothing moves under the lookup; and a
+// lookup whose predicate registered scans again what it has not scanned, so
+// that what the predicate added — an equal of the value looked up, even — is
+// found. Such a predicate may be offered a candidate twice.
 //
 // None of this is a requirement on the runtime's collector: if nothing is ever
 // found dead there are no sweeps (and nothing was cleared). A lookup always
@@ -67,7 +70,8 @@
 // does die — says that a collection has happened, and requestIdleCallback or
 // setImmediate gives time to answer it: copies are finished first (they are
 // cheap, and put lookups back on one table), then the pools are probed, then
-// the sweeps that are owed are run, in bounded slices. A registration never
+// the sweeps that are owed are run, in bounded slices, a different pool first
+// each time. A registration never
 // asks for idle time itself: on a host whose "idle" is the next turn, that put
 // a slice after every small operation (measured: ×2.7 on one of them). Measured, this is what
 // an application with idle time after a collection needs: without it the dead
@@ -245,16 +249,18 @@ function removeAt(s: Shard, i: number): void {
 
 /**
  * Dereference up to `n` entries from the shard's cursor on, whatever their
- * stamps say, passing at most `slots` slots and never more than one lap. The
+ * stamps say, passing at most `slots` slots — a removal counts as one, and a
+ * proven collection extends the budget, to one lap of the table in all. The
  * shard is not being copied: see `register`.
  */
 function probe(s: Shard, census: Census, n: number, slots: number): void {
   const words = s.words;
   const mask = words.length - 1;
   let at = s.at & mask;
+  let passed = 0;
   slots = Math.min(mask + 1, slots);
   let foundDead = false;
-  while (n > 0 && slots > 0) {
+  while (n > 0 && passed < slots) {
     const w = words[at]!;
     if (w !== 0) {
       n--;
@@ -263,18 +269,20 @@ function probe(s: Shard, census: Census, n: number, slots: number): void {
         foundDead = true;
         if ((w & STAMP_MASK) === census.stamp) {
           // It was alive in this epoch and is dead now: there has been a collection.
+          // (A stamp that wrapped can prove one that did not happen: a window, at worst a sweep or a shrink, is the cost.)
           census.advance();
           n = WINDOW;
-          slots = Math.min(mask + 1, WINDOW * SLOTS_PER_PROBE);
+          slots = Math.min(mask + 1, passed + WINDOW * SLOTS_PER_PROBE);
         }
         census.record(1);
+        passed++;
         continue; // stay: what moved back into this slot has not been looked at
       }
       words[at] = (w & ~STAMP_MASK) | census.stamp;
       census.record(0);
     }
     at = (at + 1) & mask;
-    slots--;
+    passed++;
   }
   s.at = at;
   // A dead entry of an older stamp proves nothing about collections — its epoch
@@ -388,9 +396,11 @@ function copy(s: Shard): void {
 const IMMEDIATE_SLICE = 256; // shard steps per setImmediate turn (~16 slots each: well under a millisecond)
 const IDLE_MIN_SLICE = 16; // always make progress, even on a zero-remaining deadline
 
-/** Every pool, weakly: a dropped pool is not kept by its chores. */
+/** Every pool, weakly: a dropped pool is not kept by its chores; and the one a slice starts with, so that none starves. */
 const pools: WeakRef<InternPoolImpl<object>>[] = [];
+let poolAt = 0;
 let scheduled = false;
+/** Has the sentinel reported a collection that no slice has yet acted on? (Observed by tests; nothing decides on it.) */
 let collected = false;
 let idleEnabled = true;
 
@@ -429,15 +439,12 @@ function runIdle(deadline?: IdleDeadline): void {
       ? () => ++steps >= IMMEDIATE_SLICE
       : () => ++steps >= IDLE_MIN_SLICE && deadline.timeRemaining() <= 1;
   collected = false;
+  for (let i = pools.length - 1; i >= 0; i--) if (pools[i]!.deref() === undefined) pools.splice(i, 1);
   let more = false;
-  for (let i = pools.length - 1; i >= 0 && !more; i--) {
-    const pool = pools[i]!.deref();
-    if (pool === undefined) {
-      pools.splice(i, 1);
-      continue;
-    }
-    pool._notice(); // (a pool that has not registered since it last looked does not look again)
-    more = pool._idle(spent);
+  for (let n = 0; n < pools.length && !more; n++) {
+    const i = (poolAt + n) % pools.length;
+    more = pools[i]!.deref()!._idle(spent);
+    if (more) poolAt = i;
   }
   if (more) scheduleIdle();
 }
@@ -526,11 +533,16 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
    * Lookups in progress. A predicate is the caller's code, and may register
    * into this pool (an `[equals]` that interns while comparing); a registration
    * made inside a lookup must not move entries under the lookup's probe, so it
-   * does no probing or sweeping. (Copying is safe: it fills only a table's empty
-   * slots, never writes a retired table, and a lookup holds both arrays of the
-   * table it probes.)
+   * does no probing or sweeping. Copying is safe: it fills only a table's empty
+   * slots and never writes a retired table, and a lookup takes both arrays of a
+   * table together. What such a registration adds — possibly an equal of the
+   * very value being looked up — lands in a table the lookup may have finished
+   * or not yet seen, so a lookup whose predicate registered scans again, the
+   * tables it has not scanned (a retired table gains nothing).
    */
   #looking = 0;
+  /** Registrations so far: a lookup compares it before and after its scan. */
+  #registered = 0;
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
     const m = Math.imul(hash, 0x9e3779b1);
@@ -545,33 +557,35 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   }
 
   #lookupIn(s: Shard, tag: number, predicate: (candidate: T) => boolean): T | undefined {
+    let scanned: Int32Array[] | null = null; // the tables scanned, once the predicate has registered
+    for (;;) {
+      const registered = this.#registered;
+      const words = s.words;
+      let found = this.#scan(words, s.refs, s.bits, tag, predicate);
+      if (found !== undefined) return found;
+      // Below the copy's cursor the living have been moved (and were found above): what a probe meets there is dead.
+      if (s.oldWords !== null && !scanned?.includes(s.oldWords)) {
+        found = this.#scan(s.oldWords, s.oldRefs, s.oldBits, tag, predicate);
+        if (found !== undefined) return found;
+      }
+      if (this.#registered === registered) return undefined;
+      // The predicate registered: scan again — the current table (it may be the same one, or a new one
+      // the registration began; a candidate offered before may be offered again), and a retired table
+      // only if it has not been scanned (a retired table gains nothing).
+      (scanned ??= []).push(words);
+    }
+  }
+
+  /** Probe one table for the tag. */
+  #scan(words: Int32Array, refs: (WeakRef<object> | undefined)[], bits: number, tag: number, predicate: (candidate: T) => boolean): T | undefined {
     const stamp = this.#census.stamp;
-    // Both arrays of a table are taken together: a predicate may register, and a
-    // registration may replace the shard's tables, but never writes a retired one.
-    const words = s.words;
-    const refs = s.refs;
-    let mask = words.length - 1;
-    let i = tag >>> (32 - s.bits);
+    const mask = words.length - 1;
+    let i = tag >>> (32 - bits);
     for (let w = words[i]!; w !== 0; i = (i + 1) & mask, w = words[i]!) {
       if ((w & ~STAMP_MASK) !== tag) continue;
       const candidate = refs[i]!.deref();
       if (candidate !== undefined && predicate(candidate as T)) {
-        if ((w & STAMP_MASK) !== stamp) words[i] = tag | stamp; // seen alive: the next lap need not ask
-        return candidate as T;
-      }
-    }
-
-    const oldWords = s.oldWords;
-    if (oldWords === null) return undefined;
-    const oldRefs = s.oldRefs;
-    // Below the cursor the living have been moved (and were found above): what a probe meets there is dead.
-    mask = oldWords.length - 1;
-    i = tag >>> (32 - s.oldBits);
-    for (let w = oldWords[i]!; w !== 0; i = (i + 1) & mask, w = oldWords[i]!) {
-      if ((w & ~STAMP_MASK) !== tag) continue;
-      const candidate = oldRefs[i]!.deref();
-      if (candidate !== undefined && predicate(candidate as T)) {
-        if ((w & STAMP_MASK) !== stamp) oldWords[i] = tag | stamp;
+        if ((w & STAMP_MASK) !== stamp) words[i] = tag | stamp; // seen alive: the next sweep need not ask
         return candidate as T;
       }
     }
@@ -595,6 +609,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
       else if (cleaning && s.sweepLeft > 0) sweep(s, census);
     }
     place(s, (m << SHARD_BITS) | census.stamp, new WeakRef<object>(value));
+    this.#registered++;
     return value;
   }
 
@@ -631,6 +646,9 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
    */
   _notice(): void {
     const census = this.#census;
+    /* v8 ignore start -- a slice is its own job: no lookup can be in progress (see `_idle`) */
+    if (this.#looking > 0) return;
+    /* v8 ignore stop */
     if (census.tick === this.#noticedAt) return;
     this.#noticedAt = census.tick;
     for (let n = 0; n < SHARDS; n++) {
@@ -642,14 +660,31 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     }
   }
 
-  /** @internal Idle time: finish copies, answer the noticed collection, run the sweeps owed — until `spent()`. Returns whether work is left. */
+  /**
+   * @internal Idle time, until `spent()`: finish every copy first (they are
+   * cheap, and put lookups back on one table), then notice, then answer and
+   * run the sweeps owed. Returns whether work is left.
+   */
   _idle(spent: () => boolean): boolean {
+    /* v8 ignore start -- a slice is its own job, so no lookup can be in progress; the invariant the cleaning relies on is enforced regardless */
+    if (this.#looking > 0) return true;
+    /* v8 ignore stop */
     const census = this.#census;
     for (let n = 0; n < SHARDS; n++) {
-      const s = this.#shards[(this.#idleAt + n) & (SHARDS - 1)];
+      const s = this.#shards[n];
+      if (s === undefined) continue;
+      while (s.oldWords !== null) {
+        copy(s);
+        if (spent()) return true;
+      }
+    }
+    this._notice();
+    for (let n = 0; n < SHARDS; n++) {
+      const at = (this.#idleAt + n) & (SHARDS - 1);
+      const s = this.#shards[at];
       if (s === undefined) continue;
       for (;;) {
-        if (s.oldWords !== null) copy(s);
+        if (s.oldWords !== null) copy(s); // (the answer was to shrink)
         else {
           answer(s, census);
           if (s.oldWords !== null) continue;
@@ -657,7 +692,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
           sweep(s, census);
         }
         if (spent()) {
-          this.#idleAt = (this.#idleAt + n) & (SHARDS - 1);
+          this.#idleAt = at;
           return true;
         }
       }

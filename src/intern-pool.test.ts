@@ -393,6 +393,82 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     expect(pool.size()).toBe(held.length); // (walks every slot: a word without a WeakRef beside it would throw)
   });
 
+  it('a predicate that interns an EQUAL value while comparing: the lookup finds what its predicate registered', () => {
+    // K's [equals] interns another K(7) while comparing — the nested registration may
+    // grow the shard's table, or land in a table the lookup has finished. At every fill
+    // of K's shard around a growth (fillers share its shard), intern(new K(7)) must
+    // return the one canonical K(7).
+    class K {
+      declare readonly [hashCode]: number;
+      declare readonly [interned]: true;
+      static nested: K | undefined;
+      static fired = false;
+      constructor(readonly id: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = 0x7777;
+      }
+      [equals](o: unknown): boolean {
+        if (!K.fired && o instanceof K && o.id !== this.id) {
+          K.fired = true; // once, on the decoy
+          K.nested = pool.intern(new K(7));
+        }
+        return o instanceof K && o.id === this.id;
+      }
+    }
+    const kShard = Math.imul(0x7777, G) >>> 26;
+    let pool = createInternPool<K>();
+    for (let fill = 20; fill < 300; fill++) {
+      pool = createInternPool<K>();
+      K.nested = undefined;
+      K.fired = false;
+      const held: object[] = [];
+      for (let k = 0; k < fill; k++) held.push(pool.register({ id: -k } as unknown as K, hashWithProduct((kShard << 26) | ((k + 1) << 12))));
+      const decoy = pool.intern(new K(1)); // same hash as K(7): offered first
+      const outer = pool.intern(new K(7));
+      expect(K.nested, `fill ${fill}`).toBeDefined();
+      expect(outer, `fill ${fill}: the outer intern must return what its predicate interned`).toBe(K.nested);
+      expect(pool.intern(new K(7)), `fill ${fill}`).toBe(outer);
+      expect(pool.intern(new K(1))).toBe(decoy);
+      expect(held.length).toBe(fill);
+    }
+  });
+
+  it('…also while the shard is being copied', () => {
+    class K {
+      declare readonly [hashCode]: number;
+      declare readonly [interned]: true;
+      static nested: K | undefined;
+      static fired = false;
+      constructor(readonly id: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = 0x7777;
+      }
+      [equals](o: unknown): boolean {
+        if (!K.fired && o instanceof K && o.id !== this.id) {
+          K.fired = true; // once, on the decoy
+          K.nested = pool.intern(new K(7));
+        }
+        return o instanceof K && o.id === this.id;
+      }
+    }
+    const kShard = Math.imul(0x7777, G) >>> 26;
+    let pool = createInternPool<K>();
+    let seen = 0;
+    for (let fill = 20; fill < 300; fill++) {
+      pool = createInternPool<K>();
+      K.nested = undefined;
+      K.fired = false;
+      const held: object[] = [];
+      const decoy = pool.intern(new K(1));
+      for (let k = 0; k < fill; k++) held.push(pool.register({ id: -k } as unknown as K, hashWithProduct((kShard << 26) | ((k + 1) << 12))));
+      if (_poolStats(pool).migrating > 0) seen++;
+      const outer = pool.intern(new K(7)); // the decoy may be in the old table now, and the nested K(7) go to the new
+      expect(outer, `fill ${fill}`).toBe(K.nested);
+      expect(pool.intern(new K(7)), `fill ${fill}`).toBe(outer);
+      expect(pool.intern(new K(1))).toBe(decoy);
+      expect(held.length).toBe(fill);
+    }
+    expect(seen).toBeGreaterThan(0); // some fills had a copy in flight
+  });
+
   it('…through the public API: an [equals] that interns while comparing', async () => {
     // (What the previous test guards against, seen from a consumer: a duplicate
     // canonical instance, or a pool that throws afterwards.)
