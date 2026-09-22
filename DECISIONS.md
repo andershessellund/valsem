@@ -854,6 +854,18 @@ on V8, −30% and −38% on JavaScriptCore; the filter is most of it (the
 batched descent alone: −5% to −14%, and nothing on some seeds). 1.27 KB
 minified, 0.49 KB gzipped. What remains of a delete is mostly the two list
 re-chunks. From an external performance review, 2026-09-19. DESIGN.md §6.5.
+**Since (2026-09):** the anchor protocol is applied from one place. Both
+classes carried their own copy of it — the anchor lookup, the reanchoring
+after an edit, the consistency check, the append/insert/delete sequences
+and the one-pass build — and two copies of a canonicality rule are two
+ways for equal sequences to stop indexing alike. `ordered-core` now owns a
+*keyed index* (a key list and its trie; a trie entry is `[key, ...payload,
+anchor]`, the payload nothing for the set and the value for the map), and
+each class is the index plus its own payload. Measured against the copies
+(`pnpm bench`'s `ordered` suite, A/B, median of 3): ×0.98, within its A/A
+spread. `ValueList`'s chunking rule got the same treatment: it was written
+out at five sites and as a predicate, and is now two named functions used
+at all of them. An external review pointed both out.
 
 ### D6. Iteration on explicit stacks
 

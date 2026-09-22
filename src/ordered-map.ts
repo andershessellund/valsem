@@ -16,13 +16,15 @@ import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
 import { same, atIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
 import { createInternPool } from './intern-pool.js';
-import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
-import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
-import { applyAnchorUpdates, anchorsFor, ZipIterator } from './ordered-core.js';
+import { ValueList, _ANCHOR_NONE } from './value-list.js';
+import { createTrieConfig, trieGet, trieInsert, NOT_FOUND, type HNode } from './hamt.js';
+import { keyedAnchor, keyedIndexOf, keyedInsert, keyedRemove, keyedBuild, ZipIterator, type Keyed } from './ordered-core.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createOrderedMapDraft, type OrderedMapState } from './draft-ordered-map.js';
 
 const CFG = createTrieConfig(3); // key, value, anchor
+const VALUE = 1; // the entry's slots after the key
+const ANCHOR = 2;
 const pool = createInternPool<OrderedMap<unknown, unknown>>();
 const SEED = 0x0a4d;
 
@@ -70,36 +72,23 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   /** The canonical map for a (key list, value list) pair; the trie is a function of them. */
-  static #of<K, V>(keys: ValueList<K>, vals: ValueList<V>, root: HNode): OrderedMap<K, V> {
+  static #of<K, V>(keyed: Keyed, vals: ValueList<V>): OrderedMap<K, V> {
+    const keys = keyed.list as ValueList<K>;
     const h = mix(mix(SEED, keys[hashCodeSym]), vals[hashCodeSym]);
     const hit = pool.lookup(h, (c) => c.#keys === keys && c.#vals === vals);
     if (hit !== undefined) return hit as OrderedMap<K, V>;
-    return pool.register(new OrderedMap<unknown, unknown>(keys, vals, root, h), h) as OrderedMap<K, V>;
+    return pool.register(new OrderedMap<unknown, unknown>(keys, vals, keyed.root, h), h) as OrderedMap<K, V>;
   }
 
-  /** The stored anchor of `k`, or `_ANCHOR_NONE` if `k` is not a key. */
-  #anchor(k: unknown): unknown {
-    const a = trieGet(CFG, this.#root, internHash(k), k, 0, 2);
-    return a === NOT_FOUND ? _ANCHOR_NONE : a;
+  /** The key list and its trie, as the keyed index of ordered-core works on them. */
+  get #keyed(): Keyed {
+    return { list: this.#keys as ValueList<unknown>, root: this.#root };
   }
 
   /** @internal The stored anchor of a canonical key (`undefined` if absent) — for the consistency tests. */
   _anchorOf(key: K): unknown {
-    const a = this.#anchor(intern(key));
+    const a = keyedAnchor(CFG, this.#root, intern(key));
     return a === _ANCHOR_NONE ? undefined : a;
-  }
-
-  #indexOf(k: unknown): number {
-    const i = ValueList._indexOf(this.#keys, k, (x) => this.#anchor(x));
-    if (i < 0) throw new Error('valsem: OrderedMap anchors are inconsistent (this is a bug)');
-    return i;
-  }
-
-  /** The trie after an edit at `at` made `keys` the key list, consing `consed`; `this` is the map before it. */
-  #reanchor(root: HNode, keys: ValueList<K>, consed: readonly CNode[], at: number): HNode {
-    return consed.length === 0
-      ? root
-      : applyAnchorUpdates(CFG, root, ValueList._anchorUpdates(consed, keys, this.#keys as ValueList<unknown>, at));
   }
 
   /** Number of entries. */
@@ -125,15 +114,13 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   /** The value under a structurally equal `key`, or `undefined` if absent. */
   get(key: K): V | undefined {
     const k = intern(key);
-    const r = trieGet(CFG, this.#root, internHash(k), k, 0, 1);
+    const r = trieGet(CFG, this.#root, internHash(k), k, 0, VALUE);
     return r === NOT_FOUND ? undefined : (r as V);
   }
 
   /** The position of a structurally equal `key`, or -1. O(log n). */
   indexOf(key: K): number {
-    const k = intern(key);
-    if (trieGet(CFG, this.#root, internHash(k), k) === NOT_FOUND) return -1;
-    return this.#indexOf(k);
+    return keyedIndexOf(CFG, this.#keyed, intern(key), 'OrderedMap');
   }
 
   /**
@@ -164,19 +151,15 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const k = intern(key);
     const v = intern(value);
     const h = internHash(k);
-    const cur = trieGet(CFG, this.#root, h, k, 0, 1);
+    const cur = trieGet(CFG, this.#root, h, k, 0, VALUE);
     if (cur !== NOT_FOUND) {
       if (same(cur, v)) return this;
-      const i = this.#indexOf(k);
-      const vals = this.#vals.set(i, v);
-      const a = trieGet(CFG, this.#root, h, k, 0, 2);
+      const i = keyedIndexOf(CFG, this.#keyed, k, 'OrderedMap');
+      const a = trieGet(CFG, this.#root, h, k, 0, ANCHOR); // the key keeps its place, so its anchor
       const root = trieInsert(CFG, this.#root, 0, h, [k, v, a])!.node;
-      return OrderedMap.#of<K, V>(this.#keys, vals, root);
+      return OrderedMap.#of<K, V>({ list: this.#keys as ValueList<unknown>, root }, this.#vals.set(i, v));
     }
-    const { result: keys, consed } = ValueList._record(() => this.#keys.push(k));
-    const vals = this.#vals.push(v);
-    const root = trieInsert(CFG, this.#root, 0, h, [k, v, _ANCHOR_TAIL])!.node;
-    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed, this.#keys.length));
+    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, this.#keys.length, k, h, [v]), this.#vals.push(v));
   }
 
   /** Remove a structurally equal `key`. Returns `this` if absent. */
@@ -184,11 +167,8 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const k = intern(key);
     const h = internHash(k);
     if (trieGet(CFG, this.#root, h, k) === NOT_FOUND) return this;
-    const i = this.#indexOf(k);
-    const { result: keys, consed } = ValueList._record(() => this.#keys.remove(i));
-    const vals = this.#vals.remove(i);
-    const root = trieRemove(CFG, this.#root, 0, h, k)!.node as HNode;
-    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed, i));
+    const { keyed, index } = keyedRemove(CFG, this.#keyed, k, h, 'OrderedMap');
+    return OrderedMap.#of<K, V>(keyed, this.#vals.remove(index));
   }
 
   /**
@@ -205,11 +185,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     if (trieGet(CFG, this.#root, h, k) !== NOT_FOUND) {
       throw new Error('valsem: OrderedMap.insertAt: the key is already present — delete it first to move it');
     }
-    if (index === n) return this.set(k, v);
-    const { result: keys, consed } = ValueList._record(() => this.#keys.insert(index, k));
-    const vals = this.#vals.insert(index, v);
-    const root = trieInsert(CFG, this.#root, 0, h, [k, v, _ANCHOR_TAIL])!.node;
-    return OrderedMap.#of<K, V>(keys, vals, this.#reanchor(root, keys, consed, index));
+    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, index, k, h, [v]), this.#vals.insert(index, v));
   }
 
   /** Iterate the keys in order. */
@@ -266,7 +242,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Canonical empty map. */
   static empty<K, V>(): OrderedMap<K, V> {
-    return OrderedMap.#of<K, V>(ValueList.empty<K>(), ValueList.empty<V>(), CFG.empty);
+    return OrderedMap.#of<K, V>({ list: ValueList.empty<unknown>(), root: CFG.empty }, ValueList.empty<V>());
   }
 
   /**
@@ -316,9 +292,6 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   /** The map for distinct canonical `ks` with canonical `vs`. */
   static #build<K, V>(ks: unknown[], vs: unknown[]): OrderedMap<K, V> {
     if (ks.length === 0) return OrderedMap.empty<K, V>();
-    const { result: keys, consed } = ValueList._record(() => ValueList.from(ks as K[]));
-    const vals = ValueList.from(vs as V[]);
-    const anchors = anchorsFor(ks, ValueList._anchorUpdates(consed, keys));
-    return OrderedMap.#of<K, V>(keys, vals, trieFrom(CFG, ks, vs, anchors));
+    return OrderedMap.#of<K, V>(keyedBuild(CFG, ks, vs), ValueList.from(vs as V[]));
   }
 }

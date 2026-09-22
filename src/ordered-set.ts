@@ -20,9 +20,9 @@ import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
 import { insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
 import { createInternPool } from './intern-pool.js';
-import { ValueList, _ANCHOR_TAIL, _ANCHOR_NONE, type CNode } from './value-list.js';
-import { createTrieConfig, trieGet, trieInsert, trieRemove, trieFrom, NOT_FOUND, type HNode } from './hamt.js';
-import { applyAnchorUpdates, anchorsFor, PairIterator } from './ordered-core.js';
+import { ValueList, _ANCHOR_NONE } from './value-list.js';
+import { createTrieConfig, trieGet, NOT_FOUND, type HNode } from './hamt.js';
+import { keyedAnchor, keyedIndexOf, keyedInsert, keyedRemove, keyedBuild, PairIterator, type Keyed } from './ordered-core.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createOrderedSetDraft, type OrderedSetState } from './draft-ordered-set.js';
 
@@ -76,30 +76,23 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   }
 
   /** The canonical set for a member list (the trie is a function of the list). */
-  static #of<T>(list: ValueList<T>, root: HNode): OrderedSet<T> {
+  static #of<T>(keyed: Keyed): OrderedSet<T> {
+    const list = keyed.list as ValueList<T>;
     const h = mix(SEED, list[hashCodeSym]);
     const hit = pool.lookup(h, (c) => c.#list === list);
     if (hit !== undefined) return hit as OrderedSet<T>;
-    return pool.register(new OrderedSet<unknown>(list, root, h), h) as OrderedSet<T>;
+    return pool.register(new OrderedSet<unknown>(list, keyed.root, h), h) as OrderedSet<T>;
   }
 
-  /** The stored anchor of `k`, or `_ANCHOR_NONE` if `k` is not a member. */
-  #anchor(k: unknown): unknown {
-    const a = trieGet(CFG, this.#root, internHash(k), k);
-    return a === NOT_FOUND ? _ANCHOR_NONE : a;
+  /** The member list and its trie, as the keyed index of ordered-core works on them. */
+  get #keyed(): Keyed {
+    return { list: this.#list as ValueList<unknown>, root: this.#root };
   }
 
   /** @internal The stored anchor of a canonical member (`undefined` if absent) — for the consistency tests. */
   _anchorOf(value: T): unknown {
-    const a = this.#anchor(intern(value));
+    const a = keyedAnchor(CFG, this.#root, intern(value));
     return a === _ANCHOR_NONE ? undefined : a;
-  }
-
-  /** The trie after `list` became the member list through an operation that consed `consed`. */
-  #reanchor(root: HNode, list: ValueList<T>, consed: readonly CNode[], at: number): HNode {
-    return consed.length === 0
-      ? root
-      : applyAnchorUpdates(CFG, root, ValueList._anchorUpdates(consed, list, this.#list as ValueList<unknown>, at));
   }
 
   /** Number of members. */
@@ -120,7 +113,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
 
   /** The position of a structurally equal `value`, or -1. O(log n). */
   indexOf(value: T): number {
-    return ValueList._indexOf(this.#list, intern(value), (k) => this.#anchor(k));
+    return keyedIndexOf(CFG, this.#keyed, intern(value), 'OrderedSet');
   }
 
   /** The member at `index`, as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. */
@@ -141,9 +134,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) return this;
-    const { result: list, consed } = ValueList._record(() => this.#list.push(v));
-    const root = trieInsert(CFG, this.#root, 0, h, [v, _ANCHOR_TAIL])!.node;
-    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed, this.#list.length));
+    return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, this.#list.length, v, h, []));
   }
 
   /** Remove a structurally equal `value`. Returns `this` if absent. */
@@ -151,11 +142,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) === NOT_FOUND) return this;
-    const i = ValueList._indexOf(this.#list, v, (k) => this.#anchor(k));
-    if (i < 0) throw new Error('valsem: OrderedSet anchors are inconsistent (this is a bug)');
-    const { result: list, consed } = ValueList._record(() => this.#list.remove(i));
-    const root = trieRemove(CFG, this.#root, 0, h, v)!.node as HNode;
-    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed, i));
+    return OrderedSet.#of<T>(keyedRemove(CFG, this.#keyed, v, h, 'OrderedSet').keyed);
   }
 
   /**
@@ -171,10 +158,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) {
       throw new Error('valsem: OrderedSet.insertAt: the value is already a member — delete it first to move it');
     }
-    if (index === n) return this.add(v);
-    const { result: list, consed } = ValueList._record(() => this.#list.insert(index, v));
-    const root = trieInsert(CFG, this.#root, 0, h, [v, _ANCHOR_TAIL])!.node;
-    return OrderedSet.#of<T>(list, this.#reanchor(root, list, consed, index));
+    return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, index, v, h, []));
   }
 
   /** Iterate the members in order. */
@@ -252,7 +236,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
 
   /** Canonical empty set. */
   static empty<T>(): OrderedSet<T> {
-    return OrderedSet.#of<T>(ValueList.empty<T>(), CFG.empty);
+    return OrderedSet.#of<T>({ list: ValueList.empty<unknown>(), root: CFG.empty });
   }
 
   /** The canonical ordered set of `values`, in first-occurrence order (interned on entry). */
@@ -277,8 +261,6 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
       members.push(v);
     }
     if (members.length === 0) return OrderedSet.empty<T>();
-    const { result: list, consed } = ValueList._record(() => ValueList.from(members as T[]));
-    const anchors = anchorsFor(members, ValueList._anchorUpdates(consed, list));
-    return OrderedSet.#of<T>(list, trieFrom(CFG, members, anchors));
+    return OrderedSet.#of<T>(keyedBuild(CFG, members, null));
   }
 }
