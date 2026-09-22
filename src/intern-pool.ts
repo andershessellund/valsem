@@ -1,115 +1,412 @@
 // ---------------------------------------------------------------------------
-// intern-pool — weak pools; the engine reports deaths, idle time buries them.
+// intern-pool — weak pools, swept in place by the registrations that use them.
 //
-// A pool is a Map from a 30-bit key to a bucket (64 Maps in fact, sharded by
-// hash: see SHARDS): one Slot (the overwhelmingly
-// common case) or an array when two slots share a key. A Slot IS the WeakRef
-// to the pooled object, carrying its full 32-bit hash and its pool — one
-// allocation per registration, and the registry's holdings are the slot
-// itself.
+// A pool is 64 open-addressed tables (linear probing), sharded by hash and
+// created on first use: see SHARDS. A slot is one int32 WORD in an Int32Array
+// — 26 bits of the multiplied hash above a 6-bit epoch STAMP — beside the
+// WeakRef to the pooled object in a parallel array. The hash is multiplied
+// first (Fibonacci hashing, a bijection on 32 bits): its top 6 bits choose the
+// shard and the other 26 are the word's tag, so a tag match within a shard IS
+// full 32-bit hash equality, and a lookup offers the predicate exactly the
+// candidates registered under that hash. Everything the index needs to know
+// about an entry without touching it — its hash, its home slot, whether it has
+// been seen alive lately — is in that word: a miss (the path of every fresh
+// node) reads the Int32Array alone, sixteen slots to a cache line, and so do
+// growing the table and skipping an entry known to be alive.
 //
-// The key is `hash & 0x3fffffff`, not the full uint32: V8's Smi range under
-// pointer compression is 31-bit signed, so three quarters of full hashes
-// would be boxed HeapNumber keys, and Map hits at scale cost ~2× more that
-// way (measured); on JavaScriptCore the masking is neutral. Slots of
-// different full hashes can therefore share a bucket, so every candidate is
-// pre-checked on `slot.hash` before it is dereferenced. A hand-rolled open
-// hash table was measured against this and rejected: equal on V8 in every
-// realistic regime, ~10 % slower where pools grow unboundedly (JS rebuilds
-// against a native rehash), and clearly slower on JavaScriptCore.
+// Whether an entry is dead can only be asked (`deref()`), and asking is what
+// costs: ~5 ns of a cleared ref, ~40 ns of a live one in a warm cache, several
+// times that in a cold one. It also PINS: a dereferenced (or freshly made)
+// WeakRef keeps its target alive until the job ends, and through the marking
+// cycle of an incremental collector. So the pool never watches an object whose
+// death it is waiting for — a canary that is looked at never dies — it watches
+// its own entries, of which it does not care:
 //
-// Cleanup is driven by ONE global FinalizationRegistry: a pooled object's
-// death is reported once, by the engine, after the major GC that clears
-// its WeakRef (the only time anything can be dead — scavenges never clear
-// WeakRefs). The callback does the minimum — push the slot on a stack —
-// and the actual bucket surgery runs when the thread is otherwise idle:
+//   * every 32nd registration (into a shard that is not being copied) PROBES
+//     one entry, whatever its stamp says, passing at most 64 slots for it. A
+//     word's stamp is the pool's epoch when its target was last known alive
+//     (registered, found, or probed). A probe that finds an entry dead while it
+//     carries the CURRENT stamp has proof that a collection happened in this
+//     epoch: the epoch advances, and 64 more probes measure what it left;
+//   * the dead fraction of the checks since then is the gate. A noticed
+//     collection is IGNORED unless at least two thirds of what was checked was
+//     dead; otherwise each shard is swept, once, a few slots per registration
+//     into it: entries stamped with the current epoch are passed over untouched,
+//     the living restamped, the dead removed by backward shift (linear probing's
+//     deletion without tombstones — measured, under one slot scanned and 0.2
+//     entries moved per removal). Nothing is allocated because of a collection.
+//     What dies later — say, the survivors of an ignored collection — carries
+//     an older stamp and proves nothing; but a probe that finds such an entry
+//     dead, while the window says the dead are worth it, sweeps that shard.
 //
-//   * requestIdleCallback where it exists (browser windows): the work lands
-//     in time the host has declared worthless, in deadline-bounded slices;
-//   * else setImmediate (Node, Bun): bounded slices, one per event-loop
-//     turn, so a large post-GC batch never becomes one long task;
-//   * else no deferral — the slot is reclaimed inside the callback.
+// A table is replaced only to grow (or to shrink, when a sweep began with it
+// under a quarter full and left it under an eighth): incrementally, four entries or 16 slots per registration, into
+// a table sized exactly for what it will receive, the old one left unwritten
+// so that its probe chains stay valid and a lookup probes the current table,
+// then the old. The copy never dereferences, and a shard that is copying does
+// no cleaning; its cursor is carried across by scaling (slots are in tag order,
+// so slot i becomes about 2i), and an unfinished sweep starts over in the new
+// table, where everything already verified is passed by its stamp.
 //
-// The stack is bounded (MAX_PENDING); past the bound, deaths are reclaimed
-// inline until idle time drains it. Order is irrelevant — every reclaim is
-// independent — so LIFO push/pop is the cheapest correct structure.
+// A lookup's predicate is the caller's code and may register into the pool
+// (an `[equals]` that interns while comparing): a registration made inside a
+// lookup does no probing or sweeping, so nothing moves under the lookup; and a
+// lookup whose predicate registered scans again what it has not scanned, so
+// that what the predicate added — an equal of the value looked up, even — is
+// found. Such a predicate may be offered a candidate twice.
 //
-// What this replaced: an incremental sweeper that walked every pool's
-// buckets in bounded slices on a registration-driven schedule. Measured end
-// to end (frame-loop, pool churn, and collection benchmarks, on V8 and JSC),
-// that schedule did nothing between major GCs — nothing was ever dead — and
-// its per-registration tax was the only thing it reliably delivered.
+// None of this is a requirement on the runtime's collector: if nothing is ever
+// found dead there are no sweeps (and nothing was cleared). A lookup always
+// dereferences what it returns, so no answer depends on it.
 //
-// Requires WeakRef and FinalizationRegistry (ES2021; every supported
-// runtime ships both).
+// What this replaced, and why (D2, D3): a Map per shard with a
+// FinalizationRegistry reporting each death and the bucket surgery deferred to
+// idle time. Measured side by side (scripts/experiments/mix-bench.mjs), with
+// forced collections and with the engine's own.
+//
+// All of that rides on registration, and is all a pool needs. Where the host
+// offers them, two things take the work off that path (see "Idle time" below):
+// a single FinalizationRegistry SENTINEL — one cell, never dereferenced, so it
+// does die — says that a collection has happened, and requestIdleCallback or
+// setImmediate gives time to answer it: copies are finished first (they are
+// cheap, and put lookups back on one table), then the pools are probed, then
+// the sweeps that are owed are run, in bounded slices, a different pool first
+// each time. A registration never
+// asks for idle time itself: on a host whose "idle" is the next turn, that put
+// a slice after every small operation (measured: ×2.7 on one of them). Measured, this is what
+// an application with idle time after a collection needs: without it the dead
+// of one burst of work are still in the tables, and in the collector's way,
+// when the next begins. Without the sentinel or a scheduler, nothing is lost
+// but that: a pool that stops registering keeps its husks (a cleared WeakRef
+// and a slot of table each) until registration resumes or the pool is dropped.
+//
+// Requires WeakRef (ES2021; every supported runtime ships it). Uses
+// FinalizationRegistry, requestIdleCallback and setImmediate where they exist.
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 
 /**
- * A pooled member: the WeakRef itself, plus what reclaiming it needs — the
- * full hash and the pool. The pool reference is strong on purpose: the
- * registry retains a slot only until its target dies, so a dropped pool is
- * retained exactly as long as its last live member — the members' own
- * lifetime, not a leak. Subclassing WeakRef (rather than wrapping one) was
- * measured: zero deoptimizations, identical deref/construction cost, and one
- * object header less per slot.
- */
-class Slot extends WeakRef<object> {
-  constructor(
-    target: object,
-    readonly hash: number,
-    readonly pool: InternPoolImpl<object>,
-  ) {
-    super(target);
-  }
-}
-
-type Bucket = Slot | Slot[];
-
-/** Map key for a full 32-bit hash: the low 30 bits, always a Smi. */
-const KEY_MASK = 0x3fffffff;
-
-/**
- * The index is SHARDS Maps, not one. Two reasons, both about size: an engine
- * grows a hash table by rehashing all of it inside the one `set` that tipped
- * it over (20 ms for a Map of a million entries on V8, and every canonical
- * object is an entry), and V8 refuses a Map more than 2^24 entries, which one
- * index reached at 16.7M live canonical objects with a RangeError out of
- * `intern`. With 64 shards a rehash touches a 64th of the pool and the
- * ceiling is a billion. Shards are created on first use: most pools are small.
+ * The index is SHARDS tables, not one. Replacing a table begins by allocating
+ * the next one whole — measured, 1.6 ms for a million slots and 25 ms for eight
+ * million — and an engine keeps an array fast only up to a length (V8: 32M
+ * elements). With 64 shards the allocation is a 64th of the pool's and the
+ * ceiling is two billion. Shards are created on first use: most pools are small.
  */
 const SHARD_BITS = 6;
 const SHARDS = 1 << SHARD_BITS;
 
+/** The stamp takes the word's low bits — the ones the shard bits vacate when the multiplied hash is shifted up. */
+const STAMP_MASK = SHARDS - 1;
+
+/** log2 of a new shard's slots. */
+const MIN_BITS = 6;
+/** A table is replaced by a larger one when half full… */
+const GROW_AT = 0.5;
 /**
- * Shard of a hash. Multiplied first (Fibonacci hashing), so that a hash with
- * all its entropy in the low bits — a consumer's `x + 31 * y` — still spreads.
+ * …and by a smaller one when a sweep has left it this empty — provided it was
+ * under twice this when the sweep BEGAN, its dead included. A table filled by
+ * the churn between two collections is the size that churn needs: shrinking it
+ * after every sweep made the next burst of work grow it again inside its own
+ * operations (measured: ×1.9–2.7 on a short one). A pool that has really
+ * collapsed shrinks one answered collection later…
  */
-function shardOf(hash: number): number {
-  return Math.imul(hash, 0x9e3779b1) >>> (32 - SHARD_BITS);
+const SHRINK_BELOW = 1 / 8;
+/** …in both cases by one sized to end its copy under this load. */
+const TARGET_LOAD = 0.45;
+/** One registration in this many probes an entry. */
+const PROBE_EVERY = 32;
+/** The checks the gate looks back over; and the probes that follow a noticed collection, so that the estimate is wholly from after it. */
+const WINDOW = 64;
+/** The gate reads a window of fewer checks than this as if it were this many: a handful of dead is not evidence about a pool. */
+const MIN_SAMPLE = 16;
+/** Slots a probe may pass per entry it is asked for (a table swept nearly empty is mostly slots). */
+const SLOTS_PER_PROBE = 64;
+/**
+ * A noticed collection is answered only when at least this fraction of the
+ * window was dead. It sets what a sweep may waste: at two thirds, at most one
+ * live dereference for every two entries it frees; and (measured on a million
+ * live entries under steady churn) operations cost a fifth less than at one
+ * half, for more time in collections. It bounds the dead only where the
+ * probes see them: between collections a pool holds whatever has died since
+ * the last it answered.
+ */
+const DEAD_FRACTION = 0.67;
+/** Is the window saying a sweep would pay? */
+function worthASweep(census: Census): boolean {
+  return census.dead >= DEAD_FRACTION * Math.max(census.filled, MIN_SAMPLE);
 }
+/**
+ * What one registration may spend on its shard's sweep or copy. It is paid
+ * inside `register`, where a short operation feels it: slots passed (dead and
+ * empty ones are cheap)…
+ */
+const SLOTS_PER_STEP = 16;
+/** …living entries dereferenced by a sweep (each a cache miss or two)… */
+const LIVE_PER_STEP = 1;
+/** …or entries copied to a new table. */
+const COPIED_PER_STEP = 4;
 
-/** Remove a dead slot from its pool. Idempotent: tolerates "already pruned". */
-function reclaim(slot: Slot): void {
-  slot.pool._reclaim(slot);
+// ---------------------------------------------------------------------------
+// A pool's census: its epoch, and how dead its recent checks were
+// ---------------------------------------------------------------------------
+
+class Census {
+  epoch = 1;
+  /** The epoch as a stamp: 1…63, never 0, so that a zero word is an empty slot. */
+  stamp = 1;
+  tick = 0;
+  /** The last WINDOW checks since the epoch advanced, one byte each: 1 found dead; and how many of them there are. */
+  readonly #ring = new Uint8Array(WINDOW);
+  #at = 0;
+  filled = 0;
+  dead = 0;
+
+  record(dead: 0 | 1): void {
+    this.dead += dead - this.#ring[this.#at]!;
+    this.#ring[this.#at] = dead;
+    this.#at = (this.#at + 1) & (WINDOW - 1);
+    if (this.filled < WINDOW) this.filled++;
+  }
+
+  /**
+   * A collection has been proven: the window starts afresh, so that what the
+   * gate reads is wholly from after it. A stamp that survives 63 epochs
+   * unrefreshed reads as current again: one entry is passed over once more,
+   * and asked the epoch after; a dead one found then proves a collection that
+   * may not have happened, which costs a window and, at worst, a sweep.
+   * (Sweeps and probes are bounded per registration by slots, entries and
+   * live dereferences; a removal's backward shift is bounded by the cluster.)
+   */
+  advance(): void {
+    this.epoch++;
+    this.stamp = ((this.epoch - 1) % STAMP_MASK) + 1;
+    this.#ring.fill(0);
+    this.#at = 0;
+    this.filled = 0;
+    this.dead = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Deferred reclamation
+// A shard: the current table, and the old one while it is copied
 // ---------------------------------------------------------------------------
 
-const MAX_PENDING = 100_000; // slots parked for idle time before deaths are reclaimed inline
-const IMMEDIATE_SLICE = 4096; // slots per setImmediate turn (~0.5 ms)
-const IDLE_MIN_SLICE = 64; // always make progress, even on a zero-remaining deadline
+class Shard {
+  bits = MIN_BITS;
+  words = new Int32Array(1 << MIN_BITS);
+  refs: (WeakRef<object> | undefined)[] = new Array<WeakRef<object> | undefined>(1 << MIN_BITS).fill(undefined);
+  used = 0;
 
-/** Dead slots awaiting idle time. LIFO — reclaims are independent, order is free. */
-const pending: Slot[] = [];
+  oldBits = 0;
+  oldWords: Int32Array | null = null;
+  oldRefs: (WeakRef<object> | undefined)[] = [];
+  /** Next slot of the old table to copy; everything below it has been copied. */
+  cursor = 0;
+
+  /** Where the probes and the sweep stand, and the slots a sweep has yet to pass; zero when none is due. */
+  at = 0;
+  sweepLeft = 0;
+  /** Was the table under a quarter full, its dead included, when this shard last answered a collection? */
+  sparse = false;
+  /** The epoch of the last collection this shard has answered, by a sweep or by deciding against one. */
+  answered = 1;
+}
+
+/** Store `word` (tag and stamp) and its ref in the current table. The table is never full: see `beginCopy`. */
+function place(s: Shard, word: number, ref: WeakRef<object>): void {
+  const words = s.words;
+  const mask = words.length - 1;
+  let i = (word & ~STAMP_MASK) >>> (32 - s.bits);
+  while (words[i] !== 0) i = (i + 1) & mask;
+  words[i] = word;
+  s.refs[i] = ref;
+  s.used++;
+}
+
+/**
+ * Empty slot `i` of the current table, and close the gap: every entry after it,
+ * up to the next empty slot, moves back if its home slot allows. Linear
+ * probing's deletion without tombstones; it reads the words alone.
+ */
+function removeAt(s: Shard, i: number): void {
+  const words = s.words;
+  const refs = s.refs;
+  const mask = words.length - 1;
+  const shift = 32 - s.bits;
+  for (let j = (i + 1) & mask, w = words[j]!; w !== 0; j = (j + 1) & mask, w = words[j]!) {
+    const home = (w & ~STAMP_MASK) >>> shift;
+    // An entry may move back to i unless its home lies (cyclically) after i, up to where it is now.
+    if (i <= j ? i < home && home <= j : i < home || home <= j) continue;
+    words[i] = w;
+    refs[i] = refs[j];
+    i = j;
+  }
+  words[i] = 0;
+  refs[i] = undefined;
+  s.used--;
+}
+
+/**
+ * Dereference up to `n` entries from the shard's cursor on, whatever their
+ * stamps say, passing at most `slots` slots — a removal counts as one, and a
+ * proven collection extends the budget, to one lap of the table in all. The
+ * shard is not being copied: see `register`.
+ */
+function probe(s: Shard, census: Census, n: number, slots: number): void {
+  const words = s.words;
+  const mask = words.length - 1;
+  let at = s.at & mask;
+  let passed = 0;
+  slots = Math.min(mask + 1, slots);
+  let foundDead = false;
+  while (n > 0 && passed < slots) {
+    const w = words[at]!;
+    if (w !== 0) {
+      n--;
+      if (s.refs[at]!.deref() === undefined) {
+        removeAt(s, at);
+        foundDead = true;
+        if ((w & STAMP_MASK) === census.stamp) {
+          // It was alive in this epoch and is dead now: there has been a collection.
+          // (A stamp that wrapped can prove one that did not happen: a window, at worst a sweep or a shrink, is the cost.)
+          census.advance();
+          n = WINDOW;
+          slots = Math.min(mask + 1, passed + WINDOW * SLOTS_PER_PROBE);
+        }
+        census.record(1);
+        passed++;
+        continue; // stay: what moved back into this slot has not been looked at
+      }
+      words[at] = (w & ~STAMP_MASK) | census.stamp;
+      census.record(0);
+    }
+    at = (at + 1) & mask;
+    passed++;
+  }
+  s.at = at;
+  // A dead entry of an older stamp proves nothing about collections — its epoch
+  // may have been answered with "no" — but it is dead, and this shard holds it:
+  // if the window says the dead are worth a sweep, this shard is swept.
+  if (foundDead && s.sweepLeft === 0 && worthASweep(census)) beginSweep(s);
+}
+
+/** A sweep of the whole current table is owed. */
+function beginSweep(s: Shard): void {
+  s.sweepLeft = s.words.length;
+  s.sparse = s.used < s.words.length * SHRINK_BELOW * 2;
+}
+
+/**
+ * A shard answers a noticed collection once. With a sweep, if the window says
+ * the dead are worth one; else, if the table has been nearly empty, dead
+ * included, since the collection before as well, by shrinking it (a table
+ * emptied by one collection is the size the work before it needed, and the
+ * work after it may need again); else not at all — what dies later is found
+ * by the probes.
+ */
+function answer(s: Shard, census: Census): void {
+  if (s.answered === census.epoch) return;
+  s.answered = census.epoch;
+  const wasSparse = s.sparse;
+  if (worthASweep(census)) beginSweep(s);
+  else {
+    s.sparse = s.used < s.words.length * SHRINK_BELOW * 2;
+    if (wasSparse && s.used < s.words.length * SHRINK_BELOW) beginCopy(s);
+  }
+}
+
+/** One registration's worth of sweeping the current table in place. */
+function sweep(s: Shard, census: Census): void {
+  const words = s.words;
+  const mask = words.length - 1;
+  const stamp = census.stamp;
+  let at = s.at & mask;
+  let left = s.sweepLeft;
+  let live = LIVE_PER_STEP;
+  for (let slots = SLOTS_PER_STEP; slots > 0 && live > 0 && left > 0; slots--) {
+    const w = words[at]!;
+    if (w !== 0 && (w & STAMP_MASK) !== stamp) {
+      if (s.refs[at]!.deref() === undefined) {
+        removeAt(s, at);
+        census.record(1);
+        continue; // stay, as above
+      }
+      words[at] = (w & ~STAMP_MASK) | stamp;
+      census.record(0);
+      live--;
+    }
+    at = (at + 1) & mask;
+    left--;
+  }
+  s.at = at;
+  s.sweepLeft = left;
+  if (left <= 0 && s.sparse && s.used < words.length * SHRINK_BELOW) beginCopy(s);
+}
+
+/**
+ * Retire the current table and begin copying it into a fresh one, sized for
+ * what that one will receive: what is copied, and the registrations that
+ * arrive meanwhile (one per COPIED_PER_STEP entries, or per SLOTS_PER_STEP
+ * slots, whichever is more). Does nothing if that is the size it has.
+ */
+function beginCopy(s: Shard): void {
+  const size = s.words.length;
+  const entries = s.used + Math.max(s.used / COPIED_PER_STEP, size / SLOTS_PER_STEP) + 16;
+  let bits = MIN_BITS;
+  while ((1 << bits) * TARGET_LOAD < entries) bits++;
+  if (bits === s.bits) return;
+  s.oldBits = s.bits;
+  s.oldWords = s.words;
+  s.oldRefs = s.refs;
+  s.cursor = 0;
+  // Slots are in tag order, so the cursor keeps its place in it. An unfinished sweep starts
+  // over in the new table: an entry displaced past the cursor here may sit before it there,
+  // and what has been verified is stamped, so passing it again asks nothing.
+  s.at = bits > s.bits ? s.at << (bits - s.bits) : s.at >> (s.bits - bits);
+  if (s.sweepLeft > 0) s.sweepLeft = 1 << bits;
+  s.bits = bits;
+  s.words = new Int32Array(1 << bits);
+  s.refs = new Array<WeakRef<object> | undefined>(1 << bits).fill(undefined);
+  s.used = 0;
+}
+
+/** One registration's worth of copying. Nothing is dereferenced. */
+function copy(s: Shard): void {
+  const oldWords = s.oldWords!;
+  const end = oldWords.length;
+  let c = s.cursor;
+  let entries = COPIED_PER_STEP;
+  for (let slots = SLOTS_PER_STEP; entries > 0 && slots > 0 && c < end; slots--, c++) {
+    const w = oldWords[c]!;
+    if (w === 0) continue;
+    place(s, w, s.oldRefs[c]!);
+    entries--;
+  }
+  s.cursor = c;
+  if (c < end) return;
+  s.oldWords = null;
+  s.oldRefs = [];
+}
+
+// ---------------------------------------------------------------------------
+// Idle time
+// ---------------------------------------------------------------------------
+
+const IMMEDIATE_SLICE = 256; // shard steps per setImmediate turn (~16 slots each: well under a millisecond)
+const IDLE_MIN_SLICE = 16; // always make progress, even on a zero-remaining deadline
+
+/** Every pool, weakly: a dropped pool is not kept by its chores; and the one a slice starts with, so that none starves. */
+const pools: WeakRef<InternPoolImpl<object>>[] = [];
+let poolAt = 0;
 let scheduled = false;
+/** Has the sentinel reported a collection that no slice has yet acted on? (Observed by tests; nothing decides on it.) */
+let collected = false;
+let idleEnabled = true;
 
 // Structural globalThis access: this module compiles against neither the
 // DOM nor the Node ambient globals. Looked up at schedule time, not import
-// time — one typeof per drain, and a test can install a fake.
+// time — one typeof per slice, and a test can install a fake.
 interface IdleDeadline {
   timeRemaining(): number;
 }
@@ -118,48 +415,60 @@ const _g = globalThis as {
   setImmediate?: (cb: () => void) => unknown;
 };
 
-function canDefer(): boolean {
-  return typeof _g.requestIdleCallback === 'function' || typeof _g.setImmediate === 'function';
-}
 
-function schedule(): void {
-  if (scheduled) return;
+/** Ask for idle time, if the host has any to give. Returns whether a slice is (now) scheduled. */
+function scheduleIdle(): boolean {
+  if (scheduled) return true;
   if (typeof _g.requestIdleCallback === 'function') {
     scheduled = true;
-    _g.requestIdleCallback(drainIdle);
+    _g.requestIdleCallback(runIdle);
   } else if (typeof _g.setImmediate === 'function') {
     scheduled = true;
-    _g.setImmediate(drainImmediate);
+    (_g.setImmediate(runIdle) as { unref?: () => void } | undefined)?.unref?.(); // owed sweeps never keep a process alive
   }
+  return scheduled;
 }
 
-function drainIdle(deadline: IdleDeadline): void {
+/** One slice: bounded by the host's deadline where there is one, by a step count otherwise. */
+function runIdle(deadline?: IdleDeadline): void {
   scheduled = false;
-  let n = 0;
-  while (pending.length > 0 && (n < IDLE_MIN_SLICE || deadline.timeRemaining() > 1)) {
-    reclaim(pending.pop()!);
-    n++;
+  if (!idleEnabled) return;
+  let steps = 0;
+  const spent =
+    deadline === undefined
+      ? () => ++steps >= IMMEDIATE_SLICE
+      : () => ++steps >= IDLE_MIN_SLICE && deadline.timeRemaining() <= 1;
+  collected = false;
+  for (let i = pools.length - 1; i >= 0; i--) if (pools[i]!.deref() === undefined) pools.splice(i, 1);
+  let more = false;
+  for (let n = 0; n < pools.length && !more; n++) {
+    const i = (poolAt + n) % pools.length;
+    more = pools[i]!.deref()!._idle(spent);
+    if (more) poolAt = i;
   }
-  if (pending.length > 0) schedule();
+  if (more) scheduleIdle();
 }
 
-function drainImmediate(): void {
-  scheduled = false;
-  for (let n = 0; n < IMMEDIATE_SLICE && pending.length > 0; n++) reclaim(pending.pop()!);
-  if (pending.length > 0) schedule();
-}
+// The sentinel: an object nothing holds, registered and never looked at — so,
+// unlike anything a pool dereferences, it dies with the next collection, and
+// the engine says so. One cell, re-armed each time. The registry must be
+// reachable from a module-level binding: an unreferenced FinalizationRegistry
+// is itself collected and its callbacks silently stop (measured, not theorized).
+const sentinel =
+  typeof FinalizationRegistry === 'function'
+    ? new FinalizationRegistry<undefined>(() => {
+        armSentinel();
+        if (!idleEnabled) return;
+        collected = true;
+        // No scheduler (and a host that may run this outside any task): one bounded slice, here.
+        if (!scheduleIdle()) runIdle();
+      })
+    : undefined;
 
-// The registry must be reachable from a module-level binding: an
-// unreferenced FinalizationRegistry is itself collected and its callbacks
-// silently stop (measured, not theorized).
-const registry = new FinalizationRegistry<Slot>((slot) => {
-  if (pending.length >= MAX_PENDING || !canDefer()) {
-    reclaim(slot);
-    return;
-  }
-  pending.push(slot);
-  schedule();
-});
+function armSentinel(): void {
+  sentinel?.register({}, undefined);
+}
+armSentinel();
 
 // ---------------------------------------------------------------------------
 // Pools
@@ -169,9 +478,9 @@ const registry = new FinalizationRegistry<Slot>((slot) => {
  * A typed, weakly-held pool of canonical instances of `T`.
  *
  * Members are retained via `WeakRef` and leave the pool once nothing else
- * references them: the engine reports each death after the major GC that
- * collects it, and the pool's bookkeeping is reclaimed in idle time (see the
- * module header). This backs the persistent
+ * references them: a member the garbage collector has taken is swept from
+ * the pool's index as registration continues (see the module header). This
+ * backs the persistent
  * {@link ValueList}/{@link ValueMap}/{@link ValueSet}/{@link InternedString}
  * collections and any consumer value type (see {@link createInternPool}).
  *
@@ -209,69 +518,99 @@ export interface InternPool<T extends object> {
    */
   intern(object: T): T;
 
-  /** @internal Live pool size (walks all buckets) — exposed for tests. */
+  /** @internal Live pool size (walks every table) — exposed for tests. */
   size(): number;
 }
 
 class InternPoolImpl<T extends object> implements InternPool<T> {
-  readonly #shards: (Map<number, Bucket> | undefined)[] = new Array<Map<number, Bucket> | undefined>(SHARDS).fill(undefined);
+  readonly #shards: (Shard | undefined)[] = new Array<Shard | undefined>(SHARDS).fill(undefined);
+  readonly #census = new Census();
+  /** Idle time: the shard to resume at, and the census tick when this pool last probed for a collection. */
+  #idleAt = 0;
+  #noticedAt = -1;
+  #noticeAt = 0;
+  /**
+   * Lookups in progress. A predicate is the caller's code, and may register
+   * into this pool (an `[equals]` that interns while comparing); a registration
+   * made inside a lookup must not move entries under the lookup's probe, so it
+   * does no probing or sweeping. Copying is safe: it fills only a table's empty
+   * slots and never writes a retired table, and a lookup takes both arrays of a
+   * table together. What such a registration adds — possibly an equal of the
+   * very value being looked up — lands in a table the lookup may have finished
+   * or not yet seen, so a lookup whose predicate registered scans again, the
+   * tables it has not scanned (a retired table gains nothing).
+   */
+  #looking = 0;
+  /** Registrations so far: a lookup compares it before and after its scan. */
+  #registered = 0;
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
-    const b = this.#shards[shardOf(hash)]?.get(hash & KEY_MASK);
-    if (b === undefined) return undefined;
-    if (Array.isArray(b)) {
-      for (let i = 0; i < b.length; i++) {
-        const slot = b[i]!;
-        // Shares the 30-bit key without sharing the hash: not a candidate. (The
-        // shard function happens to separate such pairs today; this does not rely on it.)
-        if (slot.hash !== hash) continue;
-        const candidate = slot.deref();
-        if (candidate !== undefined && predicate(candidate as T)) return candidate as T;
-      }
-      return undefined;
+    const m = Math.imul(hash, 0x9e3779b1);
+    const s = this.#shards[m >>> (32 - SHARD_BITS)];
+    if (s === undefined) return undefined;
+    this.#looking++;
+    try {
+      return this.#lookupIn(s, m << SHARD_BITS, predicate);
+    } finally {
+      this.#looking--;
     }
-    if (b.hash !== hash) return undefined;
-    const candidate = b.deref();
-    return candidate !== undefined && predicate(candidate as T) ? (candidate as T) : undefined;
+  }
+
+  #lookupIn(s: Shard, tag: number, predicate: (candidate: T) => boolean): T | undefined {
+    let scanned: Int32Array[] | null = null; // the tables scanned, once the predicate has registered
+    for (;;) {
+      const registered = this.#registered;
+      const words = s.words;
+      let found = this.#scan(words, s.refs, s.bits, tag, predicate);
+      if (found !== undefined) return found;
+      // Below the copy's cursor the living have been moved (and were found above): what a probe meets there is dead.
+      if (s.oldWords !== null && !scanned?.includes(s.oldWords)) {
+        found = this.#scan(s.oldWords, s.oldRefs, s.oldBits, tag, predicate);
+        if (found !== undefined) return found;
+      }
+      if (this.#registered === registered) return undefined;
+      // The predicate registered: scan again — the current table (it may be the same one, or a new one
+      // the registration began; a candidate offered before may be offered again), and a retired table
+      // only if it has not been scanned (a retired table gains nothing).
+      (scanned ??= []).push(words);
+    }
+  }
+
+  /** Probe one table for the tag. */
+  #scan(words: Int32Array, refs: (WeakRef<object> | undefined)[], bits: number, tag: number, predicate: (candidate: T) => boolean): T | undefined {
+    const stamp = this.#census.stamp;
+    const mask = words.length - 1;
+    let i = tag >>> (32 - bits);
+    for (let w = words[i]!; w !== 0; i = (i + 1) & mask, w = words[i]!) {
+      if ((w & ~STAMP_MASK) !== tag) continue;
+      const candidate = refs[i]!.deref();
+      if (candidate !== undefined && predicate(candidate as T)) {
+        if ((w & STAMP_MASK) !== stamp) words[i] = tag | stamp; // seen alive: the next sweep need not ask
+        return candidate as T;
+      }
+    }
+    return undefined;
   }
 
   register(value: T, hash: number): T {
-    const slot = new Slot(value, hash, this as unknown as InternPoolImpl<object>);
-    registry.register(value, slot);
-    const key = hash & KEY_MASK;
-    const buckets = (this.#shards[shardOf(hash)] ??= new Map());
-    const b = buckets.get(key);
-    if (b === undefined) {
-      buckets.set(key, slot);
-    } else if (Array.isArray(b)) {
-      // Prune dead members in passing (their reclaim may still be pending), then append.
-      let w = 0;
-      for (let r = 0; r < b.length; r++) if (b[r]!.deref() !== undefined) b[w++] = b[r]!;
-      b.length = w;
-      b.push(slot);
-    } else if (b.deref() === undefined) {
-      buckets.set(key, slot); // replace the dead singleton in place
-    } else {
-      buckets.set(key, [b, slot]);
-    }
-    return value;
-  }
+    const census = this.#census;
+    const m = Math.imul(hash, 0x9e3779b1);
+    const s = (this.#shards[m >>> (32 - SHARD_BITS)] ??= new Shard());
 
-  /** @internal Remove `slot` if it is still in its bucket. Idempotent. */
-  _reclaim(slot: Slot): void {
-    const key = slot.hash & KEY_MASK;
-    const buckets = this.#shards[shardOf(slot.hash)];
-    if (buckets === undefined) return;
-    const b = buckets.get(key);
-    if (b === slot) {
-      buckets.delete(key);
-    } else if (Array.isArray(b)) {
-      const k = b.indexOf(slot);
-      if (k < 0) return; // already pruned in passing
-      b.splice(k, 1);
-      if (b.length === 1) buckets.set(key, b[0]!);
+    const cleaning = this.#looking === 0;
+    census.tick++;
+    if (s.oldWords !== null) {
+      copy(s); // and no cleaning meanwhile
+    } else {
+      if (cleaning && (census.tick & (PROBE_EVERY - 1)) === 0 && s.used > 0) probe(s, census, 1, SLOTS_PER_PROBE);
+      answer(s, census);
+      if (s.oldWords !== null) copy(s); // (the answer was to shrink)
+      else if (s.used >= s.words.length * GROW_AT) beginCopy(s);
+      else if (cleaning && s.sweepLeft > 0) sweep(s, census);
     }
-    // else: replaced in place by a live member — nothing to do
+    place(s, (m << SHARD_BITS) | census.stamp, new WeakRef<object>(value));
+    this.#registered++;
+    return value;
   }
 
   intern(object: T): T {
@@ -290,29 +629,94 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
   size(): number {
     let n = 0;
-    for (const buckets of this.#shards) {
-      if (buckets === undefined) continue;
-      for (const b of buckets.values()) {
-        if (Array.isArray(b)) {
-          for (let k = 0; k < b.length; k++) if (b[k]!.deref() !== undefined) n++;
-        } else if (b.deref() !== undefined) {
-          n++;
-        }
-      }
+    for (const s of this.#shards) {
+      if (s === undefined) continue;
+      for (let i = 0; i < s.words.length; i++) if (s.words[i] !== 0 && s.refs[i]!.deref() !== undefined) n++;
+      if (s.oldWords === null) continue;
+      for (let i = s.cursor; i < s.oldWords.length; i++) if (s.oldWords[i] !== 0 && s.oldRefs[i]!.deref() !== undefined) n++;
     }
     return n;
   }
 
-  /** @internal Test-only: slots stored (live or awaiting reclaim), and bucket count. */
-  _stats(): { slots: number; buckets: number } {
-    let slots = 0;
-    let count = 0;
-    for (const buckets of this.#shards) {
-      if (buckets === undefined) continue;
-      count += buckets.size;
-      for (const b of buckets.values()) slots += Array.isArray(b) ? b.length : 1;
+  /**
+   * @internal A collection has happened: probe one shard, as registrations
+   * would have — a whole lap of it, since this is idle time and a table swept
+   * nearly empty is mostly slots. Only a pool that has registered since it
+   * last looked, and a different shard each time.
+   */
+  _notice(): void {
+    const census = this.#census;
+    /* v8 ignore start -- a slice is its own job: no lookup can be in progress (see `_idle`) */
+    if (this.#looking > 0) return;
+    /* v8 ignore stop */
+    if (census.tick === this.#noticedAt) return;
+    this.#noticedAt = census.tick;
+    for (let n = 0; n < SHARDS; n++) {
+      const s = this.#shards[(this.#noticeAt + n) & (SHARDS - 1)];
+      if (s === undefined || s.oldWords !== null || s.used === 0) continue;
+      this.#noticeAt = (this.#noticeAt + n + 1) & (SHARDS - 1);
+      probe(s, census, WINDOW, s.words.length);
+      return;
     }
-    return { slots, buckets: count };
+  }
+
+  /**
+   * @internal Idle time, until `spent()`: finish every copy first (they are
+   * cheap, and put lookups back on one table), then notice, then answer and
+   * run the sweeps owed. Returns whether work is left.
+   */
+  _idle(spent: () => boolean): boolean {
+    /* v8 ignore start -- a slice is its own job, so no lookup can be in progress; the invariant the cleaning relies on is enforced regardless */
+    if (this.#looking > 0) return true;
+    /* v8 ignore stop */
+    const census = this.#census;
+    for (let n = 0; n < SHARDS; n++) {
+      const s = this.#shards[n];
+      if (s === undefined) continue;
+      while (s.oldWords !== null) {
+        copy(s);
+        if (spent()) return true;
+      }
+    }
+    this._notice();
+    for (let n = 0; n < SHARDS; n++) {
+      const at = (this.#idleAt + n) & (SHARDS - 1);
+      const s = this.#shards[at];
+      if (s === undefined) continue;
+      for (;;) {
+        if (s.oldWords !== null) copy(s); // (the answer was to shrink)
+        else {
+          answer(s, census);
+          if (s.oldWords !== null) continue;
+          if (s.sweepLeft <= 0) break;
+          sweep(s, census);
+        }
+        if (spent()) {
+          this.#idleAt = at;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** @internal Test-only: entries stored (live, or dead and not yet dropped), the slots of every table, and the shards with a table being copied or a sweep under way. */
+  _stats(): { slots: number; capacity: number; migrating: number; sweeping: number; epoch: number } {
+    let slots = 0;
+    let capacity = 0;
+    let migrating = 0;
+    let sweeping = 0;
+    for (const s of this.#shards) {
+      if (s === undefined) continue;
+      slots += s.used;
+      capacity += s.words.length;
+      if (s.sweepLeft > 0) sweeping++;
+      if (s.oldWords === null) continue;
+      migrating++;
+      capacity += s.oldWords.length;
+      for (let i = s.cursor; i < s.oldWords.length; i++) if (s.oldWords[i] !== 0) slots++;
+    }
+    return { slots, capacity, migrating, sweeping, epoch: this.#census.epoch };
   }
 }
 
@@ -346,30 +750,27 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
  * ```
  */
 export function createInternPool<T extends object>(): InternPool<T> {
-  return new InternPoolImpl<T>();
+  const pool = new InternPoolImpl<T>();
+  if (sentinel !== undefined) pools.push(new WeakRef(pool as unknown as InternPoolImpl<object>)); // no sentinel, no idle time
+  return pool;
 }
 
 // ---------------------------------------------------------------------------
 // Test-only inspection hooks (not exported from the package barrel)
 // ---------------------------------------------------------------------------
 
-/** @internal Test-only: dead slots parked for idle time. */
-export function _pendingCount(): number {
-  return pending.length;
-}
-
-/** @internal Test-only: reclaim every parked slot now, synchronously, and forget any pending drain (a test's fake scheduler may never fire). */
-export function _drainNow(): number {
-  const n = pending.length;
-  while (pending.length > 0) reclaim(pending.pop()!);
-  scheduled = false;
-  return n;
-}
-
-/** @internal Test-only: slots stored in a pool (live or awaiting reclaim) and its bucket count. */
-export function _poolStats(pool: InternPool<object>): { slots: number; buckets: number } {
+/** @internal Test-only: entries a pool stores (live, or dead and not yet dropped), the slots of all its tables, and how many shards have a table being copied, or a sweep under way. */
+export function _poolStats(pool: InternPool<object>): { slots: number; capacity: number; migrating: number; sweeping: number; epoch: number } {
   return (pool as InternPoolImpl<object>)._stats();
 }
 
-/** @internal Test-only: the stack bound. */
-export const _MAX_PENDING = MAX_PENDING;
+/** @internal Test-only: switch the idle driver off (what is left is the registration-driven path every host has) or back on. */
+export function _idleDriver(enabled: boolean): void {
+  idleEnabled = enabled;
+  collected = false;
+}
+
+/** @internal Test-only: is an idle slice scheduled, and has a collection been reported that no slice has yet acted on? */
+export function _idleState(): { scheduled: boolean; collected: boolean } {
+  return { scheduled, collected };
+}

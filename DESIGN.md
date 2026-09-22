@@ -55,8 +55,9 @@ not part of the model.
 | `valsem/draft` | the toolkit for making a type draftable (§7.1); semver-covered |
 | `valsem/binding` | the two helpers a wire or storage binding needs (§10.1); semver-covered |
 
-Ships as ES modules with declarations, dependency-free. Requires `WeakRef`,
-`FinalizationRegistry` and `globalThis.crypto`; uses the global `Iterator`
+Ships as ES modules with declarations, dependency-free. Requires `WeakRef`
+and `globalThis.crypto`; uses `FinalizationRegistry`, `requestIdleCallback`
+and `setImmediate` where the runtime has them (idle-time pool cleanup, §4.2); uses the global `Iterator`
 as an iterator base class where the runtime has it. The declared floor is a
 list of language features, not of runtimes: ES2022, plus symbols as `WeakMap`
 keys for values that hold a unique symbol. It is stated with engine versions
@@ -295,24 +296,34 @@ their own configuration); `ValueList`'s node pool and its list pool; one
 each for `OrderedMap`, `OrderedSet`, `InternedString` and `ValueDate`; and
 any number created by `createInternPool`. (`ValueMap` and `ValueSet`
 wrappers need no pool: each root node holds its wrapper, §6.3.) A pool
-is a `Map` from a 30-bit key (`hash & 0x3fffffff`, so it is always a Smi)
-to a bucket: one `Slot`, or an array of slots when two keys collide. The
-index is in fact 64 such Maps, a shard chosen from the hash and created on
-first use, so that growing the index rehashes a 64th of it and no single
-Map approaches the engine's size limit. A
-`Slot` *is* the `WeakRef` to the pooled object (a subclass), carrying the
-full 32-bit hash and its pool; `lookup(hash, predicate)` pre-checks
-`slot.hash` before dereferencing. `register(value, hash)` prunes dead
-members of the bucket in passing. Why: D3, D48.
+is 64 open-addressed tables (linear probing), a shard chosen from the hash
+and created on first use. A slot is one int32 in an `Int32Array` — 26 bits
+of the hash, multiplied by an odd constant, above a 6-bit epoch stamp —
+beside a plain `WeakRef` in a parallel array. The top 6 bits of the product
+choose the shard and the other 26 are the slot's tag, so a tag match is
+full-hash equality: `lookup(hash, predicate)` offers the predicate exactly
+what was registered under that hash, and a miss reads the `Int32Array`
+alone. Why: D3, D48.
 
-Cleanup: one global `FinalizationRegistry` reports each death after the
-major GC that clears its `WeakRef`. The callback pushes the slot on a
-LIFO stack and schedules a drain: `requestIdleCallback` where it exists
-(deadline-bounded slices, at least 64 per call), else `setImmediate`
-(4096 per turn), else inline. The stack is bounded at 100k; beyond it,
-deaths are reclaimed inline. The registry is held from a module binding.
-The pool holds nothing alive; a dropped pool is retained only as long as
-its last live member. Why: D2.
+Cleanup rides on registration. Whether an entry is dead can only be asked
+(`deref()`), and asking pins: what is looked at does not die while it is
+being looked at. So the pool watches its own entries. Every 32nd
+registration probes one, whatever its stamp; a stamp is the pool's epoch
+when the target was last known alive (registered, found, or probed), so an
+entry found dead while carrying the current stamp proves a collection in
+this epoch, and the epoch advances. The dead fraction of the last 64 checks
+is a gate: below two thirds the collection is ignored; otherwise each shard
+is swept in place, once, a few slots per registration — entries of the
+current epoch passed untouched, the living restamped, the dead removed by
+backward shift. A table is replaced only to grow, or to shrink when a sweep
+both found and left it nearly empty: incrementally, four entries per
+registration, into a table sized exactly; a lookup probes the current
+table, then the old; the copy dereferences nothing and a shard does no
+cleaning while it copies. Where the host has them, a single
+`FinalizationRegistry` sentinel (never dereferenced, so it does die)
+reports collections, and `requestIdleCallback` or `setImmediate` slices
+finish copies, probe, and run the sweeps owed; neither is required. The
+pool holds nothing alive. Why: D2.
 
 `pool.intern(object)` is the high-level entry: returns `object` if marked,
 otherwise looks up by its `[hashCode]` and `[equals]`, and on a miss marks

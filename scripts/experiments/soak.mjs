@@ -4,8 +4,8 @@
 //
 // The benchmarks in bench/ measure operations against a working set of tens
 // of thousands of values. This asks the other question: with MILLIONS of
-// canonical values alive, each behind a WeakRef, a pool slot, a WeakMap entry
-// and a FinalizationRegistry cell, what do tail latency, the garbage
+// canonical values alive, each behind a WeakRef, a pool slot and a WeakMap
+// entry, what do tail latency, the garbage
 // collector and the heap look like at the load a server actually runs at?
 //
 // Each run is one process (soak.worker.mjs) living one server's life:
@@ -51,7 +51,9 @@
 // longest pause; floor = heap right after the first and the last major
 // collection of the phase, which is where a leak would show; bytes/entity =
 // settled heap after the build ÷ N; backlog = pool slots stored − live
-// members once traffic stopped and cleanup had its turns.
+// members once traffic stopped and cleanup had its turns (for valsem's pool
+// since D2, what its gate lets stay: dead entries up to about twice the
+// living are not worth a sweep, and are in the settled heap).
 //
 // Under each table, every request over 50 ms is laid beside the collections
 // of that phase: a slow request with no collection next to it is not the

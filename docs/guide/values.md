@@ -86,12 +86,12 @@ That yields three properties at once:
 
 The pool holds values **weakly** (via `WeakRef`), so canonical instances are
 garbage-collected once you stop referencing them — interning does not leak
-memory. Pool bookkeeping is reclaimed in **idle time**: the engine reports each
-death once (a single global `FinalizationRegistry`), the callback only parks
-the dead slot, and the actual cleanup runs under `requestIdleCallback` where
-it exists (browser windows), else `setImmediate` (Node, Bun), in bounded
-slices — no sweeping of live entries, no per-registration tax, no timers, and
-nothing retained after values die.
+memory. Pool bookkeeping is swept **as interning goes on**: the pool notices a
+collection by finding one of its own entries dead, and then sweeps its index
+in place, a few slots per registration — in idle time where the host offers
+it, never as one long task on the main thread, and with no finalizer per value. What a dead
+value leaves behind until then is a cleared `WeakRef` and a slot of index,
+not the value.
 
 ```ts
 import { deepEqual, internHash } from 'valsem';

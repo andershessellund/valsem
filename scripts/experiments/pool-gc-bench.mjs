@@ -3,9 +3,8 @@
 //
 // Compares cleanup strategies over hash-bucketed WeakRef pools:
 //
-//   shipped  — the InternPool as shipped: FinalizationRegistry reports each
-//              death, the callback parks the slot, and cleanup runs in idle
-//              time (requestIdleCallback / setImmediate) in bounded slices
+//   shipped  — the InternPool as shipped (since D2's rewrite: an open table
+//              swept in place; this script predates it — see mix-bench.mjs)
 //   fr       — FinalizationRegistry per entry, cleanup inline in the callback
 //              (what "shipped" degrades to where nothing can defer)
 //   circle   — the standalone circle prototype, no backstop, lookups pay 1

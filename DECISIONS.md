@@ -213,68 +213,224 @@ adoption explicitly. On a plain record the protocol symbols are ordinary
 keys, so an own `[interned]: true` cannot forge canonicality. DESIGN.md
 §3.1, §4.3.
 
-### D2. One global weak pool, cleaned up in idle time
+### D2. One global weak pool, swept in place by the registrations that use it
 
 Every canonical object lives in one process-wide pool keyed by hash, held
-through `WeakRef`, with a single `FinalizationRegistry` reporting deaths.
-The callback only parks the dead slot; buckets are cleaned in bounded
-slices under `requestIdleCallback` where it exists, `setImmediate`
-otherwise, inline where neither does. The parked stack is bounded (100k).
+through `WeakRef`. Whether an entry is dead can only be asked (`deref()`),
+and asking both costs (~5 ns of a cleared ref, ~40 ns of a live one warm,
+100–250 ns cold) and *pins*: a dereferenced or freshly made `WeakRef` keeps
+its target alive to the end of the job, and through the marking cycle of an
+incremental collector. So the pool never watches an object whose death it is
+waiting for. It watches its own entries, of which it does not care:
 
-**Why.** Four designs were measured end to end (`scripts/experiments/`):
-monolithic threshold sweeps (15–54 ms in-batch pauses), an incremental
-circle sweeper (a cursor advancing around one doubly-linked list of all
-bucket records on a registration-driven budget, with a GC-epoch backstop),
-per-entry finalization inline, and this hybrid. The registry is cheapest
-per registration but delivers cleanup as one post-GC storm (10–18 ms at
-100k dead on V8); the sweeper bounds the work but scans live slots between
-epochs, since `WeakRef` targets clear only at major GC, so its schedule did
-nothing between GCs and its per-registration tax was the only thing it
-reliably delivered. The hybrid took the churn benchmark from
-36.5 ms (sweeper) and 50.1 ms (registry) to 23.1 ms, with a 1.7 ms maximum
-post-GC gap, in ~80 lines instead of ~200. Two traps baked in: deref the
-owner only on the removal path (owner-deref per visit cost 2.4×), and hold
-the registry from a module binding (an unreferenced
-`FinalizationRegistry` is collected and its callbacks silently stop).
-**Cost.** A few milliseconds before the last dead slots are gone, and the
-per-node `WeakRef` (~0.3 µs) that is the dominant term in every
-construction and update. DESIGN.md §4.2.
+- every 32nd registration (into a shard not being copied) **probes** one
+  entry, whatever its stamp (D3) says, passing at most 64 slots for it. A
+  stamp is the pool's epoch when the target was last known alive. A probe
+  that finds an entry dead *while it carries the current stamp* has proof
+  that a collection happened in this epoch: the epoch advances, the window
+  starts afresh, and up to 64 more probes (one lap at most) measure what the
+  collection left;
+- the dead fraction of the checks since is the **gate** (a window of fewer
+  than 16 reads as 16). A noticed collection is ignored unless two thirds of
+  what was checked was dead — but a table found under an eighth full at
+  two answers running is shrunk; otherwise each shard is **swept in place**, once, a few slots per
+  registration into it: entries of the current epoch are passed untouched,
+  the living restamped, the dead removed by backward shift. What dies later
+  carries an older stamp and proves nothing; a probe that finds such an
+  entry dead, while the window says the dead are worth it, sweeps its shard;
+- a table is **replaced** only to grow, or to shrink when a sweep both began
+  with it under a quarter full and left it under an eighth: incrementally,
+  four entries or sixteen slots per registration, into a table sized exactly.
+  The copy never dereferences, and a shard that is copying does no cleaning;
+- a lookup's predicate is the caller's code and may register into the pool
+  (an `[equals]` that interns while comparing): a registration made inside a
+  lookup does no probing or sweeping, so nothing moves under the lookup; and
+  a lookup whose predicate registered scans again the current table, and a
+  retired one it has not scanned, so that what the predicate added — an equal
+  of the value looked up, even — is found. Such a predicate may be offered a
+  candidate twice;
+- where the host offers them, **idle time** takes the work off that path: one
+  `FinalizationRegistry` *sentinel* (one cell, never dereferenced, so it does
+  die) reports that a collection happened, and `requestIdleCallback` or
+  `setImmediate` slices finish copies, probe, and run the sweeps owed. Neither
+  is required: without them everything above still rides on registration.
 
-### D3. The pool index is a `Map` keyed by a 30-bit hash
+**Why.** Measured against the design it replaced (below), every measurement
+its own process (`scripts/experiments/mix-bench.mjs`, `pnpm bench:mix`; node
+26, two rounds, medians; replaced → this). With a major GC forced every 200k
+inserts:
 
-**Why.** A packed open-addressed array table was built and measured against
-`Map`. It wins a fixed-population micro-benchmark on V8 (hits −20%, churn
-2×) but ties on real per-op sequences, loses ~10% under unbounded growth,
-and loses 2× on JavaScriptCore. What the exercise found instead: three
-quarters of uint32 hashes fall outside V8's 31-bit Smi range, so full-hash
-keys are boxed; masking to 30 bits fixed a 2× hit cost at 200k entries.
-`Map` stays, with masked keys and a `slot.hash` pre-check. The slot *is*
-the `WeakRef` (a subclass): zero deoptimisations, one object header less
-per member. DESIGN.md §4.2.
+| scenario | ns/op | ms in the turns between batches | end memory, MB |
+| --- | --- | --- | --- |
+| churn, 50k live | 253 → 228 | 407 → 22 | 36 → 20 |
+| churn, 50k live, 4 hits per insert | 218 → 185 | 166 → 12 | 36 → 20 |
+| churn, 1M live | 425 → 327 | 656 → 22 | 276 → 227 |
+| churn, 1M live, 30 epochs | 380 → 512 | 1967 → 113 | 276 → 212 |
+| churn, 1M live, 4 hits per insert | 611 → 477 | 231 → 8 | 221 → 154 |
+| read-mostly, 1M live, 16 hits per insert | 683 → 528 | 57 → 5 | 220 → 153 |
+| grow to 2M, no deaths | 299 → 191 | 158 → 20 | 373 → 197 |
+| collapse 1M → 50k, then churn | 258 → 336 | 274 → 13 | 36 → 62 |
+| collapse, then regrow to 1M | 354 → 346 | 239 → 15 | 207 → 127 |
+| 200 inserts right after churn and a settle | 270 → 305 | | |
 
-### D48. The pool index is 64 Maps, sharded by hash
+And with **no forced collections** — the engine's own, incremental and
+mid-job, which is the normal case: 270 → 322 and 213 → 219 ns/op (without and
+with lookups), holding 712k and 835k entries for 50k live against the
+registry's 194k and 278k (65 and 58 MB against 36 and 38). `pnpm bench`,
+A/B'd against the replaced pool with alternating processes: `collections`
+×1.02, `produce` ×1.00, `list` ×1.01, `list-draft` ×1.01, `ordered` ×1.01.
 
-`shard = imul(hash, 0x9e3779b1) >>> 26`; each shard is the `Map` of D3,
+On JavaScriptCore (Bun 1.4.2, `RUNTIME=<bun>`, two rounds) it is ahead in
+every scenario run, the natural-collection ones and the 30-epoch churn
+included: 118 → 94, 101 → 74, 252 → 174, 308 → 238 (30 epochs), 402 → 238,
+347 → 326, 165 → 99 ns/op, 191 → 149 and 110 → 92 under natural collections,
+115 → 95 for the burst after a settle; its forced collections take longer
+there on a million live entries (545 → 884 ms, 2090 → 2730 ms). On
+SpiderMonkey (shell 156, `scripts/experiments/mix-bench-spidermonkey.mjs`,
+two rounds; no event loop, so each collection is answered with one inline
+slice and the rest waits for registrations) it is ahead on every row too:
+591 → 472, 444 → 354, 870 → 624, 1014 → 761 and 887 → 452 ns/op, with a
+third to a fifth of the registry pool's time in collections on the small
+pools and half on the large.
+
+So, on V8: level or ahead per operation where a pool is small or is read, a
+twentieth of the time in the turns after a collection, less memory at rest,
+no dependence on finalizers — and behind where a large pool churns through
+many collections (the 30-epoch row: it is ahead again counting collections
+and turns, 7.8 s → 6.5 s), after a mass death, and in what it holds between
+natural collections. It also asks less of the host: some runtimes run
+finalization callbacks without an I/O context, or never (Cloudflare Workers
+documents both); here the one callback is a hint whose absence costs only
+the idle-time work.
+
+**Rejected:** *the `FinalizationRegistry` hybrid this replaced*: one cell per
+object, the callback parking the slot, buckets cleaned in idle slices
+(itself chosen over monolithic sweeps with 15–54 ms pauses, inline
+finalization with a 10–18 ms storm per 100k dead, and an incremental circle
+sweeper). It is the left-hand column. *A canary* — a `WeakRef` to an object
+nothing holds, looked at every 64th registration: **it never dies**. Looking
+pins it, and under incremental marking keeps it alive through every cycle;
+measured with natural collections, none was noticed after the canary's
+promotion and the pool kept every entry it was ever given (3,050,000 for
+50,000 live). Forced collections *between* jobs, which is all the first
+measurements used, are the one moment it is unpinned. *Verifying by copying*
+each shard into a fresh table (dead entries simply not copied): level in
+steady state, but 64 shards each allocating a table right after a collection
+cost ×3 on the operations that follow one, and it needs a survivor estimate
+to size the table and an overflow path for when the estimate is wrong.
+*Dereferencing on every registration* (an ungated sweep, or a lap after
+every collection): always the slowest variant, 2.7–3.6× slower than the
+registry on a million live entries. *An adaptive sweep without epochs*
+(check rate ∝ the dead fraction of recent checks): it settles where half its
+checks land on the living, and cannot tell which entries are new since the
+last collection; the same dial exists in the gate, where 50 % → 67 % makes
+operations a fifth cheaper on a large churning pool for ~30 % more time in
+collections, and 75 % hurts small pools. *A chained table* (`Slot extends
+WeakRef` with hash and next, linear hashing): 687 against 376 ns/op on a
+million live entries. With the hash in a scattered 48-byte object, a miss, a
+bucket split and a stamp check each load one; in the open table they read an
+`Int32Array`. *Cleaning while a shard copies* (probing with a scan guard, or
+sweeping whichever table holds the entries under the cursor): correct, and
+measurably no different from not cleaning until the copy ends. *Rehashing in
+place:* a JS array cannot grow without reallocating, and a resizable buffer
+or a holey array costs 9–19 % on every miss. *Asking for idle time from a
+registration* that leaves work undone: on a host whose idle is the next turn
+it put a slice after every small operation (×2.7 on one). *Shrinking after
+every sweep*, and later *shrinking at the first collection not worth a
+sweep:* the next burst regrew the table inside its own operations (×1.9–2.7
+on a short one, then ×1.7 on the same). *Moving an entry when a lookup hits it, batching
+the work per 16 or 100 registrations:* no measurable difference.
+**Cost.** Cleanup rides on registration unless idle time takes it: a pool
+that stops registering — or registers slowly: a collapse is swept at sixteen
+slots a registration — on a host with no sentinel or scheduler, keeps its
+husks (a cleared `WeakRef` and a slot of table each, never the values) until
+it resumes or is dropped. Between natural collections it holds two to four
+times what the registry did: what has died since the last collection it
+answered, and the gate bounds only the waste of a sweep, not that. The soak
+run (`scripts/experiments/soak.mjs`, a million live entities, 40 s at half
+capacity): heap floor stable, 817 bytes an entity against the registry's
+1,070, capacity level or 12 % up; when traffic stopped the pool held about
+two million dead beside two million live records, half of what it stored,
+which is under the gate; and the multi-second stalls in the churn workload
+are the meta `WeakMap`'s growth (D49), the same on both. Two
+independent reviews of this design found holes now closed, each with a test.
+The first (its scripts are the model check in `intern-pool.fuzz.test.ts`):
+a lookup's predicate registering into the pool could shift entries under
+the lookup (a duplicate canonical, or a slot with no `WeakRef`); a
+population that survived an ignored collection could die unnoticed for
+good; the probes after a noticed collection could lap a small or sparse
+shard, once 2.8 ms in one registration. The second: a lookup did not see
+what its own predicate registered — an `[equals]` that interns an equal
+value while comparing got two canonical instances, on this design and on
+the `Map` before it (which promoted a bucket under the lookup); a probe
+could pass two laps; idle time swept one shard before finishing the others'
+copies, and always started with the last pool created. The per-node `WeakRef` (~60 ns, and most of the
+time inside a collection) remains the dominant term in every construction
+and update, and pins what it points at to the end of the job: in a long
+synchronous job everything registered survives every scavenge, is promoted,
+and waits for a major collection, in any design. On a million live entries
+a lookup hit is ~400 ns of dependent cache misses (slot, ref, `WeakRef`,
+target); over a hundred hot members it is ~80 ns. DESIGN.md §4.2.
+
+### D3. The pool index is an open-addressed table, one int32 to a slot
+
+Linear probing over an `Int32Array`, with the `WeakRef`s in a parallel
+array. The hash is multiplied by an odd constant (a bijection on 32 bits);
+the top 6 bits of the product choose the shard (D48) and the other 26 are
+the slot's tag, above a 6-bit epoch stamp (D2). A tag match within a shard
+is therefore equality of the full hash: `lookup` offers the predicate
+exactly what was registered under that hash, as it always has. A zero word
+is an empty slot, and the stamp is never zero. Deletion is by backward
+shift (no tombstones): measured, under one slot scanned and 0.2 entries
+moved per removal, ~16 ns.
+
+**Why.** Everything the index needs to know about an entry without touching
+it (its hash, its home slot, whether it has been seen alive lately) is in
+that word. A miss, the path of every fresh node, reads the `Int32Array`
+alone, sixteen slots to a cache line (28 ns against 86 for a chained bucket
+at two million entries); growing the table copies words and pointers and
+loads no object; a sweep passes a verified entry without loading it. Two
+`Int32Array`s (hash, stamp) cost a second cold line on every hit and
+registration; interleaving them halves the slots per line and slowed misses
+by 2–8 ns; packing both in one word is level on misses, 7–10 % cheaper on
+hits at scale, and 4 bytes of index a slot instead of 8. Six bits of stamp
+suffice because a stamp is only ever compared for equality with the current
+epoch: one that survives 63 epochs unrefreshed is passed over once more, and
+asked the epoch after. **Rejected:** *a `Map` keyed by `hash & 0x3fffffff`*
+with a `Slot` subclass of `WeakRef` carrying the full hash, which this
+replaced. (What that exercise found still holds for anyone keying a `Map` by
+hash: three quarters of uint32 hashes fall outside V8's 31-bit Smi range,
+and boxed keys cost 2× per hit at 200k entries.) A packed open-addressed
+table had been measured against that `Map` once before and rejected: it won
+a fixed-population micro-benchmark on V8, tied on real sequences, lost ~10 %
+under unbounded growth to JS rebuilds against a native rehash, and lost 2×
+on JavaScriptCore. The growth loss was the stop-the-world rebuild, which the
+incremental copy of D2 removes, and on JavaScriptCore and SpiderMonkey this
+table now measures ahead of the `Map` in every scenario (D2). *The chained table* of
+D2. DESIGN.md §4.2.
+
+### D48. The pool index is 64 tables, sharded by hash
+
+`shard = imul(hash, 0x9e3779b1) >>> 26`; each shard is a table of D3,
 created on first use.
 
-**Why.** A soak run (`scripts/experiments/soak.mjs`) held millions of
-canonical objects alive, which no benchmark had, and found two properties of
-one large `Map`. V8 refuses a `Map` more than 2^24 entries: at 16.9M live
-canonical objects `intern` threw `RangeError: Map maximum size exceeded`.
-And a hash table grows by rehashing all of itself inside the `set` that
-tipped it over: measured on the pool alone, with collections told apart,
-1.3 ms at 131k entries, 12 ms at 1M, 29 ms at 2M, doubling with the table.
-Sharded, 20M objects intern without error and no `register` takes over a
-millisecond outside a collection; registration and lookup cost the same
-within noise at 1k, 100k, 1M and 4M members (one multiply, a shift and an
-array load per operation). The multiply is there for consumer pools: a
-`[hashCode]` with its entropy in the low bits still spreads, and one that
-does not spread degenerates to the single Map this replaced. Shards are
-lazy because most pools are small. **Rejected:** growing the shard count
-with the pool (a split is the same stall, moved), and a hand-rolled table
-(D3). **Not covered:** the meta `WeakMap` of D11 is one table too, and V8
-grows a `WeakMap` far more slowly than a `Map` (0.4 s at 1M keys); that is
-a separate decision. DESIGN.md §4.2.
+**Why.** With a table replaced incrementally (D2), what is left that happens
+at once is allocating the next one: measured, 0.2 ms for 65k slots, 1.6–3.9
+ms for a million and 6–25 ms for four to eight million. Sharded, it is a
+64th of the pool's. An engine also keeps an array fast only up to a length
+(V8: 32M elements), which one table would reach at about 16M canonical
+objects; sharded, the ceiling is two billion. The multiply is there for
+consumer pools: a `[hashCode]` with its entropy in the low bits still
+spreads. Shards are lazy because most pools are small. **Rejected:** *one
+table:* the allocation above, and the ceiling. The same two properties are
+what sharded the `Map` this replaced: a soak run
+(`scripts/experiments/soak.mjs`) found that V8 refuses a `Map` more than
+2^24 entries (`RangeError` out of `intern` at 16.9M canonical objects) and
+rehashes all of one inside the `set` that tipped it over (12 ms at 1M
+entries, 29 ms at 2M). **Not measured:** fewer shards for small pools: the
+indirection's cost, and whether 8 would do. **Not covered:** the meta
+`WeakMap` of D11 is one table too, and V8 grows a `WeakMap` far more slowly
+than a `Map` (0.4 s at 1M keys); that is a separate decision. DESIGN.md §4.2.
 
 ### D11. One meta object per canonical, in a `WeakMap`, with no back-reference
 
