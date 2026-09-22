@@ -285,7 +285,13 @@ every scenario run, the natural-collection ones and the 30-epoch churn
 included: 118 → 94, 101 → 74, 252 → 174, 308 → 238 (30 epochs), 402 → 238,
 347 → 326, 165 → 99 ns/op, 191 → 149 and 110 → 92 under natural collections,
 115 → 95 for the burst after a settle; its forced collections take longer
-there on a million live entries (545 → 884 ms, 2090 → 2730 ms).
+there on a million live entries (545 → 884 ms, 2090 → 2730 ms). On
+SpiderMonkey (shell 156, `scripts/experiments/mix-bench-spidermonkey.mjs`,
+two rounds; no event loop, so each collection is answered with one inline
+slice and the rest waits for registrations) it is ahead on every row too:
+591 → 472, 444 → 354, 870 → 624, 1014 → 761 and 887 → 452 ns/op, with a
+third to a fifth of the registry pool's time in collections on the small
+pools and half on the large.
 
 So, on V8: level or ahead per operation where a pool is small or is read, a
 twentieth of the time in the turns after a collection, less memory at rest,
@@ -399,8 +405,8 @@ table had been measured against that `Map` once before and rejected: it won
 a fixed-population micro-benchmark on V8, tied on real sequences, lost ~10 %
 under unbounded growth to JS rebuilds against a native rehash, and lost 2×
 on JavaScriptCore. The growth loss was the stop-the-world rebuild, which the
-incremental copy of D2 removes, and on JavaScriptCore this table now
-measures ahead of the `Map` in every scenario (D2). *The chained table* of
+incremental copy of D2 removes, and on JavaScriptCore and SpiderMonkey this
+table now measures ahead of the `Map` in every scenario (D2). *The chained table* of
 D2. DESIGN.md §4.2.
 
 ### D48. The pool index is 64 tables, sharded by hash

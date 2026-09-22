@@ -68,7 +68,8 @@
 // BATCH (inserts per job, default 5000), HOT (hits go to the first HOT
 // live members, default all), PROF=<file> (CPU profile of the timed phase),
 // RUNTIME=<binary> (run the measuring processes under it instead of this node:
-// the pinned Bun, for JavaScriptCore — see bench/fetch-engines.mjs).
+// the pinned Bun, for JavaScriptCore — see bench/fetch-engines.mjs). For
+// SpiderMonkey's shell, which has no event loop, see mix-bench-spidermonkey.mjs.
 //
 // Run: pnpm build && node scripts/experiments/mix-bench.mjs [rounds] [pool,pool,…]
 // ---------------------------------------------------------------------------
