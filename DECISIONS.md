@@ -223,20 +223,28 @@ its target alive to the end of the job, and through the marking cycle of an
 incremental collector. So the pool never watches an object whose death it is
 waiting for. It watches its own entries, of which it does not care:
 
-- every 32nd registration **probes** one entry, whatever its stamp (D3) says.
-  A stamp is the pool's epoch when the target was last known alive. A probe
+- every 32nd registration (into a shard not being copied) **probes** one
+  entry, whatever its stamp (D3) says, passing at most 64 slots for it. A
+  stamp is the pool's epoch when the target was last known alive. A probe
   that finds an entry dead *while it carries the current stamp* has proof
-  that a collection happened in this epoch: the epoch advances, and 64 more
-  probes measure what the collection left;
-- the dead fraction of the last 64 checks is the **gate**. A noticed
-  collection is ignored unless two thirds of what was checked was dead;
-  otherwise each shard is **swept in place**, once, a few slots per
+  that a collection happened in this epoch: the epoch advances, the window
+  starts afresh, and up to 64 more probes (one lap at most) measure what the
+  collection left;
+- the dead fraction of the checks since is the **gate** (a window of fewer
+  than 16 reads as 16). A noticed collection is ignored unless two thirds of
+  what was checked was dead — but a table then under an eighth full is
+  shrunk; otherwise each shard is **swept in place**, once, a few slots per
   registration into it: entries of the current epoch are passed untouched,
-  the living restamped, the dead removed by backward shift;
+  the living restamped, the dead removed by backward shift. What dies later
+  carries an older stamp and proves nothing; a probe that finds such an
+  entry dead, while the window says the dead are worth it, sweeps its shard;
 - a table is **replaced** only to grow, or to shrink when a sweep both began
   with it under a quarter full and left it under an eighth: incrementally,
-  four entries per registration, into a table sized exactly. The copy never
-  dereferences, and a shard that is copying does no cleaning;
+  four entries or sixteen slots per registration, into a table sized exactly.
+  The copy never dereferences, and a shard that is copying does no cleaning;
+- a lookup's predicate is the caller's code and may register into the pool:
+  a registration made inside a lookup does no probing or sweeping, and a
+  lookup holds both arrays of the table it probes;
 - where the host offers them, **idle time** takes the work off that path: one
   `FinalizationRegistry` *sentinel* (one cell, never dereferenced, so it does
   die) reports that a collection happened, and `requestIdleCallback` or
@@ -322,10 +330,19 @@ every sweep:* the next burst regrew the table inside its own operations
 (×1.9–2.7 on a short one). *Moving an entry when a lookup hits it, batching
 the work per 16 or 100 registrations:* no measurable difference.
 **Cost.** Cleanup rides on registration unless idle time takes it: a pool
-that stops registering, on a host with no sentinel or scheduler, keeps its
+that stops registering — or registers slowly: a collapse is swept at sixteen
+slots a registration — on a host with no sentinel or scheduler, keeps its
 husks (a cleared `WeakRef` and a slot of table each, never the values) until
 it resumes or is dropped. Between natural collections it holds two to four
-times what the registry did. The per-node `WeakRef` (~60 ns, and most of the
+times what the registry did: what has died since the last collection it
+answered, and the gate bounds only the waste of a sweep, not that. An
+independent review of the first version of this design (its scripts are the
+model check in `intern-pool.fuzz.test.ts`) found three holes now closed: a
+lookup's predicate registering into the pool could shift entries under the
+lookup (a duplicate canonical, or a slot with no `WeakRef`); a population
+that survived an ignored collection could die unnoticed for good; and the
+probes after a noticed collection could lap a small or sparse shard, once
+2.8 ms in one registration. The per-node `WeakRef` (~60 ns, and most of the
 time inside a collection) remains the dominant term in every construction
 and update, and pins what it points at to the end of the job: in a long
 synchronous job everything registered survives every scavenge, is promoted,

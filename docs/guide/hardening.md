@@ -73,8 +73,9 @@ on. It notices a collection by finding one of its own entries dead (it probes
 one every 32 registrations), ignores a collection that left more than a third
 of what it checked alive, and otherwise sweeps its index in place, a few slots
 per registration — so neither growing the index nor cleaning it is ever one
-long task on the main thread, and the dead number about twice the living at
-most. Where the host offers them, one `FinalizationRegistry` sentinel and
+long task on the main thread. Between collections it holds what has died
+since the last one it answered: measured under the engine's own collections,
+a few times the number of live values. Where the host offers them, one `FinalizationRegistry` sentinel and
 `requestIdleCallback` (browser windows) or `setImmediate` (Node, Bun) move
 that work into idle time, in bounded slices. Neither is required, which
 matters on hosts that run finalizers without an I/O context or not at all:

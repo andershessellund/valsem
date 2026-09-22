@@ -18,7 +18,7 @@
 //                           (without it: a verifying lap after every collection)
 //                    +hits  a lookup hit in `old` moves the entry to `cur`
 //                    bN     spend the migration credit once every N inserts
-//                  "semi 1 gate.5" is the shipped configuration.
+//                  ("semi 1 gate.5" was the shipped configuration for a while.)
 //   chain [opts]   a chained alternative: a Slot subclass of WeakRef carrying its
 //                  hash and a next pointer; segmented LINEAR HASHING (one bucket
 //                  splits per insert, in place, and a lookup has one place to
@@ -47,8 +47,8 @@
 //                  pool's OWN entries are the canaries. One stamp-blind probe per
 //                  32 registrations; a dead entry found carrying the CURRENT stamp
 //                  proves a collection happened in this epoch, so the epoch
-//                  advances (and 16 more probes refresh the estimate). The dead
-//                  fraction of the last 16 checks is the gate. Looking at a
+//                  advances (and a window of probes refreshes the estimate). The
+//                  dead fraction of the last 16 (wN) checks is the gate. Looking at a
 //                  WeakRef pins it; of these we do not care.
 //   null, wr       ablations: the harness alone, and the harness plus one
 //                  retained WeakRef per insert

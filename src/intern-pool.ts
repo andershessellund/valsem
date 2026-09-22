@@ -22,27 +22,35 @@
 // death it is waiting for — a canary that is looked at never dies — it watches
 // its own entries, of which it does not care:
 //
-//   * every 32nd registration PROBES one entry, whatever its stamp says. A
+//   * every 32nd registration (into a shard that is not being copied) PROBES
+//     one entry, whatever its stamp says, passing at most 64 slots for it. A
 //     word's stamp is the pool's epoch when its target was last known alive
 //     (registered, found, or probed). A probe that finds an entry dead while it
 //     carries the CURRENT stamp has proof that a collection happened in this
 //     epoch: the epoch advances, and 64 more probes measure what it left;
-//   * the dead fraction of the last 64 checks is the gate. A noticed collection
-//     is IGNORED unless at least two thirds of what was checked was dead;
-//     otherwise each shard is swept, once, a few slots per registration into
-//     it: entries stamped with the current epoch are passed over untouched, the
-//     living restamped, the dead removed by backward shift (linear probing's
+//   * the dead fraction of the checks since then is the gate. A noticed
+//     collection is IGNORED unless at least two thirds of what was checked was
+//     dead; otherwise each shard is swept, once, a few slots per registration
+//     into it: entries stamped with the current epoch are passed over untouched,
+//     the living restamped, the dead removed by backward shift (linear probing's
 //     deletion without tombstones — measured, under one slot scanned and 0.2
 //     entries moved per removal). Nothing is allocated because of a collection.
+//     What dies later — say, the survivors of an ignored collection — carries
+//     an older stamp and proves nothing; but a probe that finds such an entry
+//     dead, while the window says the dead are worth it, sweeps that shard.
 //
 // A table is replaced only to grow (or to shrink, when a sweep began with it
-// under a quarter full and left it under an eighth): incrementally, four entries per registration, into
+// under a quarter full and left it under an eighth): incrementally, four entries or 16 slots per registration, into
 // a table sized exactly for what it will receive, the old one left unwritten
 // so that its probe chains stay valid and a lookup probes the current table,
 // then the old. The copy never dereferences, and a shard that is copying does
 // no cleaning; its cursor is carried across by scaling (slots are in tag order,
 // so slot i becomes about 2i), and an unfinished sweep starts over in the new
 // table, where everything already verified is passed by its stamp.
+//
+// A lookup's predicate is the caller's code and may register into the pool
+// (an `[equals]` that interns while comparing): a registration made inside a
+// lookup does no probing or sweeping, so nothing moves under the lookup.
 //
 // None of this is a requirement on the runtime's collector: if nothing is ever
 // found dead there are no sweeps (and nothing was cleared). A lookup always
@@ -106,15 +114,24 @@ const TARGET_LOAD = 0.45;
 const PROBE_EVERY = 32;
 /** The checks the gate looks back over; and the probes that follow a noticed collection, so that the estimate is wholly from after it. */
 const WINDOW = 64;
+/** The gate reads a window of fewer checks than this as if it were this many: a handful of dead is not evidence about a pool. */
+const MIN_SAMPLE = 16;
+/** Slots a probe may pass per entry it is asked for (a table swept nearly empty is mostly slots). */
+const SLOTS_PER_PROBE = 64;
 /**
  * A noticed collection is answered only when at least this fraction of the
- * window was dead. It sets the equilibrium: at two thirds the dead number about
- * twice the living at most, a sweep wastes at most one live dereference for
- * every two entries it frees, and (measured on a million live entries under
- * steady churn) operations cost a fifth less than at one half, for more time in
- * collections.
+ * window was dead. It sets what a sweep may waste: at two thirds, at most one
+ * live dereference for every two entries it frees; and (measured on a million
+ * live entries under steady churn) operations cost a fifth less than at one
+ * half, for more time in collections. It bounds the dead only where the
+ * probes see them: between collections a pool holds whatever has died since
+ * the last it answered.
  */
 const DEAD_FRACTION = 0.67;
+/** Is the window saying a sweep would pay? */
+function worthASweep(census: Census): boolean {
+  return census.dead >= DEAD_FRACTION * Math.max(census.filled, MIN_SAMPLE);
+}
 /**
  * What one registration may spend on its shard's sweep or copy. It is paid
  * inside `register`, where a short operation feels it: slots passed (dead and
@@ -135,21 +152,35 @@ class Census {
   /** The epoch as a stamp: 1…63, never 0, so that a zero word is an empty slot. */
   stamp = 1;
   tick = 0;
-  /** The last WINDOW checks, one byte each: 1 found dead. */
+  /** The last WINDOW checks since the epoch advanced, one byte each: 1 found dead; and how many of them there are. */
   readonly #ring = new Uint8Array(WINDOW);
   #at = 0;
+  filled = 0;
   dead = 0;
 
   record(dead: 0 | 1): void {
     this.dead += dead - this.#ring[this.#at]!;
     this.#ring[this.#at] = dead;
     this.#at = (this.#at + 1) & (WINDOW - 1);
+    if (this.filled < WINDOW) this.filled++;
   }
 
-  /** A collection has been proven. A stamp that survives 63 epochs unrefreshed reads as current again: one entry is passed over once more, and asked the epoch after. */
+  /**
+   * A collection has been proven: the window starts afresh, so that what the
+   * gate reads is wholly from after it. A stamp that survives 63 epochs
+   * unrefreshed reads as current again: one entry is passed over once more,
+   * and asked the epoch after; a dead one found then proves a collection that
+   * may not have happened, which costs a window and, at worst, a sweep.
+   * (Sweeps and probes are bounded per registration by slots, entries and
+   * live dereferences; a removal's backward shift is bounded by the cluster.)
+   */
   advance(): void {
     this.epoch++;
     this.stamp = ((this.epoch - 1) % STAMP_MASK) + 1;
+    this.#ring.fill(0);
+    this.#at = 0;
+    this.filled = 0;
+    this.dead = 0;
   }
 }
 
@@ -213,42 +244,61 @@ function removeAt(s: Shard, i: number): void {
 }
 
 /**
- * Dereference `n` entries from the shard's cursor on, whatever their stamps
- * say. The shard is not empty and not being copied: see `register`.
+ * Dereference up to `n` entries from the shard's cursor on, whatever their
+ * stamps say, passing at most `slots` slots and never more than one lap. The
+ * shard is not being copied: see `register`.
  */
-function probe(s: Shard, census: Census, n: number): void {
+function probe(s: Shard, census: Census, n: number, slots: number): void {
   const words = s.words;
   const mask = words.length - 1;
   let at = s.at & mask;
-  while (n > 0 && s.used > 0) {
+  slots = Math.min(mask + 1, slots);
+  let foundDead = false;
+  while (n > 0 && slots > 0) {
     const w = words[at]!;
     if (w !== 0) {
       n--;
       if (s.refs[at]!.deref() === undefined) {
         removeAt(s, at);
-        census.record(1);
+        foundDead = true;
         if ((w & STAMP_MASK) === census.stamp) {
           // It was alive in this epoch and is dead now: there has been a collection.
           census.advance();
           n = WINDOW;
+          slots = Math.min(mask + 1, WINDOW * SLOTS_PER_PROBE);
         }
+        census.record(1);
         continue; // stay: what moved back into this slot has not been looked at
       }
       words[at] = (w & ~STAMP_MASK) | census.stamp;
       census.record(0);
     }
     at = (at + 1) & mask;
+    slots--;
   }
   s.at = at;
+  // A dead entry of an older stamp proves nothing about collections — its epoch
+  // may have been answered with "no" — but it is dead, and this shard holds it:
+  // if the window says the dead are worth a sweep, this shard is swept.
+  if (foundDead && s.sweepLeft === 0 && worthASweep(census)) beginSweep(s);
 }
 
-/** A shard answers a noticed collection once: until the next one, nothing more can be found dead. */
+/** A sweep of the whole current table is owed. */
+function beginSweep(s: Shard): void {
+  s.sweepLeft = s.words.length;
+  s.sparse = s.used < s.words.length * SHRINK_BELOW * 2;
+}
+
+/**
+ * A shard answers a noticed collection once. With a sweep, if the window says
+ * the dead are worth one; else, if the table is nearly empty, dead included,
+ * by shrinking it; else not at all — what dies later is found by the probes.
+ */
 function answer(s: Shard, census: Census): void {
   if (s.answered === census.epoch) return;
   s.answered = census.epoch;
-  if (census.dead < DEAD_FRACTION * WINDOW) return;
-  s.sweepLeft = s.words.length;
-  s.sparse = s.used < s.words.length * SHRINK_BELOW * 2;
+  if (worthASweep(census)) beginSweep(s);
+  else if (s.used < s.words.length * SHRINK_BELOW) beginCopy(s);
 }
 
 /** One registration's worth of sweeping the current table in place. */
@@ -348,6 +398,7 @@ const _g = globalThis as {
   setImmediate?: (cb: () => void) => unknown;
 };
 
+
 /** Ask for idle time, if the host has any to give. Returns whether a slice is (now) scheduled. */
 function scheduleIdle(): boolean {
   if (scheduled) return true;
@@ -356,7 +407,7 @@ function scheduleIdle(): boolean {
     _g.requestIdleCallback(runIdle);
   } else if (typeof _g.setImmediate === 'function') {
     scheduled = true;
-    _g.setImmediate(runIdle);
+    (_g.setImmediate(runIdle) as { unref?: () => void } | undefined)?.unref?.(); // owed sweeps never keep a process alive
   }
   return scheduled;
 }
@@ -463,20 +514,40 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   /** Idle time: the shard to resume at, and the census tick when this pool last probed for a collection. */
   #idleAt = 0;
   #noticedAt = -1;
+  #noticeAt = 0;
+  /**
+   * Lookups in progress. A predicate is the caller's code, and may register
+   * into this pool (an `[equals]` that interns while comparing); a registration
+   * made inside a lookup must not move entries under the lookup's probe, so it
+   * does no probing or sweeping. (Copying is safe: it fills only a table's empty
+   * slots, never writes a retired table, and a lookup holds both arrays of the
+   * table it probes.)
+   */
+  #looking = 0;
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
-    const stamp = this.#census.stamp;
     const m = Math.imul(hash, 0x9e3779b1);
     const s = this.#shards[m >>> (32 - SHARD_BITS)];
     if (s === undefined) return undefined;
-    const tag = m << SHARD_BITS;
+    this.#looking++;
+    try {
+      return this.#lookupIn(s, m << SHARD_BITS, predicate);
+    } finally {
+      this.#looking--;
+    }
+  }
 
+  #lookupIn(s: Shard, tag: number, predicate: (candidate: T) => boolean): T | undefined {
+    const stamp = this.#census.stamp;
+    // Both arrays of a table are taken together: a predicate may register, and a
+    // registration may replace the shard's tables, but never writes a retired one.
     const words = s.words;
+    const refs = s.refs;
     let mask = words.length - 1;
     let i = tag >>> (32 - s.bits);
     for (let w = words[i]!; w !== 0; i = (i + 1) & mask, w = words[i]!) {
       if ((w & ~STAMP_MASK) !== tag) continue;
-      const candidate = s.refs[i]!.deref();
+      const candidate = refs[i]!.deref();
       if (candidate !== undefined && predicate(candidate as T)) {
         if ((w & STAMP_MASK) !== stamp) words[i] = tag | stamp; // seen alive: the next lap need not ask
         return candidate as T;
@@ -485,12 +556,13 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
     const oldWords = s.oldWords;
     if (oldWords === null) return undefined;
+    const oldRefs = s.oldRefs;
     // Below the cursor the living have been moved (and were found above): what a probe meets there is dead.
     mask = oldWords.length - 1;
     i = tag >>> (32 - s.oldBits);
     for (let w = oldWords[i]!; w !== 0; i = (i + 1) & mask, w = oldWords[i]!) {
       if ((w & ~STAMP_MASK) !== tag) continue;
-      const candidate = s.oldRefs[i]!.deref();
+      const candidate = oldRefs[i]!.deref();
       if (candidate !== undefined && predicate(candidate as T)) {
         if ((w & STAMP_MASK) !== stamp) oldWords[i] = tag | stamp;
         return candidate as T;
@@ -504,13 +576,16 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     const m = Math.imul(hash, 0x9e3779b1);
     const s = (this.#shards[m >>> (32 - SHARD_BITS)] ??= new Shard());
 
+    const cleaning = this.#looking === 0;
+    census.tick++;
     if (s.oldWords !== null) {
       copy(s); // and no cleaning meanwhile
     } else {
-      if ((++census.tick & (PROBE_EVERY - 1)) === 0 && s.used > 0) probe(s, census, 1);
+      if (cleaning && (census.tick & (PROBE_EVERY - 1)) === 0 && s.used > 0) probe(s, census, 1, SLOTS_PER_PROBE);
       answer(s, census);
-      if (s.used >= s.words.length * GROW_AT) beginCopy(s);
-      else if (s.sweepLeft > 0) sweep(s, census);
+      if (s.oldWords !== null) copy(s); // (the answer was to shrink)
+      else if (s.used >= s.words.length * GROW_AT) beginCopy(s);
+      else if (cleaning && s.sweepLeft > 0) sweep(s, census);
     }
     place(s, (m << SHARD_BITS) | census.stamp, new WeakRef<object>(value));
     return value;
@@ -541,14 +616,21 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     return n;
   }
 
-  /** @internal A collection has happened: probe, as a registration would have. Only a pool that has registered since it last looked. */
+  /**
+   * @internal A collection has happened: probe one shard, as registrations
+   * would have — a whole lap of it, since this is idle time and a table swept
+   * nearly empty is mostly slots. Only a pool that has registered since it
+   * last looked, and a different shard each time.
+   */
   _notice(): void {
     const census = this.#census;
     if (census.tick === this.#noticedAt) return;
     this.#noticedAt = census.tick;
-    for (const s of this.#shards) {
+    for (let n = 0; n < SHARDS; n++) {
+      const s = this.#shards[(this.#noticeAt + n) & (SHARDS - 1)];
       if (s === undefined || s.oldWords !== null || s.used === 0) continue;
-      probe(s, census, WINDOW);
+      this.#noticeAt = (this.#noticeAt + n + 1) & (SHARDS - 1);
+      probe(s, census, WINDOW, s.words.length);
       return;
     }
   }
@@ -563,6 +645,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
         if (s.oldWords !== null) copy(s);
         else {
           answer(s, census);
+          if (s.oldWords !== null) continue;
           if (s.sweepLeft <= 0) break;
           sweep(s, census);
         }
@@ -626,7 +709,7 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
  */
 export function createInternPool<T extends object>(): InternPool<T> {
   const pool = new InternPoolImpl<T>();
-  pools.push(new WeakRef(pool as unknown as InternPoolImpl<object>));
+  if (sentinel !== undefined) pools.push(new WeakRef(pool as unknown as InternPoolImpl<object>)); // no sentinel, no idle time
   return pool;
 }
 

@@ -10,6 +10,7 @@
 // normal case, and a mechanism that only works between forced ones does not work.
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { createInternPool, _poolStats, _idleDriver, _idleState } from './intern-pool.js';
+import { intern } from './intern.js';
 import { equals, hashCode, interned } from './deep-equal.js';
 
 const gc = (globalThis as { gc?: () => void }).gc;
@@ -358,6 +359,122 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     expectAllFound(pool, held);
   });
 
+  it('a predicate that registers into the pool moves nothing under the lookup that called it', async () => {
+    // A cluster [D, X] under one hash, D dead. A lookup for X calls its predicate on X;
+    // the predicate registers into the same shard, at a moment when a sweep is owed
+    // and would remove D — shifting X back into the slot the lookup is looking at.
+    // If it did, the lookup would restamp an empty slot (a word with no WeakRef) and
+    // go on from a slot past X.
+    const h = hashWithProduct((1 << 20) | 1);
+    const pool: Crafted = createInternPool<{ m: number }>();
+    const held: { m: number }[] = [];
+    (function registerAll() {
+      pool.register({ m: 0 }, h); // D
+      held.push(pool.register({ m: 1 }, h)); // X
+      for (let k = 0; k < 1000; k++) pool.register({ m: -k }, hashWithProduct((1 << 26) | ((k + 1) << 15))); // doomed, shard 1
+    })();
+    expect(await collectUntil(() => pool.size() === 1)).toBe(true);
+    for (let k = 0; k < 400 && _poolStats(pool).epoch < 2; k++) held.push(pool.register({ m: 5000 + k }, hashWithProduct((1 << 26) | ((k + 5000) << 8))));
+    expect(_poolStats(pool)).toMatchObject({ epoch: 2 });
+    const X = held[0]!;
+    let inside = 0;
+    const found = pool.lookup(h, (c) => {
+      for (let k = 0; k < 40; k++) held.push(pool.register({ m: 9000 + k }, hashWithProduct((40 << 20) | (k << 8)))); // shard 0, mid-lookup
+      inside++;
+      return c === X;
+    });
+    expect(found).toBe(X);
+    expect(inside).toBe(1);
+    // Nothing was swept during the lookup; the next registration sweeps D away; everything is consistent.
+    held.push(pool.register({ m: 9999 }, hashWithProduct(41 << 20)));
+    for (let k = 0; k < 200; k++) held.push(pool.register({ m: 10_000 + k }, hashWithProduct((42 << 20) | (k << 8))));
+    expect(pool.lookup(h, (c) => c === X)).toBe(X);
+    expect(pool.lookup(h, (c) => c.m === 0)).toBeUndefined();
+    expect(pool.size()).toBe(held.length); // (walks every slot: a word without a WeakRef beside it would throw)
+  });
+
+  it('…through the public API: an [equals] that interns while comparing', async () => {
+    // (What the previous test guards against, seen from a consumer: a duplicate
+    // canonical instance, or a pool that throws afterwards.)
+    let armed = false;
+    class K {
+      declare readonly [hashCode]: number;
+      constructor(readonly id: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = 0x5eed;
+      }
+      [equals](o: unknown): boolean {
+        if (armed) {
+          armed = false;
+          for (let k = 0; k < 40; k++) intern(['side', k, Math.random()]);
+        }
+        return o instanceof K && o.id === this.id;
+      }
+    }
+    const held: unknown[] = [];
+    (function registerAll() {
+      intern(new K(0)); // doomed
+      held.push(intern(new K(1)));
+      held.push(intern(new K(2)));
+      for (let k = 0; k < 3000; k++) intern(['filler', k]); // doomed: enough for the collection to be noticed
+    })();
+    for (let i = 0; i < 20; i++) {
+      await turn();
+      gc!();
+      await turn();
+    }
+    for (let k = 0; k < 300; k++) held.push(intern(['after', k]));
+    const X = held[1];
+    armed = true;
+    expect(intern(new K(2))).toBe(X);
+    expect(intern(new K(1))).toBe(held[0]);
+    expect(intern(new K(2))).toBe(X);
+  });
+
+  it('what dies after an ignored collection is found by the probes, and swept when the window says so', async () => {
+    // 100k long-lived and 3k short-lived: the collection that takes the 3k is noticed and
+    // ignored (3 % dead). Then the 100k die — all stamped with the previous epoch, so no
+    // probe can prove a collection with them. They are still dead, and the probes find them.
+    const pool = createInternPool<{ n: number }>();
+    let n = 0;
+    const reg = (): { n: number } => pool.register({ n }, Math.imul(++n, 0x85ebca6b) >>> 0);
+    let A: object[] | null = [];
+    const B: object[] = [];
+    (function registerAll() {
+      for (let i = 0; i < 100_000; i++) A!.push(reg());
+      for (let i = 0; i < 3_000; i++) reg();
+    })();
+    expect(await collectUntil(() => pool.size() === 100_000)).toBe(true);
+    for (let i = 0; i < 20_000 && _poolStats(pool).epoch < 2; i++) B.push(reg());
+    expect(_poolStats(pool)).toMatchObject({ epoch: 2, sweeping: 0 });
+    A = null;
+    expect(await collectUntil(() => pool.size() === B.length)).toBe(true);
+    const before = _poolStats(pool).slots;
+    for (let i = 0; i < 40_000; i++) B.push(reg());
+    const after = _poolStats(pool);
+    expect(after.epoch).toBe(2); // nothing could prove a collection…
+    expect(after.slots).toBeLessThan(before); // …and the dead are going anyway
+    expect(after.slots - B.length).toBeLessThan(30_000);
+  });
+
+  it('a small pool is swept as readily as a large one', async () => {
+    // Fewer entries than the window in every shard: the probes that follow a noticed
+    // collection must not lap a shard and count its survivors again and again.
+    for (const total of [1_000, 3_000]) {
+      const pool = createInternPool<{ n: number }>();
+      const held: object[] = [];
+      let n = 0;
+      (function registerAll() {
+        for (let i = 0; i < total; i++) {
+          const o = pool.register({ n }, Math.imul(++n, 0x85ebca6b) >>> 0);
+          if (i % 10 === 0) held.push(o);
+        }
+      })();
+      expect(await collectUntil(() => pool.size() === held.length)).toBe(true);
+      for (let i = 0; i < total; i++) held.push(pool.register({ n }, Math.imul(++n, 0x85ebca6b) >>> 0));
+      expect(_poolStats(pool)).toMatchObject({ slots: held.length, sweeping: 0 });
+    }
+  });
+
   it('notices the engine’s own collections — nothing here is forced', async () => {
     // 20k live, everything older dying, in jobs of 2,000 registrations with
     // other garbage alongside. Collections now happen when the engine chooses,
@@ -443,6 +560,43 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
     expect(_idleState().scheduled).toBe(false);
   });
 
+  it('a collection not worth a sweep is still answered by shrinking a table swept nearly empty before it', async () => {
+    // A mass death is swept in idle time; the tables it leaves are large and nearly empty,
+    // and were full (of husks) when that sweep began, so they did not shrink. The next
+    // collection takes little: not worth a sweep, but the answer to it is to shrink them —
+    // in idle time for the shards it reaches, on registration for the rest.
+    const callbacks: Array<(d: { timeRemaining(): number }) => void> = [];
+    g.requestIdleCallback = (cb: (d: { timeRemaining(): number }) => void) => {
+      callbacks.push(cb);
+    };
+    const pool = createInternPool<{ v: number }>();
+    const held: object[] = [];
+    (function registerDoomed() {
+      for (let i = 0; i < 200_000; i++) pool.register({ v: i }, Math.imul(i + 1, 0x85ebca6b) >>> 0);
+    })();
+    for (let i = 0; i < 640; i++) held.push(pool.register({ v: -i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
+    expect(await collectUntil(() => callbacks.length > 0, 40)).toBe(true);
+    while (callbacks.length > 0) callbacks.shift()!({ timeRemaining: () => 50 });
+    const swept = _poolStats(pool);
+    expect(swept).toMatchObject({ slots: 640, sweeping: 0, migrating: 0 });
+    expect(swept.capacity).toBeGreaterThan(400_000); // 200k in tables of 8,192 a shard, still
+
+    (function aLittleGarbage() {
+      for (let i = 0; i < 300; i++) pool.register({ v: 1e6 + i }, Math.imul(i + 1, 0x27d4eb2f) >>> 0);
+    })();
+    expect(await collectUntil(() => callbacks.length > 0, 40)).toBe(true);
+    callbacks.shift()!({ timeRemaining: () => 0 }); // the minimum slice: a lap of one shard notices, a few shards answer
+    const noticed = _poolStats(pool);
+    expect(noticed.epoch).toBe(swept.epoch + 1);
+    expect(noticed.migrating).toBeGreaterThan(0); // answered by shrinking…
+    expect(noticed.sweeping).toBe(0); // …not by sweeping
+    for (let i = 0; i < 20_000; i++) held.push(pool.register({ v: -i - 1000 }, Math.imul(i + 1, 0x165667b1) >>> 0)); // the rest answer on registration
+    while (callbacks.length > 0) callbacks.shift()!({ timeRemaining: () => 50 });
+    const after = _poolStats(pool);
+    expect(after.capacity).toBeLessThan(swept.capacity / 2);
+    expect(pool.size()).toBe(held.length);
+  });
+
   it('on a host without FinalizationRegistry the pool is what it is everywhere: swept by its registrations', async () => {
     vi.stubGlobal('FinalizationRegistry', undefined);
     vi.resetModules();
@@ -455,7 +609,6 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
       expect(host._poolStats(pool)).toMatchObject({ slots: 25_600, epoch: 1 }); // no report, so no idle work
       const held: object[] = [];
       for (let i = 0; i < 14_000; i++) held.push(pool.register({ v: i }, Math.imul(i + 1, 0xc2b2ae35) >>> 0));
-      for (let i = 0; i < 40; i++) await turn(); // (idle turns may finish what those registrations began)
       expect(host._poolStats(pool)).toMatchObject({ slots: 14_000, sweeping: 0, epoch: 2 });
       expect(held.length).toBe(14_000);
     } finally {
