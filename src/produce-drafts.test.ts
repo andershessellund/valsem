@@ -76,6 +76,47 @@ describe('DraftMap — iteration, size, clear', () => {
     expect(patches.map((p) => p.kind).sort()).toEqual(['map.delete', 'map.delete', 'map.set']);
   });
 
+  it('size is kept as edits go, not counted: every kind of edit, in every order', () => {
+    // set of a new key, of a present key, of a present key to the same value (a no-op), delete of a
+    // present and of an absent key, clear, and sets after a clear — against a native Map doing the same.
+    const big = ValueMap.from(Array.from({ length: 50 }, (_, i) => ['k' + i, i] as const));
+    produce(big, (d) => {
+      const model = new Map<string, number>(big);
+      let step = 0;
+      const check = (): void => expect(d.size, `step ${step++}`).toBe(model.size);
+      d.set('new', 1); model.set('new', 1); check();
+      d.set('k3', 99); model.set('k3', 99); check();
+      d.set('k3', 99); check(); // the same value: no edit, no change
+      expect(d.delete('k4')).toBe(true); model.delete('k4'); check();
+      expect(d.delete('k4')).toBe(false); check();
+      expect(d.delete('nope')).toBe(false); check();
+      d.set('k4', 4); model.set('k4', 4); check(); // deleted, then set again
+      d.clear(); model.clear(); check();
+      d.set('a', 1); model.set('a', 1); check();
+      d.set('k0', 0); model.set('k0', 0); check(); // a base key, after the clear
+      expect(d.delete('a')).toBe(true); model.delete('a'); check();
+      d.clear(); model.clear(); check();
+    });
+  });
+
+  it('reading size in a loop of sets costs nothing extra (it was quadratic)', () => {
+    const base = ValueMap.from(Array.from({ length: 10_000 }, (_, i) => ['k' + i, i] as const));
+    const time = (read: boolean): number => {
+      const t0 = performance.now();
+      produce(base, (d) => {
+        for (let i = 0; i < 3000; i++) {
+          d.set('new' + i, i);
+          if (read) expect(d.size).toBe(10_000 + i + 1);
+        }
+      });
+      return performance.now() - t0;
+    };
+    time(false); // warm
+    const without = time(false);
+    const withReads = time(true);
+    expect(withReads).toBeLessThan(without * 5 + 50); // was 40x; the reads themselves cost something
+  });
+
   it('clear() on an empty map is a no-op that leaves the base untouched', () => {
     const empty = ValueMap.empty<string, number>();
     expect(produce(empty, (d) => void d.clear())).toBe(empty);

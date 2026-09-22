@@ -639,6 +639,16 @@ another class's wrapper. A node that were both a root and another trie's
 child would only keep a wrapper alive longer, and canonical CHAMP form rules
 it out. **Cost.** One field per trie node, about 1.5% of a large map's heap.
 From an external performance review, 2026-09-19. DESIGN.md §6.3.
+**Since (2026-09):** every wrapper's `[equals]` is `other === this`. The
+map and set wrappers compared roots through a `#root in other` brand check,
+which is the same answer (a root has one wrapper) except on an object made
+from the prototype alone, where reading the private field threw where a
+predicate should answer `false`. The `NaN` normalisation before a native
+`Set`/`Map` lookup in `OrderedSet.from`/`OrderedMap.from` went at the same
+time: native collections are SameValueZero already, as the trie's own
+dedupe relies on. And `DraftMap.size` is a count kept as edits go; it
+walked the assigned keys and probed the base for each, which made a loop
+that read it quadratic (3,000 sets with a `size` read each: 251 ms → 16 ms).
 
 ### D32. Keys, values, and members intern on entry
 
@@ -1057,6 +1067,14 @@ keeps them anyway. `current`/`original` register the core snapshots from
 their own module for the same reason. The Temporal entry stays listed: its
 import registers handlers, and a tree-shaken bare import would silently
 drop Temporal support. DESIGN.md §7.1, §10.
+**Since (2026-09):** the zero-patch law is `finalizeState`'s alone. It
+takes marks before a kind's `finalize` and, when the result is the base,
+retracts everything written since — this container's ops and its children's
+patches alike. The per-kind retractions that predated it (the array,
+`DraftList` and `DraftOrderedMap` finalizers) each fired on the same
+condition from inside that call and retracted a subset, so they were
+removed; `retractSeqPatches` stays exported, deprecated, for kinds written
+against it. Found by an external review, with the two below.
 
 ### D35. `produce` is unified with `intern`; finalize is an intern walk; pool membership is the marker
 

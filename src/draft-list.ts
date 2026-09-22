@@ -26,7 +26,6 @@ import {
   snapshotOf,
   isImmutable,
   emitSeqOps,
-  retractSeqPatches,
   type DraftState,
   type Patch,
   type PatchPath,
@@ -438,8 +437,6 @@ function finalizeList(
   recorder: PatchRecorder | undefined,
 ): unknown {
   const emitting = recorder !== undefined && path !== null;
-  const patchMark = emitting ? recorder!.patches.length : 0;
-  const opCount = state.ops.length;
   if (emitting) emitSeqOps(state.ops, path!, recorder);
   const edits: [number, unknown][] = [];
   // An assigned slot is described by the ops above — unless it holds a child
@@ -459,7 +456,6 @@ function finalizeList(
     const tail = state.tail.map((e, j) => resolve(e.v, slotPath(e, at + j), recorder));
     result = result._spliceItems(result.length, 0, tail);
   }
-  if (emitting && result === state.base) retractSeqPatches(recorder!, patchMark, opCount);
   state.result = result;
   return result;
 }

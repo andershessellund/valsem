@@ -281,10 +281,9 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const at = new Map<unknown, number>();
     for (const [rawK, rawV] of entries) {
       const k = intern(rawK);
-      const key = k !== k ? NaN : k; // SameValueZero: one NaN key
-      const i = at.get(key);
+      const i = at.get(k);
       if (i === undefined) {
-        at.set(key, ks.length);
+        at.set(k, ks.length);
         ks.push(k);
         vs.push(intern(rawV));
       } else {

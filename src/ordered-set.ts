@@ -270,10 +270,8 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     const seen = new Set<unknown>();
     for (const raw of values) {
       const v = intern(raw);
-      // SameValueZero, as the trie compares: NaN is one member.
-      const key = v !== v ? NaN : v;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(v)) continue; // a native Set is SameValueZero already: NaN is one member
+      seen.add(v);
       members.push(v);
     }
     if (members.length === 0) return OrderedSet.empty<T>();

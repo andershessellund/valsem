@@ -157,10 +157,9 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   [equalsSym](other: unknown): boolean {
-    // Hash consing makes deep equality a pointer comparison on roots. `#root in`
-    // and not `instanceof`: an object that merely inherits the prototype has no
-    // root to compare, and a predicate answers false, it does not throw.
-    return typeof other === 'object' && other !== null && #root in other && (other as ValueMap<K, V>).#root === this.#root;
+    // Hash consing makes equal content one root, and a root has one wrapper
+    // (root.w): deep equality is identity, as on every other collection.
+    return other === this;
   }
 
   /** The `produce` draft protocol: a {@link DraftMap} over this map. */
