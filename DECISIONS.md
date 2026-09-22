@@ -242,9 +242,13 @@ waiting for. It watches its own entries, of which it does not care:
   with it under a quarter full and left it under an eighth: incrementally,
   four entries or sixteen slots per registration, into a table sized exactly.
   The copy never dereferences, and a shard that is copying does no cleaning;
-- a lookup's predicate is the caller's code and may register into the pool:
-  a registration made inside a lookup does no probing or sweeping, and a
-  lookup holds both arrays of the table it probes;
+- a lookup's predicate is the caller's code and may register into the pool
+  (an `[equals]` that interns while comparing): a registration made inside a
+  lookup does no probing or sweeping, so nothing moves under the lookup; and
+  a lookup whose predicate registered scans again the current table, and a
+  retired one it has not scanned, so that what the predicate added — an equal
+  of the value looked up, even — is found. Such a predicate may be offered a
+  candidate twice;
 - where the host offers them, **idle time** takes the work off that path: one
   `FinalizationRegistry` *sentinel* (one cell, never dereferenced, so it does
   die) reports that a collection happened, and `requestIdleCallback` or
@@ -336,14 +340,19 @@ slots a registration — on a host with no sentinel or scheduler, keeps its
 husks (a cleared `WeakRef` and a slot of table each, never the values) until
 it resumes or is dropped. Between natural collections it holds two to four
 times what the registry did: what has died since the last collection it
-answered, and the gate bounds only the waste of a sweep, not that. An
-independent review of the first version of this design (its scripts are the
-model check in `intern-pool.fuzz.test.ts`) found three holes now closed: a
-lookup's predicate registering into the pool could shift entries under the
-lookup (a duplicate canonical, or a slot with no `WeakRef`); a population
-that survived an ignored collection could die unnoticed for good; and the
-probes after a noticed collection could lap a small or sparse shard, once
-2.8 ms in one registration. The per-node `WeakRef` (~60 ns, and most of the
+answered, and the gate bounds only the waste of a sweep, not that. Two
+independent reviews of this design found holes now closed, each with a test.
+The first (its scripts are the model check in `intern-pool.fuzz.test.ts`):
+a lookup's predicate registering into the pool could shift entries under
+the lookup (a duplicate canonical, or a slot with no `WeakRef`); a
+population that survived an ignored collection could die unnoticed for
+good; the probes after a noticed collection could lap a small or sparse
+shard, once 2.8 ms in one registration. The second: a lookup did not see
+what its own predicate registered — an `[equals]` that interns an equal
+value while comparing got two canonical instances, on this design and on
+the `Map` before it (which promoted a bucket under the lookup); a probe
+could pass two laps; idle time swept one shard before finishing the others'
+copies, and always started with the last pool created. The per-node `WeakRef` (~60 ns, and most of the
 time inside a collection) remains the dominant term in every construction
 and update, and pins what it points at to the end of the job: in a long
 synchronous job everything registered survives every scavenge, is promoted,
