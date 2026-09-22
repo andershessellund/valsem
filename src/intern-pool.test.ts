@@ -560,11 +560,12 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
     expect(_idleState().scheduled).toBe(false);
   });
 
-  it('a collection not worth a sweep is still answered by shrinking a table swept nearly empty before it', async () => {
+  it('a collection not worth a sweep is answered by shrinking a table found nearly empty twice running', async () => {
     // A mass death is swept in idle time; the tables it leaves are large and nearly empty,
     // and were full (of husks) when that sweep began, so they did not shrink. The next
-    // collection takes little: not worth a sweep, but the answer to it is to shrink them —
-    // in idle time for the shards it reaches, on registration for the rest.
+    // collection takes little: not worth a sweep, and not yet a shrink either — a table
+    // emptied by one collection may be needed again at once. The one after that shrinks
+    // them: in idle time for the shards it reaches, on registration for the rest.
     const callbacks: Array<(d: { timeRemaining(): number }) => void> = [];
     g.requestIdleCallback = (cb: (d: { timeRemaining(): number }) => void) => {
       callbacks.push(cb);
@@ -585,9 +586,18 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
       for (let i = 0; i < 300; i++) pool.register({ v: 1e6 + i }, Math.imul(i + 1, 0x27d4eb2f) >>> 0);
     })();
     expect(await collectUntil(() => callbacks.length > 0, 40)).toBe(true);
+    while (callbacks.length > 0) callbacks.shift()!({ timeRemaining: () => 50 });
+    const once = _poolStats(pool);
+    expect(once.epoch).toBe(swept.epoch + 1);
+    expect(once).toMatchObject({ sweeping: 0, migrating: 0, capacity: swept.capacity }); // noticed; neither swept nor shrunk
+
+    (function aLittleMoreGarbage() {
+      for (let i = 0; i < 300; i++) pool.register({ v: 2e6 + i }, Math.imul(i + 1, 0x27d4eb2f) >>> 0);
+    })();
+    expect(await collectUntil(() => callbacks.length > 0, 40)).toBe(true);
     callbacks.shift()!({ timeRemaining: () => 0 }); // the minimum slice: a lap of one shard notices, a few shards answer
     const noticed = _poolStats(pool);
-    expect(noticed.epoch).toBe(swept.epoch + 1);
+    expect(noticed.epoch).toBe(swept.epoch + 2);
     expect(noticed.migrating).toBeGreaterThan(0); // answered by shrinking…
     expect(noticed.sweeping).toBe(0); // …not by sweeping
     for (let i = 0; i < 20_000; i++) held.push(pool.register({ v: -i - 1000 }, Math.imul(i + 1, 0x165667b1) >>> 0)); // the rest answer on registration

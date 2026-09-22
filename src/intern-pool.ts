@@ -203,7 +203,7 @@ class Shard {
   /** Where the probes and the sweep stand, and the slots a sweep has yet to pass; zero when none is due. */
   at = 0;
   sweepLeft = 0;
-  /** Was the table under a quarter full, its dead included, when this sweep began? */
+  /** Was the table under a quarter full, its dead included, when this shard last answered a collection? */
   sparse = false;
   /** The epoch of the last collection this shard has answered, by a sweep or by deciding against one. */
   answered = 1;
@@ -291,14 +291,21 @@ function beginSweep(s: Shard): void {
 
 /**
  * A shard answers a noticed collection once. With a sweep, if the window says
- * the dead are worth one; else, if the table is nearly empty, dead included,
- * by shrinking it; else not at all — what dies later is found by the probes.
+ * the dead are worth one; else, if the table has been nearly empty, dead
+ * included, since the collection before as well, by shrinking it (a table
+ * emptied by one collection is the size the work before it needed, and the
+ * work after it may need again); else not at all — what dies later is found
+ * by the probes.
  */
 function answer(s: Shard, census: Census): void {
   if (s.answered === census.epoch) return;
   s.answered = census.epoch;
+  const wasSparse = s.sparse;
   if (worthASweep(census)) beginSweep(s);
-  else if (s.used < s.words.length * SHRINK_BELOW) beginCopy(s);
+  else {
+    s.sparse = s.used < s.words.length * SHRINK_BELOW * 2;
+    if (wasSparse && s.used < s.words.length * SHRINK_BELOW) beginCopy(s);
+  }
 }
 
 /** One registration's worth of sweeping the current table in place. */

@@ -232,8 +232,8 @@ waiting for. It watches its own entries, of which it does not care:
   collection left;
 - the dead fraction of the checks since is the **gate** (a window of fewer
   than 16 reads as 16). A noticed collection is ignored unless two thirds of
-  what was checked was dead — but a table then under an eighth full is
-  shrunk; otherwise each shard is **swept in place**, once, a few slots per
+  what was checked was dead — but a table found under an eighth full at
+  two answers running is shrunk; otherwise each shard is **swept in place**, once, a few slots per
   registration into it: entries of the current epoch are passed untouched,
   the living restamped, the dead removed by backward shift. What dies later
   carries an older stamp and proves nothing; a probe that finds such an
@@ -326,8 +326,9 @@ place:* a JS array cannot grow without reallocating, and a resizable buffer
 or a holey array costs 9–19 % on every miss. *Asking for idle time from a
 registration* that leaves work undone: on a host whose idle is the next turn
 it put a slice after every small operation (×2.7 on one). *Shrinking after
-every sweep:* the next burst regrew the table inside its own operations
-(×1.9–2.7 on a short one). *Moving an entry when a lookup hits it, batching
+every sweep*, and later *shrinking at the first collection not worth a
+sweep:* the next burst regrew the table inside its own operations (×1.9–2.7
+on a short one, then ×1.7 on the same). *Moving an entry when a lookup hits it, batching
 the work per 16 or 100 registrations:* no measurable difference.
 **Cost.** Cleanup rides on registration unless idle time takes it: a pool
 that stops registering — or registers slowly: a collapse is swept at sixteen
