@@ -41,6 +41,8 @@ export interface MapState<K = unknown, V = unknown> extends DraftState<ValueMap<
   /** Canonical key → true (set) | false (deleted); absent = child-drafted only. */
   assigned: Map<unknown, boolean>;
   cleared: boolean;
+  /** Entries as the recipe sees them, kept as `set`, `delete` and `clear` go: `size` must not walk `assigned` (it was quadratic in a loop that read it). */
+  size: number;
   draft: DraftMap<K, V>;
 }
 
@@ -61,14 +63,7 @@ export class DraftMap<K, V> {
   }
 
   get size(): number {
-    const s = this.#state;
-    let n = s.cleared ? 0 : s.base.size;
-    for (const [k, assigned] of s.assigned) {
-      const inBase = !s.cleared && s.base.has(k);
-      if (assigned && !inBase) n++;
-      else if (!assigned && inBase) n--;
-    }
-    return n;
+    return this.#state.size;
   }
 
   has(key: K): boolean {
@@ -111,12 +106,14 @@ export class DraftMap<K, V> {
   set(key: K, value: V): this {
     const s = this.#state;
     const k = intern(key);
-    if (this.has(key as K)) {
+    const present = this.has(key as K);
+    if (present) {
       const current = s.edits.has(k) ? s.edits.get(k) : s.base.get(k);
       if (same(current, value)) return this;
     }
     assertAssignable(value, s);
     markChanged(s);
+    if (!present) s.size++;
     s.edits.set(k, value);
     s.assigned.set(k, true);
     return this;
@@ -127,6 +124,7 @@ export class DraftMap<K, V> {
     if (!this.has(key)) return false;
     const k = intern(key);
     markChanged(s);
+    s.size--;
     s.edits.delete(k);
     s.assigned.set(k, false);
     return true;
@@ -137,6 +135,7 @@ export class DraftMap<K, V> {
     if (this.size === 0) return;
     markChanged(s);
     s.cleared = true;
+    s.size = 0;
     s.edits.clear();
     s.assigned.clear();
   }
@@ -226,6 +225,7 @@ export function createMapDraft<K, V>(
     edits: new Map(),
     assigned: new Map(),
     cleared: false,
+    size: base.size,
     draft: null as unknown as DraftMap<unknown, unknown>,
     finalize: finalizeMap,
     snapshot: snapshotMap,

@@ -574,10 +574,7 @@ export function finalizeState(
     // mark describes no change. (Inverses are unshifted, so the entries added
     // since the mark are exactly the first ones.) A kind's own bookkeeping
     // can miss cases — a map cleared and refilled to equal content did.
-    if (emitting && result === state.base) {
-      recorder.patches.length = patchMark;
-      recorder.inverse.splice(0, recorder.inverse.length - inverseMark);
-    }
+    if (emitting && result === state.base) retractSeqPatches(recorder, patchMark, recorder.inverse.length - inverseMark);
     return result;
   } finally {
     inProgress.delete(state);
@@ -624,12 +621,12 @@ export function emitSeqOps(ops: SeqOp[], path: PatchPath, recorder: PatchRecorde
 
 /**
  * Retract a sequence node's own op patches after finalize concluded the
- * successor IS the base. Op patches must be emitted BEFORE children resolve
- * (children patch against post-splice indices), so a netted-out sequence
- * leaves its ops in the recorder; on the `=== base` outcome no child can
- * have emitted (a changed child forces a different result), so the marked
- * regions hold exactly this node's entries: `patchMark..` in `patches`,
- * the first `inverseCount` in `inverse` (one unshift per op).
+ * successor IS the base: `patchMark..` in `patches`, the first
+ * `inverseCount` in `inverse` (one unshift per op).
+ *
+ * @deprecated A kind's `finalize` need not do this: {@link finalizeState}
+ * retracts everything a container and its children wrote whenever the
+ * result is the base, for every kind. Kept for kinds written before it did.
  */
 export function retractSeqPatches(
   recorder: PatchRecorder,

@@ -58,7 +58,6 @@ import {
   resolve,
   finalizeState,
   emitSeqOps,
-  retractSeqPatches,
   seqTailProfile,
   snapshotOf,
   isImmutable,
@@ -1001,8 +1000,6 @@ function finalizeArray(
   const emitting = recorder !== undefined && path !== null;
   const opsMode = state.ops !== null;
 
-  const patchMark = emitting ? recorder!.patches.length : 0;
-  const opCount = opsMode ? state.ops!.length : 0;
   if (emitting && opsMode) emitSeqOps(state.ops!, path!, recorder);
 
   const base = state.base;
@@ -1057,7 +1054,6 @@ function finalizeArray(
 
     if (keys.length === 0 && app.length === 0 && L2 === L) {
       // Everything netted out: the successor IS the (canonical) base.
-      if (emitting) retractSeqPatches(recorder!, patchMark, opCount);
       state.result = base;
       return base;
     }
@@ -1065,7 +1061,6 @@ function finalizeArray(
     const h = _arrayHashOf(L2, acc);
     const hit = lookupTransition(base, h, L2, keys, vals, app);
     if (hit !== undefined) {
-      if (emitting && hit === base) retractSeqPatches(recorder!, patchMark, opCount);
       state.result = hit;
       return hit;
     }
@@ -1078,7 +1073,6 @@ function finalizeArray(
     state.result = _internPrehashed(out, h, acc, L2);
     // Content-equal-to-base is still possible here (e.g. pop then push of
     // the same value): the pool hands back the base itself.
-    if (emitting && state.result === base) retractSeqPatches(recorder!, patchMark, opCount);
     storeTransition(base, h, L2, keys, vals, app, state.result as object);
     return state.result;
   }
@@ -1096,9 +1090,6 @@ function finalizeArray(
     resolved[i] = resolve(copy[i], childPath, recorder);
   }
   state.result = intern(resolved);
-  if (emitting && opsMode && state.result === base) {
-    retractSeqPatches(recorder!, patchMark, opCount);
-  }
   if (emitting && !opsMode) {
     // Array.from (not .map): the base may be frozen — see copyArr.
     emitSeqDiff(

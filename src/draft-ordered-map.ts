@@ -351,16 +351,9 @@ function emitOps(state: OrderedMapState, path: PatchPath, recorder: PatchRecorde
 
 function finalizeOrderedMap(state: OrderedMapState, path: PatchPath | null, recorder: PatchRecorder | undefined): unknown {
   const emitting = recorder !== undefined && path !== null;
-  const patchMark = emitting ? recorder!.patches.length : 0;
-  const inverseMark = emitting ? recorder!.inverse.length : 0;
   // Ops first: a child-drafted entry's deeper patches must follow the structural ones they sit under.
   if (emitting) emitOps(state, path!, recorder!);
   const result = withEdits(state, false, recorder, emitting ? (k) => [...path!, k] : null);
-  if (emitting && result === state.base) {
-    // The edits netted out: retract this container's patches (a changed child would have changed the result).
-    recorder!.patches.length = patchMark;
-    recorder!.inverse.splice(0, recorder!.inverse.length - inverseMark);
-  }
   state.result = result;
   return result;
 }
