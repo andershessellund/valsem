@@ -1142,6 +1142,24 @@ recipe's own material to catch it would undo the raw-material rule.
 closed-schema records (real `get`/`set` accessors per known field, a fixed
 hidden-class shape, cached by schema content, proxy-free) with automatic
 fallback to the proxy path; invisible by rule 4 of D29. DESIGN.md §7.2.
+**Since (2026-09):** `DraftSet` is a persistent working `ValueSet` with
+every edit applied as it happens, as `DraftOrderedSet` was; it kept `added`,
+`removed` and `cleared` and replayed them onto the base at finalize. Its
+patches are the **trie diff** of base and working set (`trieDiff` in
+`hamt.ts`: the set operations' lockstep walk with a visitor instead of a
+builder, so equal subtrees — the same object, every node being consed — are
+skipped by pointer and nothing is built to be walked; `ValueSet._diff`,
+`ValueMap._diff` for maps, with changed values). Measured over a 10k-member
+base (medians of 3): 100 adds 100 → 87 µs, 100 deletes 94 → 81, 100 adds and
+1,000 `has` 175 → 146, `produceWithPatches` of 100 adds 140 → 132; toggling
+one member a hundred times 14 → 134 µs, two persistent path copies where
+the overlay paid two native `Set` operations, the one pattern that lost.
+**Rejected:** the same change with the patches from `base.difference(work)`
+and `work.difference(base)`, as an external review proposed it: each conses
+a trie only to iterate it, and `produceWithPatches` went to 190 µs. Set
+patches now come out in trie order rather than the recipe's; nothing
+documented or tested the order. `DraftMap` is the next candidate for the
+same shape (a working map plus a value overlay, patches from the diff).
 
 ### D37. Patches are semantic operations, and `applyPatches` sits on top of `produce`
 

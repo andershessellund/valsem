@@ -143,6 +143,32 @@ describe('total-collision trie (degenerate hasher)', () => {
   });
 });
 
+describe('total-collision trie — diff through collision nodes', () => {
+  it('trieDiff walks two collision nodes as one merge, and reports what difference() builds', () => {
+    const xs = ['a', 'b', 'c', 'd', 1, 2, 3, 4];
+    const A = ValueSet.from(xs);
+    const B = A.delete('b').delete(3).add('e').add(9);
+    const onlyA: unknown[] = [];
+    const onlyB: unknown[] = [];
+    ValueSet._diff(A, B, (m) => onlyA.push(m), (m) => onlyB.push(m));
+    expect(onlyA.sort()).toEqual(['b', 3].sort());
+    expect(onlyB.sort()).toEqual(['e', 9].sort());
+    expect([...A.difference(B)].sort()).toEqual(onlyA.sort());
+    const only: unknown[] = [];
+    ValueSet._diff(A, A, (m) => only.push(m), (m) => only.push(m));
+    expect(only).toEqual([]);
+    const M = ValueMap.from<unknown, unknown>(xs.map((x) => [x, String(x)]));
+    const N = M.set('a', 'changed').delete(2).set(7, '7');
+    const changed: unknown[] = [];
+    const gone: unknown[] = [];
+    const added: unknown[] = [];
+    ValueMap._diff(M, N, (k) => gone.push(k), (k) => added.push(k), (k, before, after) => changed.push([k, before, after]));
+    expect(gone).toEqual([2]);
+    expect(added).toEqual([7]);
+    expect(changed).toEqual([['a', 'a', 'changed']]);
+  });
+});
+
 describe('total-collision trie — node-level set algebra through collision nodes', () => {
   // Member kind keyed on the VALUE, so `members(20)` and `members(20, 10)` overlap on 10..19.
   const members = (n: number, from = 0): (string | number | object)[] =>

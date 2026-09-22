@@ -773,6 +773,137 @@ export function trieForEach(
   for (let i = dataEnd; i < slots.length; i++) trieForEach(cfg, slots[i] as HNode, fn);
 }
 
+// ---------------------------------------------------------------------------
+// Diff: what one trie has that another does not, without building anything.
+//
+// The set operations below walk two tries in lockstep and cons the result;
+// this is the same walk with a visitor, for callers that only want to SEE
+// the difference — a draft's netted patches, a "what changed" between two
+// versions. Equal subtrees are the same object (every node is consed), so
+// they are skipped by pointer without being visited: after an edit of k
+// entries in a trie of n, the walk touches about k·log₃₂ n nodes and
+// allocates nothing.
+// ---------------------------------------------------------------------------
+
+/** An entry's slots begin at `i` in `slots`: the key, then the payload. */
+export type EntryVisitor = (slots: readonly unknown[], i: number) => void;
+/** An entry under one key in both tries, with payloads that differ in some slot. */
+export type ChangeVisitor = (aSlots: readonly unknown[], ai: number, bSlots: readonly unknown[], bi: number) => void;
+
+/**
+ * Visit the entries only in `a` (`onlyA`), only in `b` (`onlyB`), and — when
+ * `changed` is given and the stride is more than a key — under one key in
+ * both with a payload slot that differs (`changed`). Order is the tries'.
+ */
+export function trieDiff(cfg: TrieConfig, a: HNode, b: HNode, onlyA: EntryVisitor, onlyB: EntryVisitor, changed: ChangeVisitor | null = null): void {
+  if (a !== b) diffNodes(cfg, a, b, 0, onlyA, onlyB, changed);
+}
+
+/** Every entry of a subtree, to one visitor. */
+function emitAll(cfg: TrieConfig, node: HNode, fn: EntryVisitor): void {
+  trieForEach(cfg, node, fn);
+}
+
+/** Same key in both: a change if any payload slot differs. */
+function diffPayload(cfg: TrieConfig, aSlots: readonly unknown[], ai: number, bSlots: readonly unknown[], bi: number, changed: ChangeVisitor | null): void {
+  if (changed === null) return;
+  for (let k = 1; k < cfg.stride; k++) {
+    if (!same(aSlots[ai + k], bSlots[bi + k])) {
+      changed(aSlots, ai, bSlots, bi);
+      return;
+    }
+  }
+}
+
+/**
+ * One entry against a subtree at the same position: every entry of the
+ * subtree is `onlyNode` but the one under the entry's key, if any; the
+ * entry is `onlyEntry` unless it was found. `entryIsA` says which side is which.
+ */
+function diffEntryNode(
+  cfg: TrieConfig,
+  eSlots: readonly unknown[],
+  ei: number,
+  node: HNode,
+  entryIsA: boolean,
+  onlyA: EntryVisitor,
+  onlyB: EntryVisitor,
+  changed: ChangeVisitor | null,
+): void {
+  const key = eSlots[ei];
+  let found = false;
+  trieForEach(cfg, node, (slots, i) => {
+    if (!found && same(slots[i], key)) {
+      found = true;
+      if (entryIsA) diffPayload(cfg, eSlots, ei, slots, i, changed);
+      else diffPayload(cfg, slots, i, eSlots, ei, changed);
+    } else (entryIsA ? onlyB : onlyA)(slots, i);
+  });
+  if (!found) (entryIsA ? onlyA : onlyB)(eSlots, ei);
+}
+
+function diffNodes(cfg: TrieConfig, a: HNode, b: HNode, shift: number, onlyA: EntryVisitor, onlyB: EntryVisitor, changed: ChangeVisitor | null): void {
+  const stride = cfg.stride;
+  if (a.t === 1 || b.t === 1) {
+    // Collision nodes sit only where the hash is exhausted, so at this
+    // position both are collision nodes: two sorted lists, one merge.
+    const A = (a as CNode).slots;
+    const B = (b as CNode).slots;
+    let i = 0;
+    let j = 0;
+    while (i < A.length || j < B.length) {
+      const c = i >= A.length ? 1 : j >= B.length ? -1 : memberCompare(A[i], B[j]);
+      if (c === 0) {
+        diffPayload(cfg, A, i, B, j, changed);
+        i += stride;
+        j += stride;
+      } else if (c < 0) {
+        onlyA(A, i);
+        i += stride;
+      } else {
+        onlyB(B, j);
+        j += stride;
+      }
+    }
+    return;
+  }
+  const ab = a as BNode;
+  const bb = b as BNode;
+  const aDataEnd = popcount(ab.dmap) * stride;
+  const bDataEnd = popcount(bb.dmap) * stride;
+  for (let rest = ab.dmap | ab.nmap | bb.dmap | bb.nmap; rest !== 0; ) {
+    const bit = rest & -rest;
+    rest ^= bit;
+    const aEntry = (ab.dmap & bit) !== 0;
+    const bEntry = (bb.dmap & bit) !== 0;
+    const ai = aEntry ? popcount(ab.dmap & (bit - 1)) * stride : aDataEnd + popcount(ab.nmap & (bit - 1));
+    const bi = bEntry ? popcount(bb.dmap & (bit - 1)) * stride : bDataEnd + popcount(bb.nmap & (bit - 1));
+    const aHas = (ab.dmap | ab.nmap) & bit;
+    const bHas = (bb.dmap | bb.nmap) & bit;
+    if (!bHas) {
+      if (aEntry) onlyA(ab.slots, ai);
+      else emitAll(cfg, ab.slots[ai] as HNode, onlyA);
+    } else if (!aHas) {
+      if (bEntry) onlyB(bb.slots, bi);
+      else emitAll(cfg, bb.slots[bi] as HNode, onlyB);
+    } else if (aEntry && bEntry) {
+      if (same(ab.slots[ai], bb.slots[bi])) diffPayload(cfg, ab.slots, ai, bb.slots, bi, changed);
+      else {
+        onlyA(ab.slots, ai);
+        onlyB(bb.slots, bi);
+      }
+    } else if (aEntry) {
+      diffEntryNode(cfg, ab.slots, ai, bb.slots[bi] as HNode, true, onlyA, onlyB, changed);
+    } else if (bEntry) {
+      diffEntryNode(cfg, bb.slots, bi, ab.slots[ai] as HNode, false, onlyA, onlyB, changed);
+    } else {
+      const an = ab.slots[ai] as HNode;
+      const bn = bb.slots[bi] as HNode;
+      if (an !== bn) diffNodes(cfg, an, bn, shift + 5, onlyA, onlyB, changed);
+    }
+  }
+}
+
 /** @internal Node-pool sizes — exposed for sharing/canonicality tests. */
 export function _trieStats(cfg: TrieConfig): { bnodes: number; cnodes: number } {
   return { bnodes: cfg.bpool.size(), cnodes: cfg.cpool.size() };

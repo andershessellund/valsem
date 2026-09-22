@@ -730,8 +730,12 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   the reads are `Array.prototype`'s own.
 - **`DraftMap`**: an overlay of edits (canonical key → draft or raw value)
   and an `assigned` map over the base; finalize sets the resolved edits
-  into the base map. **`DraftSet`**: `added`, `removed`, `cleared`;
-  members have no location, so `add`/`delete`/`clear` only.
+  into the base map. **`DraftSet`**: a persistent working `ValueSet` with
+  every edit applied as it happens (`add`/`delete`/`clear` only: members
+  have no location); finalize's patches are the trie diff of base and
+  working set — shared subtrees skipped by pointer, nothing built — so a
+  member removed and re-added is no change, and patches come in trie
+  order.
 - **`DraftList`**: never materialises. A persistent working `ValueList`
   tracks positions (every structural op applied at O(log n) as it happens,
   with placeholders where new elements went) and an overlay from current
@@ -946,7 +950,7 @@ a binding calls `intern` and learns the answer per instance (D41).
 | `deep-hash.ts` | the hash cache and canonical meta, accumulators, symbol hashes, `deepHash` |
 | `intern-pool.ts` | `InternPool`, slots, the registry and idle drain, `createInternPool` |
 | `intern.ts` | `intern`, `isCanonical`, `fastEqual`, `internHash`, `_internPrehashed` |
-| `hamt.ts` | the consed CHAMP trie at strides 1–3, node-level set algebra |
+| `hamt.ts` | the consed CHAMP trie at strides 1–3, node-level set algebra, and the diff of two tries |
 | `value-map.ts`, `value-set.ts` | wrappers over the trie |
 | `value-list.ts` | the content-chunked tree, `merge`, `diff`, anchors |
 | `ordered-core.ts`, `ordered-map.ts`, `ordered-set.ts` | the ordered collections |
