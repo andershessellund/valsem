@@ -165,7 +165,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** The `produce` draft protocol: a {@link DraftMap} over this map. */
   [toDraft](parent?: DraftState): MapState<K, V> {
-    return createMapDraft(this, parent, ValueMap.empty);
+    return createMapDraft(this, parent, ValueMap.empty, ValueMap._diff);
   }
 
   /**

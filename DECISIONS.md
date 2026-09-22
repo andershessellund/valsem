@@ -1158,8 +1158,21 @@ the overlay paid two native `Set` operations, the one pattern that lost.
 and `work.difference(base)`, as an external review proposed it: each conses
 a trie only to iterate it, and `produceWithPatches` went to 190 µs. Set
 patches now come out in trie order rather than the recipe's; nothing
-documented or tested the order. `DraftMap` is the next candidate for the
-same shape (a working map plus a value overlay, patches from the diff).
+documented or tested the order. `DraftMap` followed: a persistent working
+map for which base keys are still present (every delete applied as it
+happens) and an overlay for values and for the keys the recipe added,
+patches from `ValueMap._diff` of base and result, a child-drafted entry's
+change told deeper and skipped by the diff. Two parallel native maps and a
+`cleared` flag, which every accessor had to reconcile, went with it. A new
+key is NOT written into the working map with a placeholder as
+`DraftOrderedMap` does (it needs the position; this map has none): measured,
+the placeholder was a path copy paid twice, sets of new keys +60 %. As it
+is, over a 10k-entry base (medians of 3): 100 sets of new keys 161 → 144 µs,
+of present keys 162 → 142, 100 deletes 140 → 125, 100 sets with 1,000 `has`
+and 1,000 `get` 641 → 584, 100 nested edits and iteration of 10k entries
+level, `produceWithPatches` of 100 sets level and of 100 nested edits
+285 → 313 (the diff walks the changed paths to find they were told deeper,
+where the old code walked its own map for free). No test changed.
 
 ### D37. Patches are semantic operations, and `applyPatches` sits on top of `produce`
 

@@ -728,9 +728,15 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   their index arguments before the draft is marked or copied (`splice`,
   `fill`, `copyWithin`: an integer or ±Infinity, else a `RangeError`, D45);
   the reads are `Array.prototype`'s own.
-- **`DraftMap`**: an overlay of edits (canonical key → draft or raw value)
-  and an `assigned` map over the base; finalize sets the resolved edits
-  into the base map. **`DraftSet`**: a persistent working `ValueSet` with
+- **`DraftMap`**: a persistent working `ValueMap` — the base with every
+  delete applied as it happens — for which base keys are still present, and
+  an overlay from key to what the recipe sees there (its assignment, or a
+  child draft made on read), which also holds the keys the recipe added (no
+  placeholder in the working map: order is not part of the value, and it
+  would be a path copy paid twice); finalize sets the overlay's resolved
+  values into the working map, and the patches are the trie diff of base
+  and result, a child-drafted entry's change told deeper instead.
+  **`DraftSet`**: a persistent working `ValueSet` with
   every edit applied as it happens (`add`/`delete`/`clear` only: members
   have no location); finalize's patches are the trie diff of base and
   working set — shared subtrees skipped by pointer, nothing built — so a
