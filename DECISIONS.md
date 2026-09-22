@@ -340,7 +340,13 @@ slots a registration — on a host with no sentinel or scheduler, keeps its
 husks (a cleared `WeakRef` and a slot of table each, never the values) until
 it resumes or is dropped. Between natural collections it holds two to four
 times what the registry did: what has died since the last collection it
-answered, and the gate bounds only the waste of a sweep, not that. Two
+answered, and the gate bounds only the waste of a sweep, not that. The soak
+run (`scripts/experiments/soak.mjs`, a million live entities, 40 s at half
+capacity): heap floor stable, 817 bytes an entity against the registry's
+1,070, capacity level or 12 % up; when traffic stopped the pool held about
+two million dead beside two million live records, half of what it stored,
+which is under the gate; and the multi-second stalls in the churn workload
+are the meta `WeakMap`'s growth (D49), the same on both. Two
 independent reviews of this design found holes now closed, each with a test.
 The first (its scripts are the model check in `intern-pool.fuzz.test.ts`):
 a lookup's predicate registering into the pool could shift entries under

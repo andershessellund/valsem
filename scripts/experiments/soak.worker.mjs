@@ -12,6 +12,7 @@
 import { PerformanceObserver, constants, performance } from 'node:perf_hooks';
 import { ValueMap, produce, intern } from '../../dist/index.js';
 import { _internPoolSize, _internPoolStats } from '../../dist/intern.js';
+import { _idleState } from '../../dist/intern-pool.js';
 import { Map as IMap } from 'immutable';
 import { freeze as immerFreeze } from 'immer';
 
@@ -216,12 +217,14 @@ const task = () => new Promise((resolve) => setImmediate(resolve));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MB = (bytes) => Math.round(bytes / 2 ** 20);
 
-/** Forced collections, so that what is measured next is what stays. (valsem's pool drops its dead as registration continues: nothing to wait for.) */
+/** Forced collections, then the idle turns valsem's pool cleanup needs (its sentinel reports the collection; slices follow), so that what is measured next is what stays. */
 async function settle() {
   for (let i = 0; i < 2; i++) {
     globalThis.gc();
     for (let k = 0; k < 4; k++) await task();
   }
+  const patience = performance.now() + 5000;
+  while (contender === 'valsem' && _idleState().scheduled && performance.now() < patience) await task();
   globalThis.gc();
   return process.memoryUsage().heapUsed;
 }
