@@ -44,7 +44,10 @@ Out of scope, by documented design:
 - `deepEqual` on raw cyclic input overflowing the stack: it is uncapped on
   purpose, and the admission functions are the boundary;
 - the 32-bit hash as anything stronger than a bucket-flooding defence: it is
-  not a MAC and not collision-resistant against an attacker who learns the seed;
+  not a MAC, and not collision-resistant against an attacker who learns the
+  seed or is shown hash values (`deepHash`, `internHash`, `[hashCode]`).
+  Collisions built from hashes an application publishes are out of scope;
+  the hardening guide says to keep them in the process;
 - corruption after opting out with `skipFreezing()` or `skipChecks()`;
 - behaviour in a process whose built-in prototypes already carry **index**
   properties (`Array.prototype[1] = x`): a sparse array's hole then reads that

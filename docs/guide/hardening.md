@@ -20,7 +20,9 @@ every process, because they have no content to seed: `null`, `undefined`,
 `true`, `false`, and the empty containers. That is one value each, which
 gives an attacker nothing to multiply.
 
-For untrusted-input deployments that also worry about seed recovery via
+A `ValueMap` or `ValueSet` iterates, and serialises, in an order that follows
+the low bits of its members' hashes. For untrusted-input deployments that
+worry about the seed being recovered from output like that, or through
 timing, swap in a keyed PRF:
 
 ```ts
@@ -38,6 +40,23 @@ configureHasher(sip); // once, at startup, before any hashing
 and the collections' accumulators, so swapping mid-run would corrupt identity.
 Web Crypto (`globalThis.crypto`) is a platform requirement, present in every
 environment that meets the [feature floor](/guide/requirements).
+
+### Keep hash values in the process
+
+The seed stops an attacker who can only send input. It does not stop one who
+is also shown hashes. The combiners are public and can be run backwards: a
+record's hash gives back the sum of its entries' terms, so the hash of a
+one-field record gives that field's term, and terms add up. From the hashes
+of a few thousand one-field records of its choosing, a client can compute,
+offline, thousands of different records that all share one hash, and
+admitting those takes time quadratic in their number. In a test, 8,192
+hashes yielded 4,000 such records, and interning them took 0.66 s against
+6 ms for as many random records. A keyed PRF as the leaf hash changes
+nothing here, because the attack never computes a leaf hash.
+
+So `deepHash`, `internHash` and `[hashCode]` values stay inside the process.
+An ETag, a cache key or anything else that leaves it should be a
+cryptographic hash (SHA-256, say) of the serialised value.
 
 ## Depth-capped admission
 
