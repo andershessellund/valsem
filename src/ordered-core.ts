@@ -43,7 +43,7 @@ function reanchor(cfg: TrieConfig, root: HNode, list: ValueList<unknown>, consed
 
 /** `prev` with canonical `k` (hash `h`, not a key yet) and its payload inserted before `at`; `at === length` appends. */
 export function keyedInsert(cfg: TrieConfig, prev: Keyed, at: number, k: unknown, h: number, payload: readonly unknown[]): Keyed {
-  const { result: list, consed } = ValueList._record(() => (at === prev.list.length ? prev.list.push(k) : prev.list.insert(at, k)));
+  const { result: list, consed } = ValueList._record(() => (at === prev.list.length ? prev.list.pushed(k) : prev.list.inserted(at, k)));
   const root = trieInsert(cfg, prev.root, 0, h, [k, ...payload, _ANCHOR_TAIL])!.node;
   return { list, root: reanchor(cfg, root, list, consed, prev.list, at) };
 }
@@ -51,7 +51,7 @@ export function keyedInsert(cfg: TrieConfig, prev: Keyed, at: number, k: unknown
 /** `prev` without canonical `k` (hash `h`, a key), and the position it held. */
 export function keyedRemove(cfg: TrieConfig, prev: Keyed, k: unknown, h: number, what: string): { keyed: Keyed; index: number } {
   const index = keyedIndexOf(cfg, prev, k, what);
-  const { result: list, consed } = ValueList._record(() => prev.list.remove(index));
+  const { result: list, consed } = ValueList._record(() => prev.list.removed(index));
   const root = trieRemove(cfg, prev.root, 0, h, k)!.node as HNode;
   return { keyed: { list, root: reanchor(cfg, root, list, consed, prev.list, index) }, index };
 }

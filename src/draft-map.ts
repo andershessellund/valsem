@@ -153,7 +153,7 @@ export class DraftMap<K, V> {
     const k = intern(key);
     if (s.work.has(k)) {
       markChanged(s);
-      s.work = s.work.delete(k);
+      s.work = s.work.deleted(k);
       s.edits.delete(k);
       return true;
     }
@@ -171,6 +171,20 @@ export class DraftMap<K, V> {
     s.work = s.empty();
     s.edits = new Map();
     s.added = 0;
+  }
+
+  // The value's copying edits are what-ifs here: the `ValueMap` the edit
+  // would give, from the map as it is right now, and nothing edited (D59).
+  // `set` and `delete` are the edits.
+
+  /** The map as it is right now with `key` → `value`: a `ValueMap`, as `ValueMap.with`. To edit, `set`. */
+  with(key: K, value: V): ValueMap<K, V> {
+    return (snapshotOf(this) as ValueMap<K, V>).with(key, value);
+  }
+
+  /** The map as it is right now without a structurally equal `key`: a `ValueMap`, as `ValueMap.deleted`. To edit, `delete`. */
+  deleted(key: K): ValueMap<K, V> {
+    return (snapshotOf(this) as ValueMap<K, V>).deleted(key);
   }
 
   /**
@@ -271,7 +285,7 @@ function withEdits(state: MapState, snap: boolean, recorder: PatchRecorder | und
   let result = state.work;
   for (const [k, e] of state.edits) {
     const v = snap ? snapshotOf(e.v) : resolve(e.v, !e.assigned && childPath !== null ? childPath(k) : null, recorder);
-    result = result.set(k, v);
+    result = result.with(k, v);
   }
   return result;
 }

@@ -34,7 +34,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, insertionIndex } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
@@ -170,7 +170,7 @@ export class DraftOrderedMap<K, V> {
     markChanged(s);
     const entry: Entry = { v: value, assigned: true };
     s.edits.set(k, entry);
-    if (!existed) s.work = s.work.set(k, undefined);
+    if (!existed) s.work = s.work.with(k, undefined);
     s.ops.push({ t: 'set', key: k, entry, old, existed });
     return this;
   }
@@ -182,20 +182,18 @@ export class DraftOrderedMap<K, V> {
     markChanged(s);
     const index = s.work.indexOf(k);
     const old = this.#current(s, k);
-    s.work = s.work.delete(k);
+    s.work = s.work.deleted(k);
     s.edits.delete(k);
     s.ops.push({ t: 'delete', key: k, index, old });
     return true;
   }
 
-  /** Insert a new entry before `index`; throws if the key is present. */
+  /** Insert a new entry before `index` (0 ≤ index ≤ size); throws if the key is present — a key has one position; delete it first to move it. */
   insertAt(index: number, key: K, value: V): this {
     const s = this.#state;
     const k = intern(key);
-    if (s.work.has(k)) {
-      throw new Error('valsem: OrderedMap.insertAt: the key is already present — delete it first to move it');
-    }
-    const next = s.work.insertAt(index, k, undefined); // validates the index
+    this.#insertable(s, index, k, 'DraftOrderedMap.insertAt');
+    const next = s.work.insertedAt(index, k, undefined);
     assertAssignable(value, s);
     markChanged(s);
     const entry: Entry = { v: value, assigned: true };
@@ -205,6 +203,14 @@ export class DraftOrderedMap<K, V> {
     return this;
   }
 
+  /** The checks of an insertion, in this draft's name: a place in the map, and a key that is not present. */
+  #insertable(s: OrderedMapState, index: number, k: unknown, operation: string): void {
+    insertionIndex(index, s.work.size, operation);
+    if (s.work.has(k)) {
+      throw new Error(`valsem: ${operation}: the key is already present — a key has one position; remove it first to move it`);
+    }
+  }
+
   clear(): void {
     const s = this.#state;
     if (s.work.size === 0) return;
@@ -212,6 +218,28 @@ export class DraftOrderedMap<K, V> {
     s.ops.push({ t: 'clear', before: s.work, edits: s.edits });
     s.work = s.empty();
     s.edits = new Map();
+  }
+
+  // The value's copying edits are what-ifs here: the `OrderedMap` the edit
+  // would give, from the map as it is right now, and nothing edited (D59).
+  // `set`, `delete` and `insertAt` are the edits.
+
+  /** The map as it is right now with `key` → `value` (a present key keeps its position): an `OrderedMap`, as `OrderedMap.with`. To edit, `set`. */
+  with(key: K, value: V): OrderedMap<K, V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).with(key, value);
+  }
+
+  /** The map as it is right now without a structurally equal `key`: an `OrderedMap`, as `OrderedMap.deleted`. To edit, `delete`. */
+  deleted(key: K): OrderedMap<K, V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).deleted(key);
+  }
+
+  /** The map as it is right now with a new entry before `index`: an `OrderedMap`, as `OrderedMap.insertedAt`, with `insertAt`'s checks. To edit, `insertAt`. */
+  insertedAt(index: number, key: K, value: V): OrderedMap<K, V> {
+    const s = this.#state;
+    const k = intern(key);
+    this.#insertable(s, index, k, 'DraftOrderedMap.insertedAt');
+    return (snapshotOf(this) as OrderedMap<K, V>).insertedAt(index, k as K, value);
   }
 
   /**
@@ -307,7 +335,7 @@ function withEdits(state: OrderedMapState, snap: boolean, recorder: PatchRecorde
   let result = state.work;
   for (const [k, e] of state.edits) {
     const v = snap ? snapshotOf(e.v) : resolve(e.v, !e.assigned && childPath !== null ? childPath(k) : null, recorder);
-    result = result.set(k, v);
+    result = result.with(k, v);
   }
   return result;
 }

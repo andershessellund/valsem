@@ -65,7 +65,7 @@ export interface CollectionEntry extends ValueTypeEntry {
   /** Everything stored, read back out (a map's keys, then its values). */
   readonly contents: (c: object) => unknown[];
   readonly has: (c: object, item: unknown) => boolean;
-  /** `c` with `item` added by the persistent operation (set, add, push). */
+  /** `c` with `item` added by the persistent operation (with, added, pushed). */
   readonly add: (c: object, item: unknown) => object;
   /** The same edit on the collection's draft, inside a recipe. */
   readonly draftAdd: (draft: object, item: unknown) => void;
@@ -96,10 +96,10 @@ const mapEntry = (
   sample: () => type.from([['k', 1]]),
   empty: () => type.empty(),
   of: (...items) => type.from(pairs(items)),
-  chained: (...items) => items.reduce<AnyMap>((m, x) => m.set(x, x), type.empty<unknown, unknown>()),
+  chained: (...items) => items.reduce<AnyMap>((m, x) => m.with(x, x), type.empty<unknown, unknown>()),
   contents: (c) => [...(c as AnyMap).keys(), ...(c as AnyMap).values()],
   has: (c, item) => (c as AnyMap).has(item),
-  add: (c, item) => (c as AnyMap).set(item, item),
+  add: (c, item) => (c as AnyMap).with(item, item),
   draftAdd: (d, item) => void (d as AnyDraftMap).set(item, item),
   iterators: (c) => {
     const m = c as AnyMap;
@@ -123,10 +123,10 @@ const setEntry = (
   sample: () => type.from([1]),
   empty: () => type.empty(),
   of: (...items) => type.from(items),
-  chained: (...items) => items.reduce<AnySet>((s, x) => s.add(x), type.empty<unknown>()),
+  chained: (...items) => items.reduce<AnySet>((s, x) => s.added(x), type.empty<unknown>()),
   contents: (c) => [...(c as AnySet)],
   has: (c, item) => (c as AnySet).has(item),
-  add: (c, item) => (c as AnySet).add(item),
+  add: (c, item) => (c as AnySet).added(item),
   draftAdd: (d, item) => void (d as AnyDraftSet).add(item),
   iterators: (c) => {
     const s = c as AnySet;
@@ -145,11 +145,11 @@ const listEntry: CollectionEntry = {
   sample: () => ValueList.of(1, 2),
   empty: () => ValueList.empty(),
   of: (...items) => ValueList.from(items),
-  chained: (...items) => items.reduce<ValueList<unknown>>((l, x) => l.push(x), ValueList.empty<unknown>()),
+  chained: (...items) => items.reduce<ValueList<unknown>>((l, x) => l.pushed(x), ValueList.empty<unknown>()),
   contents: (c) => [...(c as ValueList<unknown>)],
   // A list has no membership probe of its own; this is "some element is the canonical `item`".
   has: (c, item) => (c as ValueList<unknown>).toArray().includes(intern(item)),
-  add: (c, item) => (c as ValueList<unknown>).push(item),
+  add: (c, item) => (c as ValueList<unknown>).pushed(item),
   draftAdd: (d, item) => void (d as DraftList<unknown>).push(item),
   iterators: (c) => {
     return [['[Symbol.iterator]()', (c as ValueList<unknown>)[Symbol.iterator]()]];

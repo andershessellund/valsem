@@ -169,11 +169,12 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   /**
-   * Set `key` → `value` (both interned on entry). Returns the canonical
-   * ValueMap with the entry applied. If a structurally equal entry is
-   * already present, returns `this`.
+   * The map with `key` → `value` (both interned on entry): a present key's
+   * value replaced, an absent key added, as `Map.prototype.set` would, named
+   * for its result (D59). `this` if the entry is already present with a
+   * structurally equal value.
    */
-  set(key: K, value: V): ValueMap<K, V> {
+  with(key: K, value: V): ValueMap<K, V> {
     key = intern(key);
     value = intern(value);
     const r = trieInsert(CFG, this.#root, 0, internHash(key), [key, value]);
@@ -181,8 +182,8 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     return ValueMap.#for<K, V>(r.node);
   }
 
-  /** Remove a structurally equal `key`. Returns `this` if not present. */
-  delete(key: K): ValueMap<K, V> {
+  /** The map without a structurally equal `key`; `this` if none is present. */
+  deleted(key: K): ValueMap<K, V> {
     key = intern(key);
     const r = trieRemove(CFG, this.#root, 0, internHash(key), key);
     if (r === null) return this;
@@ -218,7 +219,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
    *
    * The input is a *record*, so record semantics apply to it: a key mapped to
    * `undefined` is an absent key and is not carried into the map. To store
-   * `undefined` deliberately, use {@link set} or {@link from} — inside a
+   * `undefined` deliberately, use {@link with} or {@link from} — inside a
    * ValueMap it is a legitimate value, distinct from absence.
    */
   static fromObject<V>(obj: Record<string, V>): ValueMap<string, V> {

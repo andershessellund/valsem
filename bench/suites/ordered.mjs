@@ -41,7 +41,7 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
       let chain = OrderedMap.empty();
       let ichain = IOMap();
       for (const [k, v] of entries) {
-        chain = chain.set(k, v);
+        chain = chain.with(k, v);
         ichain = ichain.set(k, v);
       }
       // Structural rows allocate re-chunked leaves per iteration, and V8 keeps every
@@ -51,11 +51,11 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
       const t = `OrderedMap ${N}`;
       await cmp(`${t}: build from entries`, () => OrderedMap.from(entries).size, () => IOMap(entries).size, perWalk, assertEq);
       await cmp(`${t}: get`, (i) => vm.get(keys[i % N]), (i) => im.get(keys[i % N]), perOp, assertEq);
-      await cmp(`${t}: set existing key → novel value`, (i) => vm.set(keys[i % N], -i).size, (i) => im.set(keys[i % N], -i).size, perEdit, assertEq);
-      await cmp(`${t}: append a new key`, (i) => vm.set('new' + i, i).size, (i) => im.set('new' + i, i).size, perEdit, assertEq);
-      await cmp(`${t}: delete a middle key`, (i) => vm.delete(keys[(mid + i) % N]).size, (i) => im.delete(keys[(mid + i) % N]).size, perEdit, assertEq);
+      await cmp(`${t}: set existing key → novel value`, (i) => vm.with(keys[i % N], -i).size, (i) => im.set(keys[i % N], -i).size, perEdit, assertEq);
+      await cmp(`${t}: append a new key`, (i) => vm.with('new' + i, i).size, (i) => im.set('new' + i, i).size, perEdit, assertEq);
+      await cmp(`${t}: delete a middle key`, (i) => vm.deleted(keys[(mid + i) % N]).size, (i) => im.delete(keys[(mid + i) % N]).size, perEdit, assertEq);
       await cmp(`${t}: indexOf a middle key`, (i) => vm.indexOf(keys[(mid + i) % N]), (i) => im.keySeq().indexOf(keys[(mid + i) % N]), perOp, assertEq);
-      await cmp(`${t}: insert at n/2`, (i) => vm.insertAt(mid, 'new' + i, i).size, null, perEdit);
+      await cmp(`${t}: insert at n/2`, (i) => vm.insertedAt(mid, 'new' + i, i).size, null, perEdit);
       await cmp(`${t}: iterate entries`, () => { let s = 0; for (const [, v] of vm) s += v; return s; }, () => { let s = 0; for (const [, v] of im) s += v; return s; }, perWalk, assertEq);
       await cmp(`${t}: equals = (from vs set chain)`, () => deepEqual(vm, chain), () => iIs(im, ichain), perWalk * 4, (a, b) => { assertEq(a, true); assertEq(b, true); });
       for (const k of N === 100 ? [10] : [10, 100]) {
@@ -79,8 +79,8 @@ intern-on-entry is a no-op and the structures are what is timed; every row asser
       const t = `OrderedSet ${N}`;
       await cmp(`${t}: build from members`, () => OrderedSet.from(members).size, () => IOSet(members).size, perWalk, assertEq);
       await cmp(`${t}: has`, (i) => vs.has(members[i % N]), (i) => is.has(members[i % N]), perOp, assertEq);
-      await cmp(`${t}: add a new member`, (i) => vs.add('new' + i).size, (i) => is.add('new' + i).size, perEdit, assertEq);
-      await cmp(`${t}: delete a middle member`, (i) => vs.delete(members[(mid + i) % N]).size, (i) => is.delete(members[(mid + i) % N]).size, perEdit, assertEq);
+      await cmp(`${t}: add a new member`, (i) => vs.added('new' + i).size, (i) => is.add('new' + i).size, perEdit, assertEq);
+      await cmp(`${t}: delete a middle member`, (i) => vs.deleted(members[(mid + i) % N]).size, (i) => is.delete(members[(mid + i) % N]).size, perEdit, assertEq);
       await cmp(`${t}: indexOf a middle member`, (i) => vs.indexOf(members[(mid + i) % N]), (i) => is.toIndexedSeq().indexOf(members[(mid + i) % N]), perOp, assertEq);
       await cmp(`${t}: iterate members`, () => { let n = 0; for (const m of vs) n += m.length; return n; }, () => { let n = 0; for (const m of is) n += m.length; return n; }, perWalk, assertEq);
     }

@@ -25,7 +25,12 @@ array methods); `ValueMap`/`ValueSet`/`ValueList` slots hand out
 API: a draft has every method of its value. What edits, edits the draft in
 place; what does not (`slice`, `concat`, the set algebra) answers about the
 value the draft would be right now, as `current(draft)` would, and returns a
-value, not a draft (`toArray` included). Iterating a `DraftList`, a `DraftMap`
+value, not a draft (`toArray` included). The value's own copying edits —
+`with`, `pushed`, `added`, `deleted`, … — are among what does not edit: on a
+draft they are what-ifs, the value the edit would give. In a recipe, prefer
+the verbs: `d.todos.push(x)` records one `list.splice` patch, where
+`d.todos = castDraft(d.todos.pushed(x))` records a whole-slot replacement.
+Iterating a `DraftList`, a `DraftMap`
 or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
 out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
 the same as on a plain array; keys, and the members of a set, come as the
@@ -191,7 +196,7 @@ produce(state, (d) => {
 ```
 
 It takes a value, returns a value, and edits nothing, so the caller has to
-**use the result**, exactly as with `list.push(x)` on a `ValueList`; calling
+**use the result**, exactly as with `list.pushed(x)` on a `ValueList`; calling
 `bump(d.counter)` and dropping what it returns changes nothing. That also
 means a what-if can be asked twice (`bump(d.counter)` is the same value both
 times), and the result outlives the recipe. `produceWithPatches` and

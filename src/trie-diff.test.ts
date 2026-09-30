@@ -52,7 +52,7 @@ describe('trieDiff on sets', () => {
       if (int(2) === 0) {
         b = a;
         const k = int(1 + Math.min(n, 40));
-        for (let e = 0; e < k; e++) b = int(2) === 0 ? b.delete(members[int(Math.max(1, n))]) : b.add(int(2) === 0 ? `new${e}` : intern({ o: -e }));
+        for (let e = 0; e < k; e++) b = int(2) === 0 ? b.deleted(members[int(Math.max(1, n))]) : b.added(int(2) === 0 ? `new${e}` : intern({ o: -e }));
       } else {
         const from = int(1 + n);
         b = ValueSet.from((Array.from({ length: int(1 + n) }, (_, i) => `s${i + from}`) as unknown[]).concat(members.slice(from)));
@@ -92,14 +92,14 @@ describe('trieDiff on maps', () => {
         const which = int(3);
         if (which === 0 && n > 0) {
           const key = entries[int(n)]![0];
-          b = b.delete(key);
+          b = b.deleted(key);
           model.delete(intern(key));
         } else if (which === 1 && n > 0) {
           const key = entries[int(n)]![0];
-          b = b.set(key, { v: -e });
+          b = b.with(key, { v: -e });
           model.set(intern(key), intern({ v: -e }));
         } else {
-          b = b.set(`new${e}`, e);
+          b = b.with(`new${e}`, e);
           model.set(`new${e}`, e);
         }
       }

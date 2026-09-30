@@ -267,16 +267,16 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
     return createSetDraft(this, parent, ValueSet.empty, ValueSet._diff);
   }
 
-  /** Add `value` (interned on entry). Returns `this` if a structural equal is present. */
-  add(value: T): ValueSet<T> {
+  /** The set with `value` (interned on entry) as a member; `this` if a structural equal is present. The draft's `add`, named for its result (D59). */
+  added(value: T): ValueSet<T> {
     value = intern(value);
     const r = trieInsert(CFG, this.#root, 0, internHash(value), [value]);
     if (r === null) return this;
     return ValueSet.#for<T>(r.node);
   }
 
-  /** Remove a structurally equal `value`. Returns `this` if not present. */
-  delete(value: T): ValueSet<T> {
+  /** The set without a structurally equal `value`; `this` if none is present. */
+  deleted(value: T): ValueSet<T> {
     value = intern(value);
     const r = trieRemove(CFG, this.#root, 0, internHash(value), value);
     if (r === null) return this;

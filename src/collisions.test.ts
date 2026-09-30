@@ -92,17 +92,17 @@ describe('OrderedMap and OrderedSet when every key collides', () => {
       if (r < 0.45) {
         if (at >= 0) model[at] = [key, step];
         else model.push([key, step]);
-        m = m.set(key, step);
-        s = s.add(key);
+        m = m.with(key, step);
+        s = s.added(key);
       } else if (r < 0.75) {
         if (at >= 0) model.splice(at, 1);
-        m = m.delete(key);
-        s = s.delete(key);
+        m = m.deleted(key);
+        s = s.deleted(key);
       } else if (at < 0) {
         const i = Math.floor(rnd() * (model.length + 1));
         model.splice(i, 0, [key, step]);
-        m = m.insertAt(i, key, step);
-        s = s.insertAt(i, key);
+        m = m.insertedAt(i, key, step);
+        s = s.insertedAt(i, key);
       }
       if (step % 10 !== 0) continue;
       expect([...m]).toEqual(model);
@@ -134,17 +134,17 @@ describe('OrderedMap and OrderedSet when every key collides', () => {
 describe('inside one collision node: what is not there, and what is left', () => {
   it('deleting or looking up an absent key that collides with every present one changes nothing', () => {
     const m = ValueMap.from<string | number, number>([['p', 1], ['q', 2], [3, 3]]);
-    expect(m.delete('absent')).toBe(m);
-    expect(m.delete(99)).toBe(m);
+    expect(m.deleted('absent')).toBe(m);
+    expect(m.deleted(99)).toBe(m);
     expect(m.get('absent')).toBeUndefined();
     const s = ValueSet.from<string | number>(['p', 'q', 3]);
-    expect(s.delete('absent')).toBe(s);
+    expect(s.deleted('absent')).toBe(s);
     expect(s.has(99)).toBe(false);
     const om = OrderedMap.from<string | number, number>([['p', 1], ['q', 2], [3, 3]]);
-    expect(om.delete('absent')).toBe(om);
+    expect(om.deleted('absent')).toBe(om);
     expect(om.indexOf('absent')).toBe(-1);
     const os = OrderedSet.of<string | number>('p', 'q', 3);
-    expect(os.delete(99)).toBe(os);
+    expect(os.deleted(99)).toBe(os);
   });
 
   it('set algebra that leaves one member, or none, of two collision nodes', () => {
@@ -169,7 +169,7 @@ describe('inside one collision node: what is not there, and what is left', () =>
     const expected = new Map<string | number, number>(entries);
     expect([...om]).toEqual([...expected]);
     let chained = OrderedMap.empty<string | number, number>();
-    for (const [k, v] of entries) chained = chained.set(k, v);
+    for (const [k, v] of entries) chained = chained.with(k, v);
     expect(om).toBe(chained);
     expect(ValueMap.from(entries)).toBe(ValueMap.from([...expected]));
   });
@@ -285,7 +285,7 @@ describe('collision nodes whose members are of different kinds', () => {
     for (let seed = 1; seed <= 12; seed++) {
       expect(ValueSet.from(shuffled(members, seed))).toBe(canonical);
       let chained = ValueSet.empty<unknown>();
-      for (const v of shuffled(members, seed + 100)) chained = chained.add(v);
+      for (const v of shuffled(members, seed + 100)) chained = chained.added(v);
       expect(chained).toBe(canonical);
       expect([...chained]).toEqual([...canonical]);
     }
@@ -294,7 +294,7 @@ describe('collision nodes whose members are of different kinds', () => {
     let shrunk = canonical;
     const gone: unknown[] = [];
     for (const v of shuffled(members, 99)) {
-      shrunk = shrunk.delete(v);
+      shrunk = shrunk.deleted(v);
       gone.push(v);
       expect(shrunk).toBe(ValueSet.from(members.filter((x) => !gone.includes(x))));
     }
@@ -323,8 +323,8 @@ describe('collision nodes whose members are of different kinds', () => {
     }
     // …and as map keys, where an update inside the node must find its entry.
     let m = ValueMap.empty<unknown, number>();
-    members.forEach((k, i) => (m = m.set(k, i)));
-    m = m.set(members[0], -1);
+    members.forEach((k, i) => (m = m.with(k, i)));
+    m = m.with(members[0], -1);
     expect(m.get(members[0])).toBe(-1);
     members.slice(1).forEach((k, i) => expect(m.get(k)).toBe(i + 1));
   };

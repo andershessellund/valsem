@@ -129,16 +129,16 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     return this.#list.at(-1);
   }
 
-  /** Append `value` (interned on entry). Returns `this` if a structural equal is present. */
-  add(value: T): OrderedSet<T> {
+  /** The set with `value` (interned on entry) appended; a present member keeps its position, and the result is `this`. */
+  added(value: T): OrderedSet<T> {
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) return this;
     return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, this.#list.length, v, h, []));
   }
 
-  /** Remove a structurally equal `value`. Returns `this` if absent. */
-  delete(value: T): OrderedSet<T> {
+  /** The set without a structurally equal `value`; `this` if absent. */
+  deleted(value: T): OrderedSet<T> {
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) === NOT_FOUND) return this;
@@ -146,17 +146,17 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   }
 
   /**
-   * Insert a new member before `index` (0 ≤ index ≤ size). Throws if a
-   * structural equal is already a member — a member has one position;
-   * delete it first to move it.
+   * The set with a new member inserted before `index` (0 ≤ index ≤ size).
+   * Throws if a structural equal is already a member — a member has one
+   * position; remove it first to move it.
    */
-  insertAt(index: number, value: T): OrderedSet<T> {
+  insertedAt(index: number, value: T): OrderedSet<T> {
     const n = this.#list.length;
-    insertionIndex(index, n, 'OrderedSet.insertAt');
+    insertionIndex(index, n, 'OrderedSet.insertedAt');
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) {
-      throw new Error('valsem: OrderedSet.insertAt: the value is already a member — delete it first to move it');
+      throw new Error('valsem: OrderedSet.insertedAt: the value is already a member — a member has one position; remove it first to move it');
     }
     return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, index, v, h, []));
   }

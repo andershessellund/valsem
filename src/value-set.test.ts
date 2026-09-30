@@ -30,33 +30,33 @@ describe('ValueSet', () => {
 
   it('add: new value', () => {
     const a = ValueSet.from([1, 2]);
-    const b = a.add(3);
+    const b = a.added(3);
     expect(b).toBe(ValueSet.from([1, 2, 3]));
   });
 
   it('add: existing value returns this', () => {
     const a = ValueSet.from([1, 2]);
-    expect(a.add(1)).toBe(a);
+    expect(a.added(1)).toBe(a);
   });
 
   it('delete: existing value', () => {
     const a = ValueSet.from([1, 2, 3]);
-    const b = a.delete(2);
+    const b = a.deleted(2);
     expect(b).toBe(ValueSet.from([1, 3]));
   });
 
   it('delete: missing value returns this', () => {
     const a = ValueSet.from([1, 2]);
-    expect(a.delete(99)).toBe(a);
+    expect(a.deleted(99)).toBe(a);
   });
 
   it('delete to empty returns canonical empty', () => {
-    expect(ValueSet.from([1]).delete(1)).toBe(ValueSet.empty<number>());
+    expect(ValueSet.from([1]).deleted(1)).toBe(ValueSet.empty<number>());
   });
 
   it('round-trip add/delete', () => {
     const a = ValueSet.from([1, 2]);
-    expect(a.add(3).delete(3)).toBe(a);
+    expect(a.added(3).deleted(3)).toBe(a);
   });
 
   it('iteration', () => {
@@ -158,7 +158,7 @@ describe('ValueSet — encapsulation & the ReadonlySet contract', () => {
     const s = ValueSet.from(xs);
     expect(s.size).toBe(1000);
     expect([...s].length).toBe(1000);
-    expect(s.delete(3).size).toBe(999);
+    expect(s.deleted(3).size).toBe(999);
     expect(s.union([1000, 1001]).size).toBe(1002);
     expect(s.intersection(ValueSet.from([5, 6, 7, 2000])).size).toBe(3);
   });

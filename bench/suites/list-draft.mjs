@@ -12,7 +12,7 @@ export default {
   description: `
 One \`produce\` per row over a 100,000-record \`ValueList\`, through its draft. The draft never materialises: structural
 ops go to a persistent working list as they happen, point edits and child drafts sit in an overlay by current index,
-pushes wait in a tail, and finalize applies the overlay with \`setMany\` (one bottom-up pass that rebuilds each touched
+pushes wait in a tail, and finalize applies the overlay with \`_setMany\` (one bottom-up pass that rebuilds each touched
 leaf and ancestor once) and the tail as one splice. The last row is the direct persistent operations for reference.
 `,
   columns: ['per produce'],
@@ -33,8 +33,8 @@ leaf and ancestor once) and the tail as one splice. The last row is the direct p
     await r('100 sets + 10 inserts + 10 removes', () => produce(vl, (d) => { for (let k = 0; k < 100; k++) d.set((k * (N / 100)) | 0, { id: -k, v: ++seq }); for (let k = 0; k < 10; k++) { d.splice((k * (N / 10)) | 0, 0, { id: -k, v: ++seq }); d.splice(((k * (N / 10)) | 0) + 5, 1); } }), 200);
     await r('splice 1,000 out of the middle', () => produce(vl, (d) => { d.splice(N >> 1, 1000); }), 500);
     await r('pop 100 then push 100', () => produce(vl, (d) => { for (let k = 0; k < 100; k++) d.pop(); for (let k = 0; k < 100; k++) d.push({ id: -k, v: ++seq }); }), 200);
-    await r('reference: direct set', (i) => vl.set(N >> 1, { id: -1, v: i }), 3000);
-    await r('reference: direct insert', (i) => vl.insert(N >> 1, { id: -1, v: i }), 3000);
+    await r('reference: direct set', (i) => vl.with(N >> 1, { id: -1, v: i }), 3000);
+    await r('reference: direct insert', (i) => vl.inserted(N >> 1, { id: -1, v: i }), 3000);
     return rows;
   },
 };

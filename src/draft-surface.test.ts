@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// A draft offers what its value offers.
+// A draft offers what its value offers, and a value has no mutator's name.
 //
 // The drafts grew method by method, and drifted: DraftList had no `insert`,
 // `remove` or `forEach` (ValueList's own vocabulary) and no `shift`/`unshift`
@@ -7,9 +7,12 @@
 // DraftOrderedMap no `valueAt()`. The first test is the one that would have
 // caught it: every method of a value class is on its draft, no exceptions.
 // What edits, edits the draft. What does not (`slice`, `concat`, the set
-// algebra, `keyList`) answers about the value the draft would be right now,
-// its snapshot, and gives back values: `get`, iteration and `find` hand out
-// drafts.
+// algebra, `keyList`, and the value's copying edits, `with`, `pushed`, …)
+// answers about the value the draft would be right now, its snapshot, and
+// gives back values: `get`, `at`, iteration and `find` hand out drafts. The
+// second test is D59's other half: no value has a name that mutates on
+// `Array`, `Map`, `Set` or its own draft, so `list.push(x)` cannot be written
+// where it would do nothing.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { castDraft, produce, produceWithPatches } from './produce.js';
@@ -31,6 +34,14 @@ describe('a draft has its value\u2019s methods', () => {
     const onDraft = new Set(members(DraftClass.prototype));
     const missing = members(Value.prototype).filter((name) => !onDraft.has(name));
     expect(missing).toEqual([]);
+  });
+});
+
+describe('a value has no mutator\u2019s name (D59)', () => {
+  // What mutates on `Array`, `Map` and `Set`, and the drafts' own verbs.
+  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'insert', 'remove', 'insertAt', 'setMany'];
+  it.each(COLLECTIONS.map((c) => [c.name, c.type] as const))('%s', (_, Value) => {
+    expect(members(Value.prototype).filter((name) => MUTATORS.includes(name))).toEqual([]);
   });
 });
 
@@ -109,17 +120,68 @@ describe('what does not edit answers about the value the draft would be right no
     expect(produce(base, (d) => void d.l.slice(1))).toBe(base); // looking is not editing
   });
 
-  it('DraftList.setMany is an edit: all or nothing, the last write winning, with patches', () => {
+  it('DraftList: the copying edits are what-ifs, as current(draft) would answer, and edit nothing', () => {
     const base = intern({ l: ValueList.of(1, 2, 3) });
-    const [next, patches, inverse] = produceWithPatches(base, (d) => {
-      expect(d.l.setMany([[0, 9], [2, 7], [0, 8]])).toBe(d.l);
+    const [next, patches] = produceWithPatches(base, (d) => {
+      d.l.push(4); // a pending edit, so the what-ifs answer about [1, 2, 3, 4]
+      const now = current(d.l);
+      expect(d.l.with(0, 9)).toBe(now.with(0, 9));
+      expect(d.l.pushed(5, 6)).toBe(now.pushed(5, 6));
+      expect(d.l.popped()).toBe(now.popped());
+      expect(d.l.shifted()).toBe(now.shifted());
+      expect(d.l.unshifted(0)).toBe(now.unshifted(0));
+      expect(d.l.inserted(1, 7)).toBe(now.inserted(1, 7));
+      expect(d.l.removed(1)).toBe(now.removed(1));
+      expect(d.l.toSpliced(1, 2, 8)).toBe(now.toSpliced(1, 2, 8));
+      expect(d.l.toSpliced(1)).toBe(now.toSpliced(1));
+      expect(current(d.l)).toBe(now); // none of it edited
     });
-    expect(next.l.toArray()).toEqual([8, 2, 7]);
-    expectPatchRoundTrip(base, next, patches, inverse);
-    const kept = produce(base, (d) => {
-      expect(() => d.l.setMany([[0, 9], [3, 0]])).toThrow('DraftList.setMany: index 3 out of range [0, 3)');
+    expect(next.l).toBe(ValueList.of(1, 2, 3, 4));
+    expect(patches.length).toBe(1); // the push, and nothing else
+  });
+
+  it('a what-if checks its position in the draft\u2019s name, before the snapshot is built', () => {
+    produce(intern({ l: ValueList.of(1, 2, 3) }), (d) => {
+      expect(() => d.l.with(3, 0)).toThrow('DraftList.with: index 3 out of range [0, 3)');
+      expect(() => d.l.removed(-1)).toThrow('DraftList.removed: index -1 out of range [0, 3)');
+      expect(() => d.l.inserted(4, 0)).toThrow('DraftList.inserted: index 4 out of range [0, 3]');
+      expect(() => d.l.toSpliced(4)).toThrow('DraftList.toSpliced: start 4 out of range [0, 3]');
+      expect(() => d.l.toSpliced(0, undefined, 9)).toThrow('DraftList.toSpliced: deleteCount must be an integer when items follow it');
+      expect(() => d.l.toSpliced(0, -1)).toThrow('DraftList.toSpliced: deleteCount must not be negative');
     });
-    expect(kept).toBe(base); // the good edit before the bad one was not applied
+  });
+
+  it('DraftSet, DraftMap and the ordered drafts: with, added, deleted and insertedAt are what-ifs too', () => {
+    produce(intern({ s: ValueSet.of(1, 2), m: ValueMap.from([['a', 1]]), os: OrderedSet.of('p', 'q'), om: OrderedMap.from([['a', 1]]) }), (d) => {
+      d.s.add(3);
+      expect(d.s.added(4)).toBe(ValueSet.of(1, 2, 3, 4));
+      expect(d.s.deleted(1)).toBe(ValueSet.of(2, 3));
+      d.m.set('b', 2);
+      expect(d.m.with('c', 3)).toBe(ValueMap.from([['a', 1], ['b', 2], ['c', 3]]));
+      expect(d.m.deleted('a')).toBe(ValueMap.from([['b', 2]]));
+      d.os.add('r');
+      expect(d.os.added('s')).toBe(OrderedSet.of('p', 'q', 'r', 's'));
+      expect(d.os.deleted('p')).toBe(OrderedSet.of('q', 'r'));
+      expect(d.os.insertedAt(0, 'o')).toBe(OrderedSet.of('o', 'p', 'q', 'r'));
+      expect(() => d.os.insertedAt(0, 'p')).toThrow('DraftOrderedSet.insertedAt: the value is already a member');
+      expect(() => d.os.insertedAt(4, 'z')).toThrow('DraftOrderedSet.insertedAt: index 4 out of range [0, 3]');
+      d.om.set('b', 2);
+      expect(d.om.with('c', 3)).toBe(OrderedMap.from([['a', 1], ['b', 2], ['c', 3]]));
+      expect(d.om.deleted('a')).toBe(OrderedMap.from([['b', 2]]));
+      expect(d.om.insertedAt(0, 'z', 0)).toBe(OrderedMap.from([['z', 0], ['a', 1], ['b', 2]]));
+      expect(() => d.om.insertedAt(0, 'a', 0)).toThrow('DraftOrderedMap.insertedAt: the key is already present');
+      expect(() => d.om.insertedAt(3, 'z', 0)).toThrow('DraftOrderedMap.insertedAt: index 3 out of range [0, 2]');
+      expect([d.s.size, d.m.size, d.os.size, d.om.size]).toEqual([3, 2, 3, 2]); // nothing edited
+    });
+  });
+
+  it('the ordered drafts\u2019 insertAt reports in the draft\u2019s name', () => {
+    produce(intern({ os: OrderedSet.of('p'), om: OrderedMap.from([['a', 1]]) }), (d) => {
+      expect(() => d.os.insertAt(0, 'p')).toThrow('DraftOrderedSet.insertAt: the value is already a member — a member has one position; remove it first to move it');
+      expect(() => d.os.insertAt(2, 'z')).toThrow('DraftOrderedSet.insertAt: index 2 out of range [0, 1]');
+      expect(() => d.om.insertAt(0, 'a', 0)).toThrow('DraftOrderedMap.insertAt: the key is already present — a key has one position; remove it first to move it');
+      expect(() => d.om.insertAt(2, 'z', 0)).toThrow('DraftOrderedMap.insertAt: index 2 out of range [0, 1]');
+    });
   });
 
   it('DraftSet: the algebra and the comparisons', () => {
@@ -246,7 +308,7 @@ describe('a map draft hands out a draft only for what can be drafted', () => {
 });
 
 describe('DraftList.splice with a start and nothing else removes to the end', () => {
-  it('as ValueList.splice and Array.prototype.splice do', () => {
+  it('as ValueList.toSpliced and Array.prototype.splice do', () => {
     const base = ValueList.of(1, 2, 3, 4);
     const [next, patches, inverse] = produceWithPatches(base, (d) => {
       expect(d.splice(1).length).toBe(3);

@@ -92,25 +92,25 @@ describe('intern on entry — the mutation hazard is closed', () => {
 
 describe('intern on entry — probes are canonicalized', () => {
   it('map get/has/delete accept any structurally equal key', () => {
-    const m = ValueMap.empty<object, string>().set({ table: 'users', id: 1 }, 'row');
+    const m = ValueMap.empty<object, string>().with({ table: 'users', id: 1 }, 'row');
     expect(m.get({ id: 1, table: 'users' })).toBe('row');
     expect(m.has({ table: 'users', id: 1 })).toBe(true);
-    expect(m.delete({ id: 1, table: 'users' })).toBe(ValueMap.empty());
+    expect(m.deleted({ id: 1, table: 'users' })).toBe(ValueMap.empty());
     expect(m.has({ table: 'users', id: 2 })).toBe(false);
   });
 
   it('set has/delete accept structural equals; add of an equal is `this`', () => {
     const s = ValueSet.from([{ tag: 'a' }]);
     expect(s.has({ tag: 'a' })).toBe(true);
-    expect(s.add({ tag: 'a' })).toBe(s);
-    expect(s.delete({ tag: 'a' })).toBe(ValueSet.empty());
+    expect(s.added({ tag: 'a' })).toBe(s);
+    expect(s.deleted({ tag: 'a' })).toBe(ValueSet.empty());
   });
 
   it('unchanged structural writes return `this`', () => {
-    const m = ValueMap.empty<string, object>().set('k', { v: 1 });
-    expect(m.set('k', { v: 1 })).toBe(m);
+    const m = ValueMap.empty<string, object>().with('k', { v: 1 });
+    expect(m.with('k', { v: 1 })).toBe(m);
     const l = ValueList.of({ v: 1 });
-    expect(l.set(0, { v: 1 })).toBe(l);
+    expect(l.with(0, { v: 1 })).toBe(l);
   });
 });
 

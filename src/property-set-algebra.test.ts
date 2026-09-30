@@ -97,8 +97,8 @@ describe('property — set algebra converges on ValueSet.from of the array answe
           const xs = [...new Set(base)];
           const A = ValueSet.from(xs);
           let B = A;
-          for (const v of removed) B = B.delete(v);
-          for (const v of added) B = B.add(v);
+          for (const v of removed) B = B.deleted(v);
+          for (const v of added) B = B.added(v);
           const ys = [...B];
           checkAll(xs, ys);
           // The differing region is tiny, so the results relate to the inputs by identity.

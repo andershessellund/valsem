@@ -799,6 +799,12 @@ undefined)`, which is `Draft<T>` exactly, because a bare conditional type
 there is opaque to TypeScript's variance check and `ValueList<number>`
 stopped being a `ValueList<unknown>`. DESIGN.md §6.2, §7.2, §9.
 
+**Since (2026-09, D59):** the value-side names are `with`, `removed`,
+`inserted`, `insertedAt` and `toSpliced` (`setMany` is the internal
+`_setMany`); `set`, `remove`, `insert`, `insertAt` and `splice` are the
+drafts'. The checks are as described, and a draft's what-if
+(`d.list.with(i, v)`) runs them in the draft's name.
+
 ### D23. Ordered collections find a key's position through content-derived anchors
 
 `OrderedMap` and `OrderedSet` are insertion-ordered twins of `ValueMap` and
@@ -970,6 +976,12 @@ where the element type admits an array. Spreading a long array is bounded by
 the engine's argument limit, as it is for `Array`: `concat` a
 `ValueList.from(array)`. The drafts' own bulk edits go through an internal
 array form.
+
+**Since (2026-09, D59):** superseded in the names, kept in the shapes. The
+value's methods are `pushed(...items)` and `toSpliced(start, count,
+...items)`, and `push` and `splice` are the draft's alone, so the two no
+longer share a name; what this decision made them share, the arguments,
+they still do.
 
 ### D46. `JSON.stringify` sees the collections: arrays, and `[key, value]` pairs
 
@@ -1747,6 +1759,83 @@ argument of D56 about `get` and `at`, from the other side). **Left for
 later,** all additive: `findLast` / `findLastIndex`, `indexOf` / `includes` by
 value, `flatMap`, and `sort` / `reverse` in place on `DraftList`, where a
 recipe for now assigns: `d.todos = castDraft(d.todos.toSorted(byId))`.
+
+**Since (2026-09, D59):** reversed in part. `toSpliced` and `with` are the
+list's copying `splice` and `set` now, not aliases beside them: a value has
+no `splice` or `set`. The argument stands, that an alias is surface without
+capability; these are not aliases.
+
+### D59. A value's edits are named for their result; the imperative verbs are the drafts'
+
+On the value collections every edit is a copying one, and its name says so.
+`with(i, v)` and `with(k, v)` are the list or map with that entry,
+`Array.prototype.with`'s name for the copying `set`; the removals are
+`deleted(k)`, `deleted(v)` and `removed(i)`; the sequence edits are the past
+participle of the verb the draft uses, `pushed(...v)`, `popped()`,
+`shifted()`, `unshifted(...v)`, `inserted(i, v)`, `insertedAt(i, ...)`,
+`added(v)`; and `toSpliced(...)` joins `toSorted` and `toReversed` as
+`Array` spells its copies. The rule has two clauses: the value's method is
+the past participle of the draft's verb, except where ES2023 already named
+the copy (`with`, `toSpliced`, `toSorted`, `toReversed`); `with` is the
+participle of `set`, the one irregular verb, by the language's own choice.
+The imperative verbs, `set`, `push`, `pop`, `shift`, `unshift`, `insert`,
+`remove`, `splice`, `add`, `delete`, `insertAt` and `clear`, belong to what
+mutates: the drafts inside `produce`, and `HashMap`/`HashSet`. No value has
+one; as the prohibition the test checks, no method of a value has a name
+that mutates on `Array`, `Map`, `Set` or its own draft. A draft has every
+method of its value, so it has the copying edits too, as what-ifs:
+`d.todos.pushed(x)` is the `ValueList` the push would give, from the draft
+as it is right now, and edits nothing, its positions checked in the draft's
+name. `ValueList` gains `first()` and `last()` (`at(0)` and `at(-1)`, as the
+ordered collections have them), `shifted()` and `unshifted()`; `setMany`
+becomes the internal `_setMany`, and `DraftList.setMany` goes.
+
+**Why.** Three kinds of receiver shared the native verbs, and only one of
+them lied: `HashMap.set` and `DraftList.push` mutate the receiver, where
+`ValueList.push` returned a new list and left the receiver alone, so
+`list.push(x);` as a statement was a silent no-op, and inside a recipe a
+reader could not tell a draft from a value by what was called on it. D58
+had already made the argument, for `toSorted` over `sort`: a dropped
+`sort()` "would do nothing and say nothing", and that holds for `push`,
+`set`, `splice`, `add` and `delete` exactly as much. Named this way, the
+type system does the work: a value has no `push`, so the mistake is a
+compile error, and `list.pushed(x);` as a statement reads as wrong as it is.
+The pairing is mechanical (draft `insertAt`, value `insertedAt`), so D56's
+`At` rule carries over untouched. Participles over a preposition family
+(`without`): `without(i)` on a list would read as removal by content, which
+`without` is everywhere else (lodash, Kotlin's `minus`, this library's own
+sets and maps), so `rows.without(3)` on a list of numbers would silently
+remove the wrong thing; and a preposition has no form for `pop`, `shift` or
+`insert`. `popped()` and `shifted()` return the list, as Immutable.js's
+`pop`/`shift` and Clojure's `pop` do; the element is `last()`/`first()`,
+which is why the list gained them. The drafts keep the copying edits so that
+"a draft has every method of its value" stays one sentence and one test, and
+because their meaning was already decided: a non-editing method on a draft
+answers about the value the draft would be right now (D53); inside a recipe
+the verbs are still preferred, since `d.todos.push(x)` records one
+`list.splice` patch where an assigned `pushed` records a whole-slot
+replacement. `with` and `toSpliced` keep D45's checked positions where
+`Array`'s accept a negative start: a borrowed name brings its arguments for
+a read (D56), but a write to a place that does not exist is an upstream
+error, and every deviation is a loud `RangeError`.
+
+**Rejected:** removing the copying edits from the values altogether, immer's
+model. The strongest guarantee, but it loses the direct edits (set + push on
+a 10k list is 3 µs directly and 14 µs through a draft, BENCHMARKS.md) and
+the `acc.with(k, v)` reducer idiom. **Rejected:** `appended`/`prepended` for
+`pushed`/`unshifted`: clearer words, and they break the pairing with the
+draft's verbs. **Rejected:** `withoutLast()`/`withoutFirst()` beside
+`first()`/`last()`: `popped()`/`shifted()` complete the participle rule and
+are Immutable.js's words for the same result. **Rejected:** keeping the
+copying edits off the drafts, so that `.pushed(` would compile only on a
+value: it made D58's additive `sort()` a future breaking change, since
+`toSorted` would then be the twin of a verb the draft has, and a participle
+used as a statement reads wrong on either receiver. **Cost.** Breaking for
+every caller of a value's edits; the compiler finds each call, since the
+drafts, `HashMap` and arrays keep the old names. Supersedes D52 in the names
+and keeps it in the shapes; reverses D58's rejection of `toSpliced` and
+`with`, which are the names now, not aliases. Left for later: a lint rule
+for a discarded copying result, generic over the `[interned]` brand.
 
 ## Non-goals
 

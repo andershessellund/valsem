@@ -8,13 +8,13 @@
 // review, finding 6). The fix coerced as Array does, ToIntegerOrInfinity.
 // Second (D45): positional arguments are CHECKED, by what they name.
 //
-//   - an ELEMENT (`get`, `set`, `remove`): an
+//   - an ELEMENT (`get`, `with`, `removed`; `set`, `remove` on the draft): an
 //     integer in [0, length), or a RangeError. No element, no answer;
-//   - an INSERTION POINT (`insert`, `insertAt`, `splice`'s start): an integer
+//   - an INSERTION POINT (`inserted`, `insertedAt`, `toSpliced`'s start): an integer
 //     in [0, length], not counted from the end, or a RangeError. An edit
 //     lands in canonical state, so the place must exist, and -1 (an
 //     `indexOf` miss) must not mean "the last one";
-//   - a RANGE (`slice`'s bounds, `splice`'s count): the oracle is still the
+//   - a RANGE (`slice`'s bounds, `toSpliced`'s count): the oracle is still the
 //     plain Array, clamping and all, since a range has an answer wherever it
 //     points: the part of it that exists;
 //   - a PATCH is exact: an index or count that does not fit is a patch made
@@ -58,8 +58,8 @@ describe('indexArg accepts a position and nothing else', () => {
   );
 
   it.each([...JUNK, undefined].map((v) => [v]))('%s throws a RangeError naming the operation and the argument', (input) => {
-    expect(() => indexArg(input as number, 'ValueList.splice', 'start')).toThrow(RangeError);
-    expect(() => indexArg(input as number, 'ValueList.splice', 'start')).toThrow(/^ValueList\.splice: start must be an integer, got /);
+    expect(() => indexArg(input as number, 'ValueList.toSpliced', 'start')).toThrow(RangeError);
+    expect(() => indexArg(input as number, 'ValueList.toSpliced', 'start')).toThrow(/^ValueList\.toSpliced: start must be an integer, got /);
   });
 
   it('shows the argument without running it or throwing on it', () => {
@@ -146,40 +146,40 @@ describe('ValueList: an edit names a place that exists', () => {
   // Infinity, or nothing at all.
   const count = fc.oneof(fc.constantFrom(0, 1, 3, 1e9, Infinity), fc.integer({ min: 0, max: 400 }));
 
-  it('splice: a start in [0, length] and a count that means "up to" are Array’s splice', () => {
+  it('toSpliced: a start in [0, length] and a count that means "up to" are Array’s splice', () => {
     fc.assert(
       fc.property(size, fc.nat(), count, fc.array(fc.integer(), { maxLength: 3 }), (n, at, del, items) => {
         const start = at % (n + 1);
         const list = ValueList.from(range(n));
         const withCount = range(n);
         withCount.splice(start, del, ...items);
-        expect([...list.splice(start, del, ...items)]).toEqual(withCount);
+        expect([...list.toSpliced(start, del, ...items)]).toEqual(withCount);
         const toEnd = range(n);
         toEnd.splice(start);
-        expect([...list.splice(start)]).toEqual(toEnd);
-        expect([...list.splice(start, undefined)]).toEqual(toEnd);
+        expect([...list.toSpliced(start)]).toEqual(toEnd);
+        expect([...list.toSpliced(start, undefined)]).toEqual(toEnd);
         // The items follow the count as Array takes them, and Array reads an
         // `undefined` count before items as 0: "the rest, and insert" is Infinity.
-        expect([...list.splice(start, Infinity, ...items)]).toEqual([...toEnd, ...items]);
+        expect([...list.toSpliced(start, Infinity, ...items)]).toEqual([...toEnd, ...items]);
         if (items.length !== 0) {
-          expect(() => list.splice(start, undefined, ...items)).toThrow(/ValueList\.splice: deleteCount must be an integer when items follow it, got undefined/);
+          expect(() => list.toSpliced(start, undefined, ...items)).toThrow(/ValueList\.toSpliced: deleteCount must be an integer when items follow it, got undefined/);
         }
-        expect(list.splice(start, del, ...items)).toBe(ValueList.from(withCount)); // and it is the canonical of that content
+        expect(list.toSpliced(start, del, ...items)).toBe(ValueList.from(withCount)); // and it is the canonical of that content
       }),
       { numRuns: 600 },
     );
   });
 
-  it('splice: a start that is no place in the list throws, as does a negative count', () => {
+  it('toSpliced: a start that is no place in the list throws, as does a negative count', () => {
     fc.assert(
       fc.property(size, fc.integer({ min: 1, max: 400 }), (n, k) => {
         const list = ValueList.from(range(n));
         for (const start of [n + k, -k, Infinity, -Infinity]) {
-          expect(() => list.splice(start)).toThrow(RangeError);
-          expect(() => list.splice(start, 1)).toThrow(RangeError);
-          expect(() => list.splice(start, 0, 9)).toThrow(RangeError);
+          expect(() => list.toSpliced(start)).toThrow(RangeError);
+          expect(() => list.toSpliced(start, 1)).toThrow(RangeError);
+          expect(() => list.toSpliced(start, 0, 9)).toThrow(RangeError);
         }
-        expect(() => list.splice(0, -k)).toThrow(RangeError);
+        expect(() => list.toSpliced(0, -k)).toThrow(RangeError);
       }),
       { numRuns: 200 },
     );
@@ -187,16 +187,16 @@ describe('ValueList: an edit names a place that exists', () => {
 
   it('insert takes [0, length]; remove takes an element', () => {
     const list = ValueList.from(range(5));
-    expect([...list.insert(0, 9)]).toEqual([9, 0, 1, 2, 3, 4]);
-    expect([...list.insert(5, 9)]).toEqual([0, 1, 2, 3, 4, 9]);
-    expect([...list.remove(0)]).toEqual([1, 2, 3, 4]);
-    expect([...list.remove(4)]).toEqual([0, 1, 2, 3]);
-    for (const bad of [6, 99, -1, Infinity]) expect(() => list.insert(bad, 9)).toThrow(RangeError);
-    for (const bad of [5, 99, -1, Infinity]) expect(() => list.remove(bad)).toThrow(RangeError);
+    expect([...list.inserted(0, 9)]).toEqual([9, 0, 1, 2, 3, 4]);
+    expect([...list.inserted(5, 9)]).toEqual([0, 1, 2, 3, 4, 9]);
+    expect([...list.removed(0)]).toEqual([1, 2, 3, 4]);
+    expect([...list.removed(4)]).toEqual([0, 1, 2, 3]);
+    for (const bad of [6, 99, -1, Infinity]) expect(() => list.inserted(bad, 9)).toThrow(RangeError);
+    for (const bad of [5, 99, -1, Infinity]) expect(() => list.removed(bad)).toThrow(RangeError);
     // The bug this is for: an indexOf miss is -1, which used to count from
     // the end and delete the last element.
-    expect(() => list.remove(list.toArray().indexOf(42))).toThrow('ValueList.remove: index -1 out of range [0, 5)');
-    expect(() => list.splice(list.toArray().indexOf(42), 1)).toThrow('ValueList.splice: start -1 out of range [0, 5]');
+    expect(() => list.removed(list.toArray().indexOf(42))).toThrow('ValueList.removed: index -1 out of range [0, 5)');
+    expect(() => list.toSpliced(list.toArray().indexOf(42), 1)).toThrow('ValueList.toSpliced: start -1 out of range [0, 5]');
   });
 
   it('anything that is not an integer throws, at every edit', () => {
@@ -204,14 +204,14 @@ describe('ValueList: an edit names a place that exists', () => {
       fc.property(size, junk, (n, bad) => {
         const list = ValueList.from(range(n)) as unknown as Record<string, Loose>;
         for (const call of [
-          () => list.splice!(bad),
-          () => list.splice!(bad, 1),
-          () => list.splice!(0, bad),
-          () => list.splice!(0, bad, [9]),
-          () => list.insert!(bad, 9),
-          () => list.remove!(bad),
-          () => list.set!(bad, 9),
-          () => list.setMany!([[bad, 9]]),
+          () => list.toSpliced!(bad),
+          () => list.toSpliced!(bad, 1),
+          () => list.toSpliced!(0, bad),
+          () => list.toSpliced!(0, bad, [9]),
+          () => list.inserted!(bad, 9),
+          () => list.removed!(bad),
+          () => list.with!(bad, 9),
+          () => list._setMany!([[bad, 9]]),
         ]) {
           expect(call).toThrow(RangeError);
         }
@@ -220,22 +220,22 @@ describe('ValueList: an edit names a place that exists', () => {
     );
   });
 
-  it('a start is required: splice() cuts nowhere', () => {
+  it('a start is required: toSpliced() cuts nowhere', () => {
     const list = ValueList.from(range(5)) as unknown as Record<string, Loose>;
-    expect(() => list.splice!()).toThrow(/ValueList\.splice: start must be an integer, got undefined/);
-    expect(() => list.insert!()).toThrow(/ValueList\.insert: index must be an integer, got undefined/);
-    expect(() => list.remove!()).toThrow(/ValueList\.remove: index must be an integer, got undefined/);
+    expect(() => list.toSpliced!()).toThrow(/ValueList\.toSpliced: start must be an integer, got undefined/);
+    expect(() => list.inserted!()).toThrow(/ValueList\.inserted: index must be an integer, got undefined/);
+    expect(() => list.removed!()).toThrow(/ValueList\.removed: index must be an integer, got undefined/);
   });
 });
 
 describe('ValueList: get names an element, as arr[i] with its type made true; at is Array.prototype.at', () => {
-  it('get, set and setMany answer for [0, length) and throw for anything else; at reads what is there, or undefined', () => {
+  it('get, with and _setMany answer for [0, length) and throw for anything else; at reads what is there, or undefined', () => {
     for (const n of [5, 300]) {
       const list = ValueList.from(range(n));
       for (const i of [NaN, 0.5, 1.5, -1, -0.5, Infinity, -Infinity, n, n + 0.5]) {
         expect(() => list.get(i)).toThrow(RangeError);
-        expect(() => list.set(i, 9)).toThrow(RangeError);
-        expect(() => list.setMany([[i, 9]])).toThrow(RangeError);
+        expect(() => list.with(i, 9)).toThrow(RangeError);
+        expect(() => list._setMany([[i, 9]])).toThrow(RangeError);
       }
       expect(list.get(-0)).toBe(0);
       expect(list.get(n - 1)).toBe(n - 1);
@@ -247,7 +247,7 @@ describe('ValueList: get names an element, as arr[i] with its type made true; at
       expect(list.at(n - 1)).toBe(n - 1);
       expect(list.at(-1)).toBe(n - 1);
       expect(list.at(-n)).toBe(0);
-      expect(list.set(-0, 9).at(0)).toBe(9);
+      expect(list.with(-0, 9).at(0)).toBe(9);
     }
     expect(ValueList.empty().at(0)).toBeUndefined();
     expect(ValueList.empty().at(-1)).toBeUndefined();
@@ -350,10 +350,10 @@ describe('the other index-taking entry points', () => {
     expect(OrderedSet.empty().last()).toBeUndefined();
     expect(OrderedMap.empty().first()).toBeUndefined();
     expect(OrderedMap.empty().last()).toBeUndefined();
-    expect(() => s.insertAt(0.5, 9)).toThrow(RangeError);
-    expect(() => s.insertAt(4, 9)).toThrow(RangeError);
-    expect(() => m.insertAt(NaN, 'z', 9)).toThrow(RangeError);
-    expect(() => m.insertAt(-1, 'z', 9)).toThrow(RangeError);
+    expect(() => s.insertedAt(0.5, 9)).toThrow(RangeError);
+    expect(() => s.insertedAt(4, 9)).toThrow(RangeError);
+    expect(() => m.insertedAt(NaN, 'z', 9)).toThrow(RangeError);
+    expect(() => m.insertedAt(-1, 'z', 9)).toThrow(RangeError);
   });
 
   it('the ordered drafts: the same, mid-recipe', () => {

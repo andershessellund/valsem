@@ -30,9 +30,9 @@ describe('ValueMap — hash-consed canonicality', () => {
       ['b', 2],
       ['c', 3],
     ]);
-    expect(base.set('zz', 9).delete('zz')).toBe(base);
-    expect(base.delete('a').set('a', 1)).toBe(base);
-    expect(base.set('a', 99).set('a', 1)).toBe(base);
+    expect(base.with('zz', 9).deleted('zz')).toBe(base);
+    expect(base.deleted('a').with('a', 1)).toBe(base);
+    expect(base.with('a', 99).with('a', 1)).toBe(base);
   });
 
   it('a random op-walk agrees with a native-Map mirror, instance-exactly', () => {
@@ -43,10 +43,10 @@ describe('ValueMap — hash-consed canonicality', () => {
       s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
       const key = s % 200;
       if (s & 0x10000) {
-        m = m.set(key, i);
+        m = m.with(key, i);
         mirror.set(key, i);
       } else {
-        m = m.delete(key);
+        m = m.deleted(key);
         mirror.delete(key);
       }
     }
@@ -64,7 +64,7 @@ describe('ValueMap — hash-consed canonicality', () => {
       ['x', 1],
       ['y', 2],
     ]);
-    m = m.delete('x').delete('y');
+    m = m.deleted('x').deleted('y');
     expect(m).toBe(ValueMap.empty());
     expect(m.size).toBe(0);
   });
@@ -81,24 +81,24 @@ describe('ValueMap — hash-consed canonicality', () => {
   });
 
   it('NaN keys and stored undefined behave like native Map', () => {
-    const m = ValueMap.empty<number, string | undefined>().set(NaN, 'nan').set(1, undefined);
+    const m = ValueMap.empty<number, string | undefined>().with(NaN, 'nan').with(1, undefined);
     expect(m.has(NaN)).toBe(true);
     expect(m.get(NaN)).toBe('nan');
     expect(m.has(1)).toBe(true); // stored undefined is present …
     expect(m.get(1)).toBeUndefined();
     expect(m.has(2)).toBe(false); // … and distinct from absence
-    expect(m.delete(NaN).has(NaN)).toBe(false);
+    expect(m.deleted(NaN).has(NaN)).toBe(false);
     // +0 and -0 are the same key (SameValueZero).
-    expect(ValueMap.empty<number, number>().set(-0, 1)).toBe(
-      ValueMap.empty<number, number>().set(0, 1),
+    expect(ValueMap.empty<number, number>().with(-0, 1)).toBe(
+      ValueMap.empty<number, number>().with(0, 1),
     );
   });
 
   it('NaN stored as a value does not split canonical instances', () => {
-    const a = ValueMap.empty<string, number>().set('x', NaN);
-    const b = ValueMap.empty<string, number>().set('x', NaN);
+    const a = ValueMap.empty<string, number>().with('x', NaN);
+    const b = ValueMap.empty<string, number>().with('x', NaN);
     expect(a).toBe(b);
-    expect(a.set('x', NaN)).toBe(a); // unchanged write is `this`
+    expect(a.with('x', NaN)).toBe(a); // unchanged write is `this`
   });
 
   it('a derived map allocates only a spine of new nodes', () => {
@@ -106,7 +106,7 @@ describe('ValueMap — hash-consed canonicality', () => {
     for (let i = 0; i < 128; i++) entries.push([`k${i}`, i]);
     const base = ValueMap.from(entries);
     const before = ValueMap._nodeStats().bnodes;
-    const derived = base.set('one-more', 1);
+    const derived = base.with('one-more', 1);
     const after = ValueMap._nodeStats().bnodes;
     expect(derived).not.toBe(base);
     expect(after - before).toBeLessThanOrEqual(8); // ≤ path-copied spine
@@ -116,8 +116,8 @@ describe('ValueMap — hash-consed canonicality', () => {
     const k1 = intern({ id: 7 });
     const k2 = intern({ id: 7 });
     expect(k1).toBe(k2);
-    const a = ValueMap.empty<object, string>().set(k1, 'v');
-    const b = ValueMap.empty<object, string>().set(k2, 'v');
+    const a = ValueMap.empty<object, string>().with(k1, 'v');
+    const b = ValueMap.empty<object, string>().with(k2, 'v');
     expect(a).toBe(b);
     expect(a.get(k2)).toBe('v');
   });
@@ -136,9 +136,9 @@ describe('ValueSet — hash-consed canonicality', () => {
 
   it('add/delete detours land back on the same instance', () => {
     const base = ValueSet.from([1, 2, 3]);
-    expect(base.add(99).delete(99)).toBe(base);
-    expect(base.delete(1).add(1)).toBe(base);
-    expect(base.add(2)).toBe(base);
+    expect(base.added(99).deleted(99)).toBe(base);
+    expect(base.deleted(1).added(1)).toBe(base);
+    expect(base.added(2)).toBe(base);
   });
 
   it('a random op-walk agrees with a native-Set mirror, instance-exactly', () => {
@@ -149,10 +149,10 @@ describe('ValueSet — hash-consed canonicality', () => {
       s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
       const member = s % 200;
       if (s & 0x10000) {
-        v = v.add(member);
+        v = v.added(member);
         mirror.add(member);
       } else {
-        v = v.delete(member);
+        v = v.deleted(member);
         mirror.delete(member);
       }
     }
@@ -162,7 +162,7 @@ describe('ValueSet — hash-consed canonicality', () => {
   });
 
   it('deletion unwinds to the canonical empty set', () => {
-    expect(ValueSet.from([7]).delete(7)).toBe(ValueSet.empty());
+    expect(ValueSet.from([7]).deleted(7)).toBe(ValueSet.empty());
   });
 
   it('equal sets iterate identically', () => {

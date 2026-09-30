@@ -110,6 +110,16 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return i === -1 ? undefined : this.get(i);
   }
 
+  /** The first element (drafted, if it can be), or `undefined` when empty: `at(0)`. */
+  first(): Draft<T> | undefined {
+    return this.at(0);
+  }
+
+  /** The last element (drafted, if it can be), or `undefined` when empty: `at(-1)`, so `d.todos.last()!.done = true` edits. */
+  last(): Draft<T> | undefined {
+    return this.at(-1);
+  }
+
   /**
    * The element at `index` (drafted, if it can be), which must name one: an
    * integer in `[0, length)`, or a `RangeError`, as `ValueList.get`. So
@@ -174,7 +184,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     s.ops.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
     if (s.tail.length !== 0) s.tail.pop();
     else {
-      s.work = s.work.pop();
+      s.work = s.work.popped();
       s.overlay.delete(len - 1);
     }
     return removed as T;
@@ -233,19 +243,6 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return this.length;
   }
 
-  /**
-   * Set many elements at once: `[index, value]` pairs, the last write to an
-   * index winning, as `ValueList.setMany`. Every index is checked before
-   * anything is written, so a bad one leaves the draft untouched.
-   */
-  setMany(edits: readonly (readonly [number, T])[]): this {
-    const s = this.#state;
-    const len = s.work.length + s.tail.length;
-    for (const [i] of edits) elementIndex(i, len, 'DraftList.setMany');
-    for (const [i, v] of edits) this.set(i, v);
-    return this;
-  }
-
   // What does not edit answers about the VALUE this draft would be right now
   // (its snapshot, `current(draft)`), and gives back values, not drafts: `get`, `at`
   // and iteration hand out drafts. Assign the result into a slot to keep it.
@@ -258,6 +255,60 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   /** The list as it is right now, followed by `other`, as `ValueList.concat`: a value, not a draft. */
   concat(other: ValueList<T>): ValueList<T> {
     return (snapshotOf(this) as ValueList<T>).concat(other);
+  }
+
+  // The value's copying edits are what-ifs here: each answers with the
+  // `ValueList` the edit would give, applied to the list as it is right now,
+  // and edits nothing (D59). The draft's own verbs — `set`, `push`, `pop`,
+  // `shift`, `unshift`, `insert`, `remove`, `splice` — are the edits. The
+  // positions are checked here first, so a bad one is reported in this
+  // draft's name and before the snapshot is built.
+
+  /** The list as it is right now with `value` at `index` (an element, D45): a value, as `ValueList.with`. To edit, `set`. */
+  with(index: number, value: T): ValueList<T> {
+    elementIndex(index, this.length, 'DraftList.with');
+    return (snapshotOf(this) as ValueList<T>).with(index, value);
+  }
+
+  /** The list as it is right now with `values` appended: a value, as `ValueList.pushed`. To edit, `push`. */
+  pushed(...values: T[]): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).pushed(...values);
+  }
+
+  /** The list as it is right now without its last element: a value, as `ValueList.popped`. To edit, `pop`. */
+  popped(): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).popped();
+  }
+
+  /** The list as it is right now without its first element: a value, as `ValueList.shifted`. To edit, `shift`. */
+  shifted(): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).shifted();
+  }
+
+  /** The list as it is right now with `values` in front: a value, as `ValueList.unshifted`. To edit, `unshift`. */
+  unshifted(...values: T[]): ValueList<T> {
+    return (snapshotOf(this) as ValueList<T>).unshifted(...values);
+  }
+
+  /** The list as it is right now with `value` inserted before `index` (a place in it, D45): a value, as `ValueList.inserted`. To edit, `insert`. */
+  inserted(index: number, value: T): ValueList<T> {
+    insertionIndex(index, this.length, 'DraftList.inserted');
+    return (snapshotOf(this) as ValueList<T>).inserted(index, value);
+  }
+
+  /** The list as it is right now without the element at `index` (D45): a value, as `ValueList.removed`. To edit, `remove`. */
+  removed(index: number): ValueList<T> {
+    elementIndex(index, this.length, 'DraftList.removed');
+    return (snapshotOf(this) as ValueList<T>).removed(index);
+  }
+
+  /** The list as it is right now with `deleteCount` elements at `start` replaced by `items`, as `ValueList.toSpliced` (its checks too): a value. To edit, `splice`. */
+  toSpliced(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
+    insertionIndex(start, this.length, 'DraftList.toSpliced', 'start');
+    if (spliceCount(deleteCount, items.length, 'DraftList.toSpliced') !== undefined) {
+      extentArg(deleteCount!, 'DraftList.toSpliced', 'deleteCount');
+    }
+    return (snapshotOf(this) as ValueList<T>).toSpliced(start, deleteCount, ...items);
   }
 
   // The functional reads do not draft: their callbacks get values (a drafted
@@ -427,7 +478,7 @@ function snapshotList(state: DraftState<ValueList<unknown>>): unknown {
   const s = state as ListState;
   const edits: [number, unknown][] = [];
   for (const [i, e] of s.overlay) edits.push([i, snapshotOf(e.v)]);
-  const result = s.work.setMany(edits);
+  const result = s.work._setMany(edits);
   return s.tail.length === 0 ? result : result._spliceItems(result.length, 0, s.tail.map((e) => snapshotOf(e.v)));
 }
 
@@ -450,7 +501,7 @@ function finalizeList(
     return stateOf(e.v)?.parent === state ? [...path!, i] : null;
   };
   for (const [i, e] of state.overlay) edits.push([i, resolve(e.v, slotPath(e, i), recorder)]);
-  let result = state.work.setMany(edits);
+  let result = state.work._setMany(edits);
   if (state.tail.length !== 0) {
     const at = state.work.length;
     const tail = state.tail.map((e, j) => resolve(e.v, slotPath(e, at + j), recorder));

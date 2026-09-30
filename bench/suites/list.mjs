@@ -32,24 +32,24 @@ list with three changed records, which shares nothing by lineage with the origin
     op('get, random', await timeSettled((i) => vl.get((i * 7919) % N), 300_000));
     op('iterate for…of', await timeSettled(() => { let s = 0; for (const x of vl) s += x.id; return s; }, 20));
     op('toArray (memoized)', await timeSettled(() => vl.toArray().length, 20));
-    op('push', await timeSettled((i) => vl.push({ id: -i }), 3000));
-    op('pop', await timeSettled(() => vl.pop(), 3000));
-    op('set, middle', await timeSettled((i) => vl.set(N >> 1, { id: -i }), 3000));
-    op('insert at 0', await timeSettled((i) => vl.insert(0, { id: -i }), 3000));
-    op('insert, middle', await timeSettled((i) => vl.insert(N >> 1, { id: -i }), 3000));
-    op('remove at 0', await timeSettled(() => vl.remove(0), 3000));
+    op('push', await timeSettled((i) => vl.pushed({ id: -i }), 3000));
+    op('pop', await timeSettled(() => vl.popped(), 3000));
+    op('set, middle', await timeSettled((i) => vl.with(N >> 1, { id: -i }), 3000));
+    op('insert at 0', await timeSettled((i) => vl.inserted(0, { id: -i }), 3000));
+    op('insert, middle', await timeSettled((i) => vl.inserted(N >> 1, { id: -i }), 3000));
+    op('remove at 0', await timeSettled(() => vl.removed(0), 3000));
     op('slice, middle half', await timeSettled(() => vl.slice(N >> 2, 3 * (N >> 2)), 3000));
     const half = ValueList.from(items.slice(0, N >> 1)), half2 = ValueList.from(items.slice(N >> 1));
     op('concat, two halves', await timeSettled(() => half.concat(half2), 3000));
     const scan = (a, b) => { const x = a.toArray(), y = b.toArray(); let c = 0; for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) c++; return c; };
     for (const c of [1, 10, 100]) {
       let edited = vl;
-      for (let k = 0; k < c; k++) edited = edited.set(Math.floor(((k + 0.5) * N) / c), { id: -k });
+      for (let k = 0; k < c; k++) edited = edited.with(Math.floor(((k + 0.5) * N) / c), { id: -k });
       const hunks = ValueList.diff(vl, edited).length;
       rows.push(row(`diff: ${c} point edit${c > 1 ? 's' : ''} (${hunks} hunks)`, { ValueList: await timeSettled(() => ValueList.diff(vl, edited), 2000), 'pointer scan': await timeSettled(() => scan(vl, edited), 20) }));
     }
     {
-      const ins = vl.insert(N >> 2, { id: -1 }).remove(3 * (N >> 2));
+      const ins = vl.inserted(N >> 2, { id: -1 }).removed(3 * (N >> 2));
       rows.push(row(`diff: insert + remove (${ValueList.diff(vl, ins).length} hunks)`, { ValueList: await timeSettled(() => ValueList.diff(vl, ins), 2000), 'pointer scan': await timeSettled(() => scan(vl, ins), 20) }));
     }
     {
