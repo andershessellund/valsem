@@ -138,10 +138,10 @@ describe('where a value is required, a draft stands for the value it holds right
       expect([d.byKey.has(d.sub), d.byKey.get(d.list), d.seen.has(d.sub), d.seen.has(d.list)]).toEqual([true, 2, true, true]);
       // The values' own entry points, called inside the recipe.
       kept = {
-        vm: ValueMap.empty<unknown, number>().set(d.sub, 1).set(d.list, 2),
-        om: OrderedMap.empty<unknown, number>().set(d.sub, 1).insertAt(0, d.list, 2),
+        vm: ValueMap.empty<unknown, number>().with(d.sub, 1).with(d.list, 2),
+        om: OrderedMap.empty<unknown, number>().with(d.sub, 1).insertedAt(0, d.list, 2),
         vs: ValueSet.from<unknown>([d.sub, d.list]),
-        os: OrderedSet.of<unknown>(d.sub).insertAt(0, d.list),
+        os: OrderedSet.of<unknown>(d.sub).insertedAt(0, d.list),
       };
       for (const keys of [d.byKey.keys(), d.seen, kept.vm.keys(), kept.om.keys(), kept.vs, kept.os]) {
         for (const k of keys) expect(isDraft(k)).toBe(false);

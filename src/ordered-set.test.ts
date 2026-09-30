@@ -17,8 +17,8 @@ describe('OrderedSet', () => {
     expect(OrderedSet.empty()).toBe(OrderedSet.empty());
     expect(OrderedSet.from([])).toBe(OrderedSet.empty());
     const s = OrderedSet.of('a', 'b', 'c');
-    expect(OrderedSet.empty<string>().add('a').add('b').add('c')).toBe(s);
-    expect(s.add('d').delete('d')).toBe(s);
+    expect(OrderedSet.empty<string>().added('a').added('b').added('c')).toBe(s);
+    expect(s.added('d').deleted('d')).toBe(s);
     expect(OrderedSet.from(['a', 'b', 'c', 'a', 'b'])).toBe(s);
   });
 
@@ -60,26 +60,26 @@ describe('OrderedSet', () => {
     const s = OrderedSet.from([{ x: 1 }, { x: 2 }]);
     expect(s.has({ x: 2 })).toBe(true);
     expect(s.indexOf({ x: 2 })).toBe(1);
-    expect(s.add({ x: 1 })).toBe(s);
-    expect(s.delete({ x: 1 })).toBe(OrderedSet.from([{ x: 2 }]));
+    expect(s.added({ x: 1 })).toBe(s);
+    expect(s.deleted({ x: 1 })).toBe(OrderedSet.from([{ x: 2 }]));
   });
 
-  it('add appends (a present member stays put); delete then add moves to the end', () => {
+  it('added appends (a present member stays put); deleted then added moves to the end', () => {
     const s = OrderedSet.of('a', 'b', 'c');
-    expect([...s.add('d')]).toEqual(['a', 'b', 'c', 'd']);
-    expect(s.add('a')).toBe(s);
-    expect([...s.delete('a').add('a')]).toEqual(['b', 'c', 'a']);
-    expect(s.delete('z')).toBe(s);
-    expect(s.delete('a').delete('b').delete('c')).toBe(OrderedSet.empty());
+    expect([...s.added('d')]).toEqual(['a', 'b', 'c', 'd']);
+    expect(s.added('a')).toBe(s);
+    expect([...s.deleted('a').added('a')]).toEqual(['b', 'c', 'a']);
+    expect(s.deleted('z')).toBe(s);
+    expect(s.deleted('a').deleted('b').deleted('c')).toBe(OrderedSet.empty());
   });
 
-  it('insertAt places a new member; a present member or a bad index throws', () => {
+  it('insertedAt places a new member; a present member or a bad index throws', () => {
     const s = OrderedSet.of('a', 'b', 'c');
-    expect([...s.insertAt(0, 'z')]).toEqual(['z', 'a', 'b', 'c']);
-    expect([...s.insertAt(2, 'z')]).toEqual(['a', 'b', 'z', 'c']);
-    expect(s.insertAt(3, 'z')).toBe(s.add('z'));
-    expect(() => s.insertAt(0, 'b')).toThrow(/already a member/);
-    expect(() => s.insertAt(4, 'z')).toThrow(RangeError);
+    expect([...s.insertedAt(0, 'z')]).toEqual(['z', 'a', 'b', 'c']);
+    expect([...s.insertedAt(2, 'z')]).toEqual(['a', 'b', 'z', 'c']);
+    expect(s.insertedAt(3, 'z')).toBe(s.added('z'));
+    expect(() => s.insertedAt(0, 'b')).toThrow(/already a member/);
+    expect(() => s.insertedAt(4, 'z')).toThrow(RangeError);
   });
 
   it('iterates in order: values, keys, entries, forEach, spread, new Set; helpers apply', () => {
@@ -122,9 +122,9 @@ describe('OrderedSet', () => {
       expect(s.size).toBe(N + 1);
       expect(s.indexOf(undefined)).toBe(at);
       for (let i = 0; i < members.length; i += 5) expect(s.indexOf(members[i])).toBe(i);
-      expect(OrderedSet.from(base).insertAt(at, undefined as unknown as string)).toBe(s);
+      expect(OrderedSet.from(base).insertedAt(at, undefined as unknown as string)).toBe(s);
       const other = members[at === N ? 0 : at + 1] as string;
-      expect(s.delete(other).indexOf(undefined)).toBe(at === N ? at - 1 : at);
+      expect(s.deleted(other).indexOf(undefined)).toBe(at === N ? at - 1 : at);
     }
   });
 
@@ -142,7 +142,7 @@ describe('OrderedSet', () => {
     const model = Array.from({ length: N }, (_, i) => `m${i}`);
     let s = OrderedSet.from(model);
     for (const i of [0, 1, 700, 1500, 2999, 2997]) {
-      s = s.delete(model[i]!);
+      s = s.deleted(model[i]!);
       model.splice(i, 1);
     }
     for (const [i, v] of [
@@ -150,7 +150,7 @@ describe('OrderedSet', () => {
       [1234, 'n1'],
       [model.length, 'n2'],
     ] as [number, string][]) {
-      s = s.insertAt(i, v);
+      s = s.insertedAt(i, v);
       model.splice(i, 0, v);
     }
     expect([...s]).toEqual(model);

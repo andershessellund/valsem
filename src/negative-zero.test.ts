@@ -31,30 +31,30 @@ describe('-0 is stored as +0', () => {
     expect(isPlusZero(m.get(0))).toBe(true);
     expect(isPlusZero(m.get(-0))).toBe(true);
     expect(m).toBe(ValueMap.from([[0, 0]]));
-    const s = ValueMap.empty<number, number>().set(-0, -0);
+    const s = ValueMap.empty<number, number>().with(-0, -0);
     expect(isPlusZero([...s.keys()][0])).toBe(true);
     expect(isPlusZero([...s.values()][0])).toBe(true);
     expect(isPlusZero(ValueMap.fromObject({ a: -0 }).get('a'))).toBe(true);
     // Overwriting +0 with -0 is not a change.
-    expect(ValueMap.from([['a', 0]]).set('a', -0)).toBe(ValueMap.from([['a', 0]]));
+    expect(ValueMap.from([['a', 0]]).with('a', -0)).toBe(ValueMap.from([['a', 0]]));
   });
 
   it('ValueSet: members', () => {
     expect(isPlusZero([...ValueSet.from([-0])][0])).toBe(true);
-    expect(isPlusZero([...ValueSet.empty<number>().add(-0)][0])).toBe(true);
+    expect(isPlusZero([...ValueSet.empty<number>().added(-0)][0])).toBe(true);
     expect(ValueSet.from([-0])).toBe(ValueSet.from([0]));
     expect(isPlusZero([...ValueSet.from([1]).union([-0])].find((v) => v === 0))).toBe(true);
   });
 
-  it('ValueList: of, push, set, splice, setMany, toArray', () => {
+  it('ValueList: of, pushed, with, toSpliced, _setMany, toArray', () => {
     expect(isPlusZero(ValueList.of(-0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.empty<number>().push(-0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1).set(0, -0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1).splice(0, 0, -0).get(0))).toBe(true);
-    expect(isPlusZero(ValueList.of(1, 2).setMany([[0, -0], [1, -0]]).get(1))).toBe(true);
+    expect(isPlusZero(ValueList.empty<number>().pushed(-0).get(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1).with(0, -0).get(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1).toSpliced(0, 0, -0).get(0))).toBe(true);
+    expect(isPlusZero(ValueList.of(1, 2)._setMany([[0, -0], [1, -0]]).get(1))).toBe(true);
     expect(isPlusZero(ValueList.of(-0).toArray()[0])).toBe(true);
     expect(ValueList.of(-0)).toBe(ValueList.of(0));
-    expect(ValueList.of(0).set(0, -0)).toBe(ValueList.of(0));
+    expect(ValueList.of(0).with(0, -0)).toBe(ValueList.of(0));
   });
 
   it('produce: record fast path, new keys, grafted objects, arrays', () => {
@@ -116,7 +116,7 @@ describe('-0 is stored as +0', () => {
 // through (the bulk factory, a persistent operation, a draft inside a recipe,
 // nested in a record), what is read back is +0, a -0 probe finds it, and the
 // result is the very instance the +0 spelling builds. The cases above pin
-// each type's own doors (fromObject, setMany, splice, union, ...).
+// each type's own doors (fromObject, _setMany, toSpliced, union, ...).
 describe.each(COLLECTIONS.map((c) => [c.name, c] as const))('-0 is stored as +0 — %s', (_name, c) => {
   const allPlusZero = (value: object): boolean => c.contents(value).length > 0 && c.contents(value).every(isPlusZero);
 

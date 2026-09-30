@@ -85,7 +85,7 @@ describe.each(Object.entries(shapes))('%s, sharing a full hash', (_name, found) 
     expect(s.has(found[0]!()[0])).toBe(true);
     expect(s.has(found[0]!()[1])).toBe(true);
     expect(ValueSet.from([y, x])).toBe(s);
-    expect(s.delete(x)).toBe(ValueSet.from([y]));
+    expect(s.deleted(x)).toBe(ValueSet.from([y]));
     const m = new HashMap<unknown, string>();
     m.set(x, 'x');
     m.set(y, 'y');

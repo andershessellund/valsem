@@ -181,7 +181,7 @@ position or intent makes it meaningful there:
 
 - **Arrays** are positional: `[undefined]` has length 1 and does not equal
   `[]`.
-- **`ValueMap`** stores it deliberately: `m.set(k, undefined)` is a real
+- **`ValueMap`** stores it deliberately: `m.with(k, undefined)` is a real
   entry, distinct from absence (`has` tells them apart). With TypeScript, a
   `Map<K, V | undefined>` is a declared intent in a way a record's
   `{ x: opts.x }` never is. (`ValueMap.fromObject` takes a *record* as input,

@@ -29,17 +29,21 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
  * Positional arguments are CHECKED, never coerced (D45). Three kinds, by what
  * the argument names:
  *
- * - an ELEMENT ({@link elementIndex}: `get`, `set`, `remove`): an
- *   integer in `[0, length)`. There is no element anywhere else, so there is
- *   nothing to answer with and nothing to edit;
- * - an INSERTION POINT ({@link insertionIndex}: `insert`, `insertAt`,
- *   `splice`'s start): an integer in `[0, length]`. An edit lands in canonical
+ * - an ELEMENT ({@link elementIndex}: `get`, `with` and `removed` on a value,
+ *   `set` and `remove` on its draft): an integer in `[0, length)`. There is
+ *   no element anywhere else, so there is nothing to answer with and nothing
+ *   to edit;
+ * - an INSERTION POINT ({@link insertionIndex}: `inserted`, `insertedAt` and
+ *   `toSpliced`'s start on a value, `insert`, `insertAt` and `splice`'s on
+ *   its draft): an integer in `[0, length]`. An edit lands in canonical
  *   state, so the place it names must exist: no counting from the end, where
  *   an `indexOf` miss (-1) would name the last element;
  * - a RANGE. `slice`'s bounds ({@link indexArg}) are any integer or
- *   ±Infinity, clamped as `Array` clamps them; `splice`'s count
+ *   ±Infinity, clamped as `Array` clamps them; `toSpliced`'s count
  *   ({@link extentArg}) is an amount, an integer ≥ 0 or Infinity, clamped to
- *   what is there, and a negative one throws where `Array` reads it as 0. A
+ *   what is there, or left out for the rest; a negative one throws where
+ *   `Array` reads it as 0, and so does an explicit `undefined`
+ *   ({@link spliceArgs}), which `Array` reads as 0 as well. A
  *   range has an answer wherever it points, the part of it that exists, and
  *   correct programs overshoot on purpose: the top ten of seven, the short
  *   last page, "the rest".
@@ -62,16 +66,23 @@ export function extentArg(value: number, operation: string, name: string): numbe
 }
 
 /**
- * `splice`'s count when items follow it. Left out, the count means "through
- * the end"; but `Array` reads an explicit `undefined` before items as 0, so
- * one of the two readings deletes data, and the call throws. `Infinity` is
- * how to say "the rest, and insert".
+ * `toSpliced`'s arguments after the start, checked as D45 says and clamped.
+ * `start` is a place in the list (`[0, length]`); `rest` is what followed it
+ * in the call, so that a count left out ("the rest") can be told from one
+ * passed as `undefined`, which is refused with or without items after it,
+ * where `Array` reads it as 0 and a plain array draft refuses it too. The
+ * count is an amount ("up to", clamped to what is there) or `Infinity`. The
+ * one place the values and the drafts check a splice, so that their checks
+ * cannot drift; `operation` names the caller in the error.
  */
-export function spliceCount(deleteCount: number | undefined, itemCount: number, operation: string): number | undefined {
-  if (deleteCount === undefined && itemCount !== 0) {
-    throw new RangeError(`${operation}: deleteCount must be an integer when items follow it, got undefined (Infinity removes through the end)`);
+export function spliceArgs<T>(start: number, rest: readonly unknown[], length: number, operation: string): [at: number, count: number, items: readonly T[]] {
+  const at = insertionIndex(start, length, operation, 'start');
+  if (rest.length === 0) return [at, length - at, []];
+  if (rest[0] === undefined) {
+    throw new RangeError(`${operation}: deleteCount must be an integer, got undefined (leave it out, or pass Infinity, for the rest)`);
   }
-  return deleteCount;
+  const count = Math.min(extentArg(rest[0] as number, operation, 'deleteCount'), length - at);
+  return [at, count, rest.slice(1) as T[]];
 }
 
 /**
@@ -98,6 +109,30 @@ export function insertionIndex(index: number, length: number, operation: string,
   if (!Number.isInteger(index)) throw notAnInteger(index, operation, name);
   if (index < 0 || index > length) throw outOfRange(index, length, operation, name, ']');
   return index === 0 ? 0 : index;
+}
+
+/**
+ * The index of a new entry in an ordered collection, checked before anything
+ * is touched: a place in the sequence (`[0, size]`), and a member or key not
+ * already there, since each has one position. The one place the ordered
+ * values and their drafts check an insertion; `operation` names the caller,
+ * `subject` what is being inserted, and `verb` how to move one, `delete` on
+ * a draft (its verb) and `remove` on a value (a plain word).
+ */
+export function newEntryIndex(
+  index: number,
+  size: number,
+  present: () => boolean,
+  operation: string,
+  subject: 'member' | 'key',
+  verb: 'delete' | 'remove',
+): number {
+  const at = insertionIndex(index, size, operation);
+  if (present()) {
+    const what = subject === 'key' ? 'the key is already present — a key has one position' : 'the value is already a member — a member has one position';
+    throw new Error(`valsem: ${operation}: ${what}; ${verb} it first to move it`);
+  }
+  return at;
 }
 
 function notAnInteger(value: unknown, operation: string, name: string): RangeError {

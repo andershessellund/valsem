@@ -104,7 +104,7 @@ except the recurrent row. Arenas:
         [C.ioff]: null,
         [C.m]: await timeSettled(() => mutativeCreate(mb, (d) => { d.set('k5', novel()); }), 300),
       }));
-      rows.push(row('value-map 10k, one set, direct persistent op', { [C.v]: await timeSettled(() => vb.set('k5', novel()), it), [C.ion]: null, [C.ioff]: null, [C.m]: null }));
+      rows.push(row('value-map 10k, one set, direct persistent op', { [C.v]: await timeSettled(() => vb.with('k5', novel()), it), [C.ion]: null, [C.ioff]: null, [C.m]: null }));
     }
     {
       const nums = Array.from({ length: N }, (_, i) => i);
@@ -119,7 +119,7 @@ except the recurrent row. Arenas:
       setAutoFreeze(true);
       const m = await timeSettled(() => mutativeCreate(mb, (d) => { d[mid] = novel(); d.push(novel()); }), it);
       rows.push(row('value-list 10k, set + push, through the draft', { [C.v]: v, [C.ion]: null, [C.ioff]: ioff, [C.m]: m }));
-      rows.push(row('value-list 10k, set + push, direct persistent ops', { [C.v]: await timeSettled(() => vb.set(mid, novel()).push(novel()), it), [C.ion]: null, [C.ioff]: null, [C.m]: null }));
+      rows.push(row('value-list 10k, set + push, direct persistent ops', { [C.v]: await timeSettled(() => vb.with(mid, novel()).pushed(novel()), it), [C.ion]: null, [C.ioff]: null, [C.m]: null }));
     }
     {
       const vb = intern({ x: 1, y: 2, z: 3 });

@@ -26,14 +26,14 @@
 // to a cut in this list), head elements, and a cursor over a right context
 // (the remainder of a list after a cut), re-chunk level by level until each
 // level resynchronises with the right context's existing nodes. `from`,
-// `push`, `splice`, `concat` and `slice` are all calls to it.
+// `pushed`, `toSpliced`, `concat` and `slice` are all calls to it.
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, spliceArgs } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -331,16 +331,18 @@ function leafClosed(items: readonly unknown[]): boolean {
 /**
  * Persistent (immutable) list whose instances are canonical: equal content
  * is the same object, however built. Elements are interned on entry.
- * `push`, `pop`, `set`, `insert`, `remove`, `splice`, `slice` and `concat`
- * are O(log n) expected (`setMany` batches point edits), and
- * `ValueList.diff(a, b)` finds the changed regions between any two lists in
- * O(c log n) expected for c changes.
+ * Every edit is a copying one, and is named for its result (D59): `with`,
+ * `pushed`, `popped`, `shifted`, `unshifted`, `inserted`, `removed` and
+ * `toSpliced`, beside `slice` and `concat`, all O(log n) expected. The
+ * imperative verbs (`set`, `push`, `splice`, …) belong to the draft, which
+ * edits in place. `ValueList.diff(a, b)` finds the changed regions between
+ * any two lists in O(c log n) expected for c changes.
  *
  * Representation: the tree holds every CLOSED run; the last run, while it
  * is still open (no boundary element at its end, under 64 elements), lives
- * in `#tail` as a plain array — so `push` and `pop` are an array copy, and
- * the tree is touched only when a run closes. The split is canonical: the
- * open run is exactly what the chunker would leave open at the end.
+ * in `#tail` as a plain array — so `pushed` and `popped` are an array copy,
+ * and the tree is touched only when a run closes. The split is canonical:
+ * the open run is exactly what the chunker would leave open at the end.
  */
 export class ValueList<T> implements Iterable<T> {
   /** Closed runs only; null when there are none. */
@@ -448,6 +450,16 @@ export class ValueList<T> implements Iterable<T> {
     return i === -1 ? undefined : this.get(i);
   }
 
+  /** The first element, or `undefined` when empty: `at(0)`. */
+  first(): T | undefined {
+    return this.at(0);
+  }
+
+  /** The last element, or `undefined` when empty: `at(-1)`, the element {@link popped} leaves out. */
+  last(): T | undefined {
+    return this.at(-1);
+  }
+
   /**
    * The element at `index`, which must name one: an integer in
    * `[0, length)`, or a `RangeError`. What `arr[i]` is to an array, with its
@@ -488,12 +500,12 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /**
-   * Append `values` (interned on entry), as `Array.prototype.push` takes
-   * them. One value is an array copy of the open run, and the tree is touched
-   * only when the run closes; several are a splice at the end. With none,
-   * `this`.
+   * The list with `values` appended (interned on entry), taken as
+   * `Array.prototype.push` takes them. One value is an array copy of the open
+   * run, and the tree is touched only when the run closes; several are a
+   * splice at the end. With none, `this`.
    */
-  push(...values: T[]): ValueList<T> {
+  pushed(...values: T[]): ValueList<T> {
     if (values.length !== 1) return values.length === 0 ? this : this._spliceItems(this.length, 0, values);
     const v = intern(values[0]);
     const tail = this.#tail.slice();
@@ -508,8 +520,8 @@ export class ValueList<T> implements Iterable<T> {
     return ValueList.#of<T>(merge(p.frames, head, null), []);
   }
 
-  /** Drop the last element. Returns `this` when empty. */
-  pop(): ValueList<T> {
+  /** The list without its last element (the element itself is {@link last}); `this` when empty. */
+  popped(): ValueList<T> {
     if (this.#tail.length !== 0) return ValueList.#of<T>(this.#root, this.#tail.slice(0, -1));
     const root = this.#root;
     if (root === null) return this;
@@ -521,29 +533,47 @@ export class ValueList<T> implements Iterable<T> {
     return ValueList.#of<T>(detachLast(p.frames), items);
   }
 
+  /** The list without its first element (the element itself is {@link first}); `this` when empty. O(log n) expected. */
+  shifted(): ValueList<T> {
+    return this.length === 0 ? this : this._spliceItems(0, 1, []);
+  }
+
+  /** The list with `values` in front (interned on entry), taken as `Array.prototype.unshift` takes them; with none, `this`. O(log n) expected. */
+  unshifted(...values: T[]): ValueList<T> {
+    return values.length === 0 ? this : this._spliceItems(0, 0, values);
+  }
+
   /**
-   * Replace `deleteCount` elements at `start` with `items` (interned on
-   * entry) — the general edit; O(log n) expected. `insert`, `remove` and
+   * The list with `deleteCount` elements at `start` replaced by `items`
+   * (interned on entry) — the general edit, as `Array.prototype.toSpliced`;
+   * O(log n) expected. `inserted`, `removed`, `shifted`, `unshifted` and
    * `slice` are all this. `start` is where the edit lands, so it must be a
    * place in the list: an integer in `[0, length]`, not counted from the end,
    * or a `RangeError`. `deleteCount` is how much, and means "up to": an
-   * integer ≥ 0 clamped to what is there, with an omitted (or `undefined`)
-   * count, or `Infinity`, removing through the end (with items after it, an
-   * `undefined` count throws: `Array` reads that one as 0). The items follow the
-   * count as `Array.prototype.splice` takes them, so spreading an array is
-   * bounded by the engine's argument limit: for a long one, `concat` a
-   * `ValueList.from(array)`.
+   * integer ≥ 0 clamped to what is there, or `Infinity`; left out, the rest.
+   * An explicit `undefined` count throws, with or without items after it,
+   * where `Array` reads it as 0, and the overloads refuse it at compile time.
+   * The items follow the count as `Array.prototype.splice` takes them, so
+   * spreading an array is bounded by the engine's argument limit: for a long
+   * one, `concat` a `ValueList.from(array)`.
    */
-  splice(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
-    return this._spliceItems(start, spliceCount(deleteCount, items.length, 'ValueList.splice'), items);
+  toSpliced(start: number): ValueList<T>;
+  toSpliced(start: number, deleteCount: number, ...items: T[]): ValueList<T>;
+  toSpliced(start: number, ...rest: unknown[]): ValueList<T> {
+    const [at, count, items] = spliceArgs<T>(start, rest, this.length, 'ValueList.toSpliced');
+    return this._spliceItems(at, count, items);
   }
 
-  /** @internal `splice` with the items as an array: what the drafts and `push` call, with no argument limit. */
-  _spliceItems(start: number, deleteCount: number | undefined, items: readonly T[]): ValueList<T> {
-    const n = this.length;
-    start = insertionIndex(start, n, 'ValueList.splice', 'start');
-    const end =
-      deleteCount === undefined ? n : Math.min(n, start + extentArg(deleteCount, 'ValueList.splice', 'deleteCount'));
+  /**
+   * @internal `toSpliced` with its arguments already checked (`spliceArgs`:
+   * `start` a place in the list, `deleteCount` an amount clamped to what is
+   * there) and the items as an array: what the drafts, `pushed`, `shifted`
+   * and `unshifted` call, with no argument limit. The count is clamped again
+   * here, since that is free and a caller that forgot would otherwise walk
+   * past the end.
+   */
+  _spliceItems(start: number, deleteCount: number, items: readonly T[]): ValueList<T> {
+    const end = Math.min(this.length, start + deleteCount);
     const root = this.#full();
     if (root === null) return ValueList.from(items);
     const s = pathTo(root, start);
@@ -561,13 +591,14 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /**
-   * Replace one element; O(log n). In the open tail it is an array copy;
+   * The list with `value` at `index`, which must name an element (D45), as
+   * `Array.prototype.with`; O(log n). In the open tail it is an array copy;
    * in the tree, when neither the old nor the new element flips a boundary
    * at any level, a plain path copy; otherwise the general splice.
    */
-  set(index: number, value: T): ValueList<T> {
+  with(index: number, value: T): ValueList<T> {
     const n = this.length;
-    elementIndex(index, n, 'ValueList.set');
+    elementIndex(index, n, 'ValueList.with');
     const v = intern(value);
     const root = this.#root;
     const trunk = root === null ? 0 : root.n;
@@ -577,7 +608,7 @@ export class ValueList<T> implements Iterable<T> {
       if (old === v || (old !== old && v !== v)) return this;
       // The open run holds no boundary element, so only a new boundary changes
       // the chunking (closing the run at `j`); let the general path re-chunk.
-      if (itemBoundary(internHash(v))) return this.splice(index, 1, v);
+      if (itemBoundary(internHash(v))) return this.toSpliced(index, 1, v);
       const tail = this.#tail.slice();
       tail[j] = v;
       return ValueList.#of<T>(root, tail);
@@ -587,7 +618,7 @@ export class ValueList<T> implements Iterable<T> {
     if (old === v || (old !== old && v !== v)) return this;
     const hOld = internHash(old);
     const hNew = internHash(v);
-    if (itemBoundary(hOld) !== itemBoundary(hNew)) return this.splice(index, 1, v);
+    if (itemBoundary(hOld) !== itemBoundary(hNew)) return this.toSpliced(index, 1, v);
     const items = p.leaf.kids.slice();
     items[p.off] = v;
     const hashes = new Array<number>(items.length);
@@ -595,7 +626,7 @@ export class ValueList<T> implements Iterable<T> {
     let node = consLeaf(items, hashes);
     let prev = p.leaf;
     for (let k = p.frames.length - 1; k >= 0; k--) {
-      if (nodeBoundary(prev) !== nodeBoundary(node)) return this.splice(index, 1, v);
+      if (nodeBoundary(prev) !== nodeBoundary(node)) return this.toSpliced(index, 1, v);
       const f = p.frames[k]!;
       const kids = f.node.kids.slice() as CNode[];
       kids[f.i] = node;
@@ -606,27 +637,27 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /**
-   * Apply many point edits at once — `[index, value]` pairs, any order —
-   * in one bottom-up pass: every touched leaf and ancestor is rebuilt once,
-   * untouched siblings are fed through in O(1), and a run that spills past
-   * its old node carries into the next. O(k log n) for k edits. What a
-   * draft's finalize uses.
+   * @internal Apply many point edits at once — `[index, value]` pairs, any
+   * order — in one bottom-up pass: every touched leaf and ancestor is rebuilt
+   * once, untouched siblings are fed through in O(1), and a run that spills
+   * past its old node carries into the next. O(k log n) for k edits. What a
+   * draft's snapshot and finalize use; not API, since `produce` is the batch.
    */
-  setMany(edits: readonly (readonly [number, T])[]): ValueList<T> {
+  _setMany(edits: readonly (readonly [number, T])[]): ValueList<T> {
     if (edits.length === 0) return this;
     const n = this.length;
     const sorted = edits.map(([i, v]) => [i, intern(v)] as [number, unknown]).sort((a, b) => a[0] - b[0]);
     const idx: number[] = [];
     const vals: unknown[] = [];
     for (const [i, v] of sorted) {
-      elementIndex(i, n, 'ValueList.setMany');
+      elementIndex(i, n, 'ValueList._setMany');
       if (idx.length !== 0 && idx[idx.length - 1] === i) vals[vals.length - 1] = v; // last write wins
       else {
         idx.push(i);
         vals.push(v);
       }
     }
-    if (idx.length === 1) return this.set(idx[0]!, vals[0] as T); // the path-copy fast path
+    if (idx.length === 1) return this.with(idx[0]!, vals[0] as T); // the path-copy fast path
     const root = this.#full()!;
     const ed: EditStream = { idx, vals, pos: 0 };
     const carry: Carry = [];
@@ -648,13 +679,13 @@ export class ValueList<T> implements Iterable<T> {
     return newRoot === root ? this : ValueList.#fromFull<T>(newRoot);
   }
 
-  /** Insert `value` (interned on entry) before `index`, an integer in `[0, length]` (else a `RangeError`); O(log n) expected. */
-  insert(index: number, value: T): ValueList<T> {
-    return this.splice(insertionIndex(index, this.length, 'ValueList.insert'), 0, value);
+  /** The list with `value` (interned on entry) inserted before `index`, an integer in `[0, length]` (else a `RangeError`); O(log n) expected. */
+  inserted(index: number, value: T): ValueList<T> {
+    return this.toSpliced(insertionIndex(index, this.length, 'ValueList.inserted'), 0, value);
   }
-  /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`); O(log n) expected. */
-  remove(index: number): ValueList<T> {
-    return this.splice(elementIndex(index, this.length, 'ValueList.remove'), 1);
+  /** The list without the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`); O(log n) expected. */
+  removed(index: number): ValueList<T> {
+    return this.toSpliced(elementIndex(index, this.length, 'ValueList.removed'), 1);
   }
   /**
    * Elements `[start, end)`, the part of that range that exists:
@@ -670,7 +701,7 @@ export class ValueList<T> implements Iterable<T> {
     if (end < 0) end = Math.max(0, n + end);
     end = Math.min(end, n);
     if (start >= end) return ValueList.empty<T>();
-    return this.splice(end, n - end).splice(0, start);
+    return this.toSpliced(end, n - end).toSpliced(0, start);
   }
   /** This list followed by `other`; O(log n) expected — the two trees meet at one re-chunked seam. */
   concat(other: ValueList<T>): ValueList<T> {
@@ -741,9 +772,9 @@ export class ValueList<T> implements Iterable<T> {
     return findIndexIn(this, this, true, fn as never, thisArg);
   }
 
-  // `Array`'s copying reorders (ES2023). The list already names its copying
-  // edits `splice` and `set`, where `Array` needed `toSpliced` and `with`
-  // because its short names mutate; a list has no `sort` to confuse these with.
+  // `Array`'s copying reorders (ES2023), beside its copying edits `with` and
+  // `toSpliced` above: where `Array` has a name for the copy, the list uses
+  // it (D59).
 
   /**
    * A list of the elements in the order `compare` gives, as
@@ -1005,7 +1036,7 @@ function detachLast(frames: Frame[]): CNode | null {
 }
 
 // ---------------------------------------------------------------------------
-// Batch rebuild — used by setMany
+// Batch rebuild — used by _setMany
 // ---------------------------------------------------------------------------
 
 interface EditStream {

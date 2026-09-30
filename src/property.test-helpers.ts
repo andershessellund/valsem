@@ -151,9 +151,9 @@ export function shuffledClone(v: unknown, rnd: () => number): unknown {
       rnd,
       (es) => OrderedMap.from(es),
       OrderedMap.empty<unknown, unknown>(),
-      (m, [k, val]) => m.set(k, val),
-      (m, i, [k, val]) => m.insertAt(i, k, val),
-      (m, spare) => (m.has(spare) ? m : m.set(spare, 0).delete(spare)),
+      (m, [k, val]) => m.with(k, val),
+      (m, i, [k, val]) => m.insertedAt(i, k, val),
+      (m, spare) => (m.has(spare) ? m : m.with(spare, 0).deleted(spare)),
     );
   }
   if (v instanceof OrderedSet) {
@@ -163,9 +163,9 @@ export function shuffledClone(v: unknown, rnd: () => number): unknown {
       rnd,
       (xs) => OrderedSet.from(xs),
       OrderedSet.empty<unknown>(),
-      (s, x) => s.add(x),
-      (s, i, x) => s.insertAt(i, x),
-      (s, spare) => (s.has(spare) ? s : s.add(spare).delete(spare)),
+      (s, x) => s.added(x),
+      (s, i, x) => s.insertedAt(i, x),
+      (s, spare) => (s.has(spare) ? s : s.added(spare).deleted(spare)),
     );
   }
   if (v instanceof ValueMap) {
@@ -177,10 +177,10 @@ export function shuffledClone(v: unknown, rnd: () => number): unknown {
     );
     if (rnd() < 0.5) return ValueMap.from(entries);
     let m = ValueMap.empty<unknown, unknown>();
-    for (const [k, val] of entries) m = m.set(k, val);
+    for (const [k, val] of entries) m = m.with(k, val);
     if (rnd() < 0.3) {
       const spare = `spare_${Math.floor(rnd() * 1e9)}`;
-      if (!m.has(spare)) m = m.set(spare, 0).delete(spare);
+      if (!m.has(spare)) m = m.with(spare, 0).deleted(spare);
     }
     return m;
   }
@@ -191,10 +191,10 @@ export function shuffledClone(v: unknown, rnd: () => number): unknown {
     );
     if (rnd() < 0.5) return ValueSet.from(items);
     let s = ValueSet.empty<unknown>();
-    for (const x of items) s = s.add(x);
+    for (const x of items) s = s.added(x);
     if (rnd() < 0.3) {
       const spare = `spare_${Math.floor(rnd() * 1e9)}`;
-      if (!s.has(spare)) s = s.add(spare).delete(spare);
+      if (!s.has(spare)) s = s.added(spare).deleted(spare);
     }
     return s;
   }
@@ -202,8 +202,8 @@ export function shuffledClone(v: unknown, rnd: () => number): unknown {
     const items = (v as ValueList<unknown>).toArray().map((x) => shuffledClone(x, rnd));
     if (rnd() < 0.5) return ValueList.from(items);
     let l = ValueList.empty<unknown>();
-    for (const x of items) l = l.push(x);
-    if (rnd() < 0.3) l = l.push('spare').pop();
+    for (const x of items) l = l.pushed(x);
+    if (rnd() < 0.3) l = l.pushed('spare').popped();
     return l;
   }
   if (Array.isArray(v)) return v.map((x) => shuffledClone(x, rnd));

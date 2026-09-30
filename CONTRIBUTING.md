@@ -44,7 +44,7 @@ Tests sit beside the source, in `src/`, and come in four kinds. The kind
 decides the file.
 
 - **One type's behaviour** goes in that type's file (`ordered-map.test.ts`):
-  what `insertAt` does, which errors it throws, the sizes where its structure
+  what `insertedAt` does, which errors it throws, the sizes where its structure
   changes shape.
 - **A law of the whole library** gets a file of its own, named for the law
   (`negative-zero`, `markers`, `iteration`, `intern-on-entry`, `symbols`), and

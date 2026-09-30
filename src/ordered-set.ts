@@ -18,7 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, NOT_FOUND, type HNode } from './hamt.js';
@@ -47,9 +47,10 @@ type ReadonlySetReads<T> = Pick<ReadonlySet<T>, 'size' | 'has' | 'keys' | 'value
  * built. Members are interned on entry and probes are canonicalized, as in
  * every valsem collection.
  *
- * `add` appends (a present member stays where it is); `delete` removes;
- * `insertAt` places a new member at an index. `has`, `indexOf`, `at`,
- * `add`, `delete` and `insertAt` are all O(log n) expected. Iteration is in
+ * `added` appends (a present member stays where it is); `deleted` removes;
+ * `insertedAt` places a new member at an index (the draft's verbs are `add`,
+ * `delete`, `insertAt`). `has`, `indexOf`, `at`, `added`, `deleted` and
+ * `insertedAt` are all O(log n) expected. Iteration is in
  * order, O(n), and `valueList` is the canonical `ValueList` of the members,
  * shared with every other structure holding that sequence.
  */
@@ -129,16 +130,16 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     return this.#list.at(-1);
   }
 
-  /** Append `value` (interned on entry). Returns `this` if a structural equal is present. */
-  add(value: T): OrderedSet<T> {
+  /** The set with `value` (interned on entry) appended; a present member keeps its position, and the result is `this`. */
+  added(value: T): OrderedSet<T> {
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) return this;
     return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, this.#list.length, v, h, []));
   }
 
-  /** Remove a structurally equal `value`. Returns `this` if absent. */
-  delete(value: T): OrderedSet<T> {
+  /** The set without a structurally equal `value`; `this` if absent. */
+  deleted(value: T): OrderedSet<T> {
     const v = intern(value);
     const h = internHash(v);
     if (trieGet(CFG, this.#root, h, v) === NOT_FOUND) return this;
@@ -146,18 +147,14 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   }
 
   /**
-   * Insert a new member before `index` (0 ≤ index ≤ size). Throws if a
-   * structural equal is already a member — a member has one position;
-   * delete it first to move it.
+   * The set with a new member inserted before `index` (0 ≤ index ≤ size).
+   * Throws if a structural equal is already a member — a member has one
+   * position; remove it first to move it.
    */
-  insertAt(index: number, value: T): OrderedSet<T> {
-    const n = this.#list.length;
-    insertionIndex(index, n, 'OrderedSet.insertAt');
+  insertedAt(index: number, value: T): OrderedSet<T> {
     const v = intern(value);
     const h = internHash(v);
-    if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) {
-      throw new Error('valsem: OrderedSet.insertAt: the value is already a member — delete it first to move it');
-    }
+    newEntryIndex(index, this.#list.length, () => trieGet(CFG, this.#root, h, v) !== NOT_FOUND, 'OrderedSet.insertedAt', 'member', 'remove');
     return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, index, v, h, []));
   }
 

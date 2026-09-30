@@ -82,7 +82,7 @@ describe('property — collection canonical form', () => {
         const rebuilt = ValueMap.from(shuffle([...m.entries()], rnd));
         expect(rebuilt).toBe(m);
         let chained = ValueMap.empty<unknown, unknown>();
-        for (const [k, val] of shuffle([...m.entries()], rnd)) chained = chained.set(k, val);
+        for (const [k, val] of shuffle([...m.entries()], rnd)) chained = chained.with(k, val);
         expect(chained).toBe(m);
       }),
       { numRuns: 300 },
@@ -106,12 +106,12 @@ describe('property — collection canonical form', () => {
         const l = ValueList.from(items);
         expect(l.length).toBe(items.length);
         let chained = ValueList.empty<unknown>();
-        for (const x of items) chained = chained.push(x);
+        for (const x of items) chained = chained.pushed(x);
         expect(chained).toBe(l);
         expect(ValueList.from(l.toArray())).toBe(l);
         const flat = l.toArray();
         for (let i = 0; i < flat.length; i++) expect(l.get(i)).toBe(flat[i]);
-        expect(l.push('x').pop()).toBe(l);
+        expect(l.pushed('x').popped()).toBe(l);
       }),
       { numRuns: 300 },
     );

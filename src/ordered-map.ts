@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, atIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, atIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, NOT_FOUND, type HNode } from './hamt.js';
@@ -37,9 +37,10 @@ const SEED = 0x0a4d;
  * are one `===` instance however they were built. Keys and values are
  * interned on entry and probes are canonicalized.
  *
- * `set` on a present key keeps its position, as a native `Map` does; on a
- * new key it appends. `delete` removes; `insertAt` places a new entry at an
- * index. `get`, `has`, `indexOf`, `at`, `set`, `delete` and `insertAt` are
+ * `with` on a present key keeps its position, as a native `Map`'s `set`
+ * does; on a new key it appends. `deleted` removes; `insertedAt` places a
+ * new entry at an index (the draft's verbs are `set`, `delete`, `insertAt`).
+ * `get`, `has`, `indexOf`, `at`, `with`, `deleted` and `insertedAt` are
  * O(log n) expected. Iteration is in order, O(n). `keyList` and `valueList`
  * are the canonical `ValueList`s of the keys and values: two maps with the
  * same keys in the same order share one key list, whatever their values
@@ -143,11 +144,11 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   }
 
   /**
-   * Set `key` → `value` (both interned on entry). A present key keeps its
-   * position; a new key is appended. Returns `this` if the entry is already
-   * present with a structurally equal value.
+   * The map with `key` → `value` (both interned on entry). A present key
+   * keeps its position; a new key is appended. `this` if the entry is
+   * already present with a structurally equal value.
    */
-  set(key: K, value: V): OrderedMap<K, V> {
+  with(key: K, value: V): OrderedMap<K, V> {
     const k = intern(key);
     const v = intern(value);
     const h = internHash(k);
@@ -157,35 +158,31 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
       const i = keyedIndexOf(CFG, this.#keyed, k, 'OrderedMap');
       const a = trieGet(CFG, this.#root, h, k, 0, ANCHOR); // the key keeps its place, so its anchor
       const root = trieInsert(CFG, this.#root, 0, h, [k, v, a])!.node;
-      return OrderedMap.#of<K, V>({ list: this.#keys as ValueList<unknown>, root }, this.#vals.set(i, v));
+      return OrderedMap.#of<K, V>({ list: this.#keys as ValueList<unknown>, root }, this.#vals.with(i, v));
     }
-    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, this.#keys.length, k, h, [v]), this.#vals.push(v));
+    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, this.#keys.length, k, h, [v]), this.#vals.pushed(v));
   }
 
-  /** Remove a structurally equal `key`. Returns `this` if absent. */
-  delete(key: K): OrderedMap<K, V> {
+  /** The map without a structurally equal `key`; `this` if absent. */
+  deleted(key: K): OrderedMap<K, V> {
     const k = intern(key);
     const h = internHash(k);
     if (trieGet(CFG, this.#root, h, k) === NOT_FOUND) return this;
     const { keyed, index } = keyedRemove(CFG, this.#keyed, k, h, 'OrderedMap');
-    return OrderedMap.#of<K, V>(keyed, this.#vals.remove(index));
+    return OrderedMap.#of<K, V>(keyed, this.#vals.removed(index));
   }
 
   /**
-   * Insert a new entry before `index` (0 ≤ index ≤ size). Throws if a
-   * structurally equal key is present — a key has one position; delete it
-   * first to move it.
+   * The map with a new entry inserted before `index` (0 ≤ index ≤ size).
+   * Throws if a structurally equal key is present — a key has one position;
+   * remove it first to move it.
    */
-  insertAt(index: number, key: K, value: V): OrderedMap<K, V> {
-    const n = this.#keys.length;
-    insertionIndex(index, n, 'OrderedMap.insertAt');
+  insertedAt(index: number, key: K, value: V): OrderedMap<K, V> {
     const k = intern(key);
     const v = intern(value);
     const h = internHash(k);
-    if (trieGet(CFG, this.#root, h, k) !== NOT_FOUND) {
-      throw new Error('valsem: OrderedMap.insertAt: the key is already present — delete it first to move it');
-    }
-    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, index, k, h, [v]), this.#vals.insert(index, v));
+    newEntryIndex(index, this.#keys.length, () => trieGet(CFG, this.#root, h, k) !== NOT_FOUND, 'OrderedMap.insertedAt', 'key', 'remove');
+    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, index, k, h, [v]), this.#vals.inserted(index, v));
   }
 
   /** Iterate the keys in order. */

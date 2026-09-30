@@ -162,7 +162,7 @@ describe('memoize', () => {
     const first = visible(todos, { done: true });
     expect(first).toEqual(['a', 'c']);
     expect(visible(todos, { done: true })).toBe(first); // a fresh filter literal — same value, same instance
-    expect(visible(todos.push({ text: 'd', done: true }), { done: true })).toEqual(['a', 'c', 'd']);
+    expect(visible(todos.pushed({ text: 'd', done: true }), { done: true })).toEqual(['a', 'c', 'd']);
     expect(fn).toHaveBeenCalledTimes(2);
   });
 });

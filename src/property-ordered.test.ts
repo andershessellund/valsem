@@ -101,14 +101,14 @@ describe('OrderedMap / OrderedSet — random sequences against the model', () =>
           const done = stepModel(model, o);
           if (done === null) continue;
           if (done.t === 'set') {
-            m = m.set(done.k, done.v);
-            s = s.add(done.k);
+            m = m.with(done.k, done.v);
+            s = s.added(done.k);
           } else if (done.t === 'delete') {
-            m = m.delete(done.k);
-            s = s.delete(done.k);
+            m = m.deleted(done.k);
+            s = s.deleted(done.k);
           } else {
-            m = m.insertAt(done.i, done.k, done.v);
-            s = s.insertAt(done.i, done.k);
+            m = m.insertedAt(done.i, done.k, done.v);
+            s = s.insertedAt(done.i, done.k);
           }
           checkMap(m, model);
           checkSet(
@@ -131,11 +131,11 @@ describe('OrderedMap / OrderedSet — random sequences against the model', () =>
         let next = 0;
         for (let r = 0; r < 400; r++) {
           if (model.length === 0 || rnd() < 0.6) {
-            m = m.set(next, r);
+            m = m.with(next, r);
             model.push([next++, r]);
           } else {
             const i = Math.floor(rnd() * model.length);
-            m = m.delete(model[i]![0]);
+            m = m.deleted(model[i]![0]);
             model.splice(i, 1);
           }
         }
@@ -161,23 +161,23 @@ describe('OrderedMap / OrderedSet — random sequences against the model', () =>
           if (p < 0.35) {
             const i = Math.floor(rnd() * model.length);
             const [k] = model.splice(i, 1)[0]!;
-            m = m.delete(k);
-            s = s.delete(k);
+            m = m.deleted(k);
+            s = s.deleted(k);
           } else if (p < 0.7) {
             const i = Math.floor(rnd() * (model.length + 1));
             model.splice(i, 0, [next, r]);
-            m = m.insertAt(i, next, r);
-            s = s.insertAt(i, next);
+            m = m.insertedAt(i, next, r);
+            s = s.insertedAt(i, next);
             next++;
           } else if (p < 0.85) {
             model.push([next, r]);
-            m = m.set(next, r);
-            s = s.add(next);
+            m = m.with(next, r);
+            s = s.added(next);
             next++;
           } else {
             const [k] = model.pop()!;
-            m = m.delete(k);
-            s = s.delete(k);
+            m = m.deleted(k);
+            s = s.deleted(k);
           }
         }
         expect([...m.keys()]).toEqual(model.map(([k]) => k));

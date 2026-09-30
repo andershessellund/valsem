@@ -15,9 +15,14 @@ ValueMap.fromObject({ a: 1 }) === ValueMap.fromObject({ a: 1 }); // true
 ValueSet.of(1, 2) === ValueSet.from([2, 1]);                     // true — unordered
 ```
 
-Mutators are **persistent**: they return the canonical successor, sharing all
-untouched structure and allocating nothing when the result already exists. All
-three collections are backed by **hash-consed trees** (a CHAMP trie for
+Edits are **copying**, and named for their result — `with`, `pushed`,
+`added`, `deleted`, … — each returning the canonical successor, sharing all
+untouched structure and allocating nothing when the result already exists.
+The imperative verbs (`set`, `push`, `add`, `delete`) belong to the drafts
+inside `produce`, which edit in place; a value has none of them, so
+`list.push(x)` is a type error, not a silent no-op ([the two
+vocabularies](#value-names-and-draft-names)). All three collections are
+backed by **hash-consed trees** (a CHAMP trie for
 `ValueMap`/`ValueSet`, a content-chunked tree for `ValueList`): equal content
 converges on the very same tree nodes process-wide — however and in whatever
 order it was built — so deep equality is a pointer comparison, an update
@@ -28,24 +33,55 @@ Elements, keys, and values are **interned on entry**: everything stored is a
 canonical value or primitive. Structurally equal raw inputs converge
 (`ValueList.of({ a: 1 }) === ValueList.of({ a: 1 })`), raw plain data is
 frozen at the door — a stored element can never be mutated out from under its
-cached hashes — and lookups canonicalize their probe, so `get`/`has`/`delete`
+cached hashes — and lookups canonicalize their probe, so `get`/`has`/`deleted`
 accept any structurally equal key.
 
 ```ts
 const v0 = ValueList.empty<number>();
-const v1 = v0.push(1).push(2);   // ValueList [1, 2]
-const v2 = v1.pop();             // back to the canonical [1] — no allocation
-v2 === v0.push(1);               // true
+const v1 = v0.pushed(1).pushed(2); // ValueList [1, 2]
+const v2 = v1.popped();            // back to the canonical [1] — no allocation
+v2 === v0.pushed(1);               // true
+v1.last();                         // 2 — the element popped() leaves out
 
-const m1 = ValueMap.fromObject({ hp: 3 }).set('sp', 5);
-m1.get('sp');                    // 5
-[...m1];                         // ValueMap *is* a ReadonlyMap — iterate it directly
+const m1 = ValueMap.fromObject({ hp: 3 }).with('sp', 5);
+m1.get('sp');                      // 5
+[...m1];                           // ValueMap *is* a ReadonlyMap — iterate it directly
 ```
+
+### Value names and draft names
+
+Every edit on a value is a copying one, and its name says so: it is named
+for its **result**. `with(i, v)` and `with(k, v)` are the list or map with
+that entry, `Array.prototype.with`'s name for the copying `set`; the keyed
+additions and removals are `added(v)`, `deleted(k)`, `deleted(v)` and
+`removed(i)`; and the sequence edits are the past participle of the verb the
+draft uses — `pushed`, `popped`, `shifted`, `unshifted`, `inserted`,
+`insertedAt` — with `toSpliced`, `toSorted` and `toReversed` spelled as
+`Array` spells its copies. The imperative verbs belong to what mutates: the drafts inside
+`produce` (`push`, `set`, `add`, `delete`, `splice`, …) and
+`HashMap`/`HashSet`. So a value has no method named `push`, `list.push(x)` is
+a type error rather than a silent no-op, and `list.pushed(x);` as a statement
+reads as wrong as it is. A draft has the value's methods too, as what-ifs:
+`d.todos.pushed(x)` is the `ValueList` the push would give, from the draft
+as it is right now, and edits nothing. In a recipe, prefer the verbs: an
+assigned what-if is a snapshot, so `d.todos = castDraft(d.todos.pushed(x))`
+cuts off the child drafts handed out earlier, where `d.todos.push(x)` keeps
+them live ([the produce guide](./produce) has the details).
+
+| The draft edits in place | The value returns the result |
+| --- | --- |
+| `set(i, v)`, `set(k, v)`, `add(v)` | `with(i, v)`, `with(k, v)`, `added(v)` |
+| `delete(k)`, `delete(v)`, `remove(i)` | `deleted(k)`, `deleted(v)`, `removed(i)` |
+| `push(…v)`, `pop()` | `pushed(…v)`, `popped()` — the element is `last()` |
+| `unshift(…v)`, `shift()` | `unshifted(…v)`, `shifted()` — the element is `first()` |
+| `insert(i, v)`, `insertAt(i, …)` | `inserted(i, v)`, `insertedAt(i, …)` |
+| `splice(…)` | `toSpliced(…)` |
+| `clear()`, on the map and set drafts | `ValueMap.empty()`, `ValueSet.empty()`, … |
 
 **A position is checked.** What happens to an index depends on what it
 names, and what fails throws a `RangeError` before anything is touched:
 
-- **An element** (`get`, `set`, `remove`) must exist: an integer in
+- **An element** (`get`, `with`, `removed`) must exist: an integer in
   `[0, length)`. `list.get(i)` is what `arr[i]` is to an array, with its type
   made true: it returns a `T`, not a `T | undefined`, because a missing
   element throws instead of coming back as an `undefined` typed `T`. A loop
@@ -57,20 +93,21 @@ names, and what fails throws a `RangeError` before anything is touched:
   `undefined`. It is the read to probe with. The ordered collections have
   `at` alone; their strict reads are their lists', `m.keyList.get(i)` and
   `s.valueList.get(i)`.
-- **An insertion point** (`insert`, `insertAt`, `splice`'s `start`) is an
+- **An insertion point** (`inserted`, `insertedAt`, `toSpliced`'s `start`) is an
   integer in `[0, length]`, never counted from the end, so the `-1` of an
   `indexOf` miss cannot quietly mean "the last one".
 - **A range** has an answer wherever it points, the part of it that exists.
   `slice` takes `Array`'s bounds whole: a negative bound counts from the end,
-  and out of range clamps. `splice`'s count means "up to": an integer ≥ 0, or
+  and out of range clamps. `toSpliced`'s count means "up to": an integer ≥ 0, or
   `Infinity` for "the rest", clamped to what is there. A *negative* count is
   a `RangeError` (`Array` reads it as 0): how much to remove has no negative
   meaning, and a count that came out negative is a computation gone wrong.
-  `push` and `splice` take their items as `Array`'s do, `list.push(a, b)` and
-  `list.splice(i, 1, a, b)`, and return the new list. One reading differs, so
-  it throws: `splice(i, undefined, x)` deletes nothing for `Array` and would
-  remove through the end here. Leave the count out, or pass `Infinity` for
-  "the rest, and insert".
+  `pushed` and `toSpliced` take their items as `Array`'s `push` and `splice`
+  do, `list.pushed(a, b)` and `list.toSpliced(i, 1, a, b)`, and return the
+  new list. A count passed as an explicit `undefined` is a `RangeError`, with
+  or without items after it, where `Array` reads it as 0: leave it out for
+  "the rest", or pass `Infinity`, which with items is "the rest, and insert".
+  TypeScript refuses it too, by the overloads.
 - **A non-integer** (`NaN`, `1.5`, `'2'`) throws everywhere. `Array` would
   make it index 0 or 1; here that edit would land in a canonical value.
 
@@ -80,7 +117,7 @@ list.get(1);                     // 'b', typed string
 list.get(3);                     // RangeError: ValueList.get: index 3 out of range [0, 3)
 list.at(-1);                     // 'c', typed string | undefined
 list.at(3);                      // undefined
-list.remove(['a'].indexOf('z')); // RangeError: ValueList.remove: index -1 out of range [0, 3)
+list.removed(['a'].indexOf('z')); // RangeError: ValueList.removed: index -1 out of range [0, 3)
 list.slice(-2).toArray();        // ['b', 'c']: a range clamps, as Array's does
 list.slice(0, 10).length;        // 3
 ```
@@ -114,24 +151,27 @@ mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 
 `ValueList` has `Array`'s functional reads, `map`, `filter`, `reduce`, `some`,
 `every`, `find` and `findIndex`, with `Array`'s callback arguments and a
-`ValueList` where `Array` gives an array; `ValueSet` and `OrderedSet` have
-`map`, `filter`, `reduce`, `some` and `every`, whose callbacks get what their
-`forEach` passes, `(value, value, set)`. What they build is canonical like
-any other collection (`list.filter(() => true) === list`), and a set's `map`
-merges equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s
-too (a stable sort, `undefined` last, by string with no comparator), and a
-list already in order comes back as itself. There is no `toSpliced` or
-`with`: on a list `splice` and `set` are those already.
+`ValueList` where `Array` gives an array, and `first()` and `last()` for
+`at(0)` and `at(-1)`; `ValueSet` and `OrderedSet` have `map`, `filter`,
+`reduce`, `some` and `every`, whose callbacks get what their `forEach`
+passes, `(value, value, set)`. What they build is canonical like any other
+collection (`list.filter(() => true) === list`), and a set's `map` merges
+equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s too (a
+stable sort, `undefined` last, by string with no comparator), and a list
+already in order comes back as itself. `with` and `toSpliced` are `Array`'s
+names for the copying `set` and `splice`, with valsem's positions rather than
+`Array`'s (above): `with(-1, x)` throws where `Array` counts from the end,
+and an explicit `undefined` count throws where `Array` reads it as 0.
 
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
 read with `get(i)` (a size-table walk; sequential reads stay in one leaf),
 iterate in index order, and take the interned frozen snapshot with
 `toArray()` — explicitly O(n), weakly memoized, with `toArray()[i] === get(i)`
 always. Because a chunk boundary is a property of the elements beside it,
-the tree's shape is a function of the content alone, so `insert`, `remove`,
-`splice`, `slice` and `concat` are O(log n) expected (they disturb only the
-chunks around the edit), `setMany` applies a batch of point edits in one
-pass, and `ValueList.diff(a, b)` returns the changed regions between *any*
+the tree's shape is a function of the content alone, so `inserted`,
+`removed`, `toSpliced`, `slice` and `concat` are O(log n) expected (they
+disturb only the chunks around the edit), a draft's finalize applies its
+point edits in one bottom-up pass, and `ValueList.diff(a, b)` returns the changed regions between *any*
 two lists — a refetched one included — in O(c log n) expected, by skipping
 every node they share. The bounds are expected on the seeded hash, with no
 amortised rebuild anywhere. `InternedString` *does* expose its datum —
@@ -195,18 +235,18 @@ const rows = OrderedMap.from([['r2', { title: 'b' }], ['r1', { title: 'a' }]]);
 rows.get('r1');                    // { title: 'a' }
 rows.indexOf('r1');                // 1
 rows.at(0);                        // ['r2', { title: 'b' }]
-rows.set('r1', { title: 'A' });    // r1 keeps its position — native Map semantics
-rows.delete('r2').set('r2', { title: 'b' }); // …and a deleted-then-set key moves to the end
-rows.insertAt(1, 'r3', { title: 'c' });      // r2, r3, r1 — what a native Map cannot do
+rows.with('r1', { title: 'A' });   // r1 keeps its position — native Map semantics
+rows.deleted('r2').with('r2', { title: 'b' }); // …and a key deleted and put back moves to the end
+rows.insertedAt(1, 'r3', { title: 'c' });    // r2, r3, r1 — what a native Map cannot do
 [...rows.keys()];                  // ['r2', 'r1'] — always insertion order
 
-OrderedSet.of('x', 'y').add('x') === OrderedSet.of('x', 'y'); // true — a present member stays put
+OrderedSet.of('x', 'y').added('x') === OrderedSet.of('x', 'y'); // true — a present member stays put
 ```
 
-Every operation is O(log n): `get`, `has`, `set`, `delete`, `indexOf`, `at`,
-`first`, `last`, `insertAt`. Underneath are three canonical structures — a
+Every operation is O(log n): `get`, `has`, `indexOf`, `at`, `first`, `last`,
+and the copying edits `with`, `added`, `deleted`, `insertedAt`. Underneath are three canonical structures — a
 `ValueList` of the keys, a `ValueList` of the values, and a trie from key to
-value — and the trick that makes `delete` and `indexOf` logarithmic is one
+value — and the trick that makes `deleted` and `indexOf` logarithmic is one
 extra pointer per key in the trie: its **anchor**, the first element of the
 run of the key list it sits in (or, for a key that starts its run, of the
 lowest enclosing run it does not start). Following anchors upward gives the
@@ -220,7 +260,8 @@ order change" is a pointer compare, separately from "did any row change".
 `OrderedMap` is a `ReadonlyMap`; `OrderedSet` has the `ReadonlySet` read API.
 There is no set algebra on `OrderedSet` — a union has no single natural order —
 so take `ValueSet.from(orderedSet)` for that. Inside `produce` they draft as
-`DraftOrderedMap` / `DraftOrderedSet` with the same verbs plus `clear()`, and
+`DraftOrderedMap` / `DraftOrderedSet` with the mutating verbs (`set`, `add`,
+`delete`, `insertAt`, `clear()`), and
 their patches replay the recipe's operations in order: a delete's inverse is
 an insert at the index it had, and a key deleted and set back to the same
 value still yields two patches, because it moved.

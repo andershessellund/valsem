@@ -56,7 +56,7 @@ if (!child) console.log(`valsem bench — ${env.runtime.name} ${env.runtime.vers
  * A suite that declares `processes: n` is run in n processes of its own and
  * reports the MEDIAN of each cell. The hash seed is drawn per process, and
  * the shape of a content-chunked list or an anchor trie follows the hashes:
- * measured here, `OrderedMap.delete` at 10k keys ranges 28–46 µs across
+ * measured here, `OrderedMap.deleted` at 10k keys ranges 28–46 µs across
  * seeds with no code change, so one process is one draw, not the number.
  */
 function medianRows(id, n) {

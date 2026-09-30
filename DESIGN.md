@@ -117,7 +117,7 @@ intern({ a: undefined }) === intern({});   // true — the canonical form drops 
 ```
 
 Arrays are positional, so `[undefined]` has length 1 and differs from `[]`.
-`ValueMap` stores `undefined` deliberately: `m.set(k, undefined)` is a real
+`ValueMap` stores `undefined` deliberately: `m.with(k, undefined)` is a real
 entry distinct from absence (`has` distinguishes; the trie returns a
 sentinel, never `undefined`, for a miss). `ValueMap.fromObject` takes a
 *record*, so record semantics apply to its input. Why: D25.
@@ -443,19 +443,22 @@ and does not pretend to be (D29).
   `ValueMap` and `OrderedMap` implement `ReadonlyMap`; `ValueSet` and
   `OrderedSet` carry the `ReadonlySet` read API. `new Map(m)` / `new
   Set(s)` for a mutable copy (D30).
-- **Persistent updates.** Mutators return the canonical successor; an
-  unchanged write returns `this`.
+- **Copying edits, named for their result.** `with`, `pushed`, `popped`,
+  `shifted`, `unshifted`, `inserted`, `removed`, `toSpliced`, `added`,
+  `deleted` and `insertedAt` return the canonical successor; an unchanged
+  edit returns `this`. The imperative verbs (`set`, `push`, `add`, `delete`,
+  …) are the drafts', which edit in place, so no value has one (D59).
 - **Checked positions.** A positional argument is checked by what it names,
   and fails with a `RangeError` before anything is touched. An *element*
-  (`get`, `set`, `remove`) is an integer in `[0, length)`, so `get` returns
+  (`get`, `with`, `removed`) is an integer in `[0, length)`, so `get` returns
   `T`, never `undefined` for "not there": `arr[i]` with its type made true.
   `at` is `Array.prototype.at`: a negative index from the end, and
-  `undefined` for no element (D56). An *insertion point* (`insert`, `insertAt`, `splice`'s start) is
+  `undefined` for no element (D56). An *insertion point* (`inserted`, `insertedAt`, `toSpliced`'s start) is
   an integer in `[0, length]`, not counted from the end. A *range*
   has an answer wherever it points, the part that exists: `slice`'s bounds
-  keep `Array`'s clamping whole, and `splice`'s count is an amount, an
-  integer ≥ 0 or `Infinity`, clamped to what is there (a negative one
-  throws). `Array`'s
+  keep `Array`'s clamping whole, and `toSpliced`'s count is an amount, an
+  integer ≥ 0 or `Infinity`, clamped to what is there, or left out for the
+  rest (a negative or an explicit `undefined` one throws). `Array`'s
   coercion is nowhere: `NaN`, `1.5` and `'2'` throw. `first()`/`last()`
   answer `undefined` when empty; keyed lookups are queries and a miss is an
   answer (D45).
@@ -509,7 +512,7 @@ process). Why: D31.
 through a field on the root node (`root.w`): root and wrapper hold each
 other, so they are collected together, which is the lifetime a
 `WeakMap<root, wrapper>` gave them, without the table (D50). `size` is
-`root.n`. `get`/`has` walk at most seven nodes; `set`/`delete` path-copy at
+`root.n`. `get`/`has` walk at most seven nodes; `with`/`deleted` path-copy at
 most seven. The map's `[hashCode]` is the root hash.
 
 **Set algebra.** `union`, `intersection`, `difference`,
@@ -528,8 +531,8 @@ by design (§2.4).
 
 A `ValueList` is `{ #root: CNode | null, #tail: unknown[], #hash }`. The
 closed runs form a tree of consed nodes; the open last run is a plain tail
-array, so `push` and `pop` are array copies and the tree is touched only
-when a run closes.
+array, so `pushed` and `popped` are array copies and the tree is touched
+only when a run closes.
 
 **Chunking rule.** A leaf run ends after any element whose hash says
 "boundary" (`Math.imul(h, 0x9e3779b1) >>> 27 === 0`, one in 32) or at 64
@@ -551,10 +554,11 @@ pool for all heights.
 elements, and a cursor over a right context (the remainder of a list after
 a cut), re-chunk level by level until each level resynchronises with the
 right context's existing nodes, at which point the parent and everything
-after it are reused by pointer. `from`, `push`, `splice`, `concat` and
-`slice` are all calls to it. `insert` and `remove` are splices. `set` is a
-path copy when no boundary flips, else a local re-chunk. `setMany` applies
-a batch of point edits in one bottom-up pass. The bounds are expected on
+after it are reused by pointer. `from`, `pushed`, `toSpliced`, `concat` and
+`slice` are all calls to it. `inserted`, `removed`, `shifted` and
+`unshifted` are splices. `with` is a path copy when no boundary flips, else
+a local re-chunk. `_setMany`, the drafts' finalize, applies a batch of point
+edits in one bottom-up pass. The bounds are expected on
 the seeded hash, with no amortised rebuild anywhere.
 
 **Reads.** `get(i)` walks size tables, with the last leaf cached so
@@ -594,8 +598,8 @@ are `===`). `keyList` and `valueList` are public: two maps with the same
 keys in the same order share one key list whatever their values did.
 
 Operations: `get`, `has`, `indexOf`, `at`, `first`,
-`last`, `set` (a present key keeps its position; a new key appends),
-`delete`, `insertAt`, all O(log n) expected. A structural edit runs the
+`last`, `with` (a present key keeps its position; a new key appends),
+`deleted`, `insertedAt`, all O(log n) expected. A structural edit runs the
 list operation under `_record`, sets or removes the trie entry (a new key
 anchors to the tail), then applies the anchor updates the consed nodes imply
 (`applyAnchorUpdates`: one batched descent, `trieSetLast`, that rebuilds
@@ -895,7 +899,7 @@ never subtree size:
 | --- | --- |
 | plain record / array | O(width): the copy itself; the hash is O(changes) |
 | CHAMP-backed map / set | O(edits · log₃₂ n) |
-| content-chunked list | O(edits · log n) expected; `push` is a tail-array copy |
+| content-chunked list | O(edits · log n) expected; `pushed` is a tail-array copy |
 
 Plain data scales with depth; the optimised structures scale with width.
 Records are schema-narrow by nature, so plain is safe for them; sets and

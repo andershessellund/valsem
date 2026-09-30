@@ -24,43 +24,43 @@ describe('ValueMap', () => {
     expect(ValueMap.fromObject({ a: 1 })[interned]).toBe(true);
   });
 
-  it('set: new key — incremental hash matches from-scratch', () => {
+  it('with: new key — incremental hash matches from-scratch', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
-    const b = a.set('y', 2);
+    const b = a.with('y', 2);
     expect(b).toBe(ValueMap.fromObject({ x: 1, y: 2 }));
     expect(b[hashCode]).toBe(ValueMap.fromObject({ x: 1, y: 2 })[hashCode]);
   });
 
-  it('set: existing key with new value', () => {
+  it('with: existing key, new value', () => {
     const a = ValueMap.fromObject<number>({ x: 1, y: 2 });
-    const b = a.set('y', 99);
+    const b = a.with('y', 99);
     expect(b).toBe(ValueMap.fromObject({ x: 1, y: 99 }));
   });
 
-  it('set with same value returns this', () => {
+  it('with the same value returns this', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
-    expect(a.set('x', 1)).toBe(a);
+    expect(a.with('x', 1)).toBe(a);
   });
 
-  it('delete: incremental hash matches from-scratch', () => {
+  it('deleted: incremental hash matches from-scratch', () => {
     const a = ValueMap.fromObject<number>({ x: 1, y: 2, z: 3 });
-    const b = a.delete('y');
+    const b = a.deleted('y');
     expect(b).toBe(ValueMap.fromObject({ x: 1, z: 3 }));
   });
 
-  it('delete missing returns this', () => {
+  it('deleted missing returns this', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
-    expect(a.delete('y')).toBe(a);
+    expect(a.deleted('y')).toBe(a);
   });
 
-  it('delete to empty returns canonical empty', () => {
+  it('deleted to empty returns canonical empty', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
-    expect(a.delete('x')).toBe(ValueMap.empty<string, number>());
+    expect(a.deleted('x')).toBe(ValueMap.empty<string, number>());
   });
 
-  it('round-trip set/delete produces same instance', () => {
+  it('round-trip with/deleted produces same instance', () => {
     const a = ValueMap.fromObject<number>({ x: 1, y: 2 });
-    expect(a.set('z', 3).delete('z')).toBe(a);
+    expect(a.with('z', 3).deleted('z')).toBe(a);
   });
 
   it('iteration', () => {
@@ -121,11 +121,11 @@ describe('ValueMap — encapsulation & the ReadonlyMap contract', () => {
 describe('ValueMap — undefined IS a value here, unlike in records', () => {
   it('stores undefined distinctly from absence', () => {
     const base = ValueMap.fromObject<number | undefined>({ a: 1 });
-    const withU = base.set('b', undefined);
+    const withU = base.with('b', undefined);
     expect(withU.size).toBe(2);
     expect(withU.has('b')).toBe(true);
     expect(withU).not.toBe(base);
-    expect(withU.delete('b')).toBe(base); // removing it restores the canonical base
+    expect(withU.deleted('b')).toBe(base); // removing it restores the canonical base
   });
 
   it('two maps differing only by a stored undefined are distinct values', () => {
@@ -156,11 +156,11 @@ describe('ValueMap.fromObject — own keys only', () => {
 describe('ValueMap — size comes from the root', () => {
   it('agrees with a walk after every kind of update', () => {
     let m = ValueMap.empty<number, number>();
-    for (let i = 0; i < 300; i++) m = m.set(i, i);
+    for (let i = 0; i < 300; i++) m = m.with(i, i);
     expect(m.size).toBe(300);
-    m = m.set(5, 99); // update, not growth
+    m = m.with(5, 99); // update, not growth
     expect(m.size).toBe(300);
-    for (let i = 0; i < 150; i++) m = m.delete(i * 2);
+    for (let i = 0; i < 150; i++) m = m.deleted(i * 2);
     expect(m.size).toBe(150);
     expect([...m].length).toBe(150);
     expect(ValueMap.from([...m]).size).toBe(150);

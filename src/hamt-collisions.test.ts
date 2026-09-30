@@ -29,7 +29,7 @@ const { intern } = await import('./intern.js');
 describe('total-collision trie (degenerate hasher)', () => {
   it('map operations stay correct when every key collides', () => {
     let m = ValueMap.empty<string | number, number>();
-    for (let i = 0; i < 40; i++) m = m.set(`k${i}`, i).set(i, i * 10);
+    for (let i = 0; i < 40; i++) m = m.with(`k${i}`, i).with(i, i * 10);
     expect(m.size).toBe(80);
     for (let i = 0; i < 40; i++) {
       expect(m.get(`k${i}`)).toBe(i);
@@ -62,24 +62,24 @@ describe('total-collision trie (degenerate hasher)', () => {
       ['x', 1],
       ['y', 2],
     ]);
-    expect(base.set('x', 1)).toBe(base); // unchanged
-    expect(base.set('x', 9).set('x', 1)).toBe(base); // detour
+    expect(base.with('x', 1)).toBe(base); // unchanged
+    expect(base.with('x', 9).with('x', 1)).toBe(base); // detour
   });
 
   it('deleting down to one entry unwinds the whole chain', () => {
-    const single = ValueMap.empty<string, number>().set('only', 1);
+    const single = ValueMap.empty<string, number>().with('only', 1);
     const viaDetour = ValueMap.empty<string, number>()
-      .set('only', 1)
-      .set('other', 2)
-      .delete('other');
+      .with('only', 1)
+      .with('other', 2)
+      .deleted('other');
     expect(viaDetour).toBe(single);
 
-    const emptyAgain = single.delete('only');
+    const emptyAgain = single.deleted('only');
     expect(emptyAgain).toBe(ValueMap.empty());
   });
 
   it('stored undefined stays distinct from absence under total collision', () => {
-    const m = ValueMap.empty<string, number | undefined>().set('a', undefined).set('b', 1);
+    const m = ValueMap.empty<string, number | undefined>().with('a', undefined).with('b', 1);
     expect(m.has('a')).toBe(true);
     expect(m.get('a')).toBeUndefined();
     expect(m.has('zzz')).toBe(false);
@@ -105,7 +105,7 @@ describe('total-collision trie (degenerate hasher)', () => {
       const built = ValueSet.from(shuffled(members, s));
       expect(built).toBe(canonical);
       let chained = ValueSet.empty<unknown>();
-      for (const m of shuffled(members, s + 100)) chained = chained.add(m);
+      for (const m of shuffled(members, s + 100)) chained = chained.added(m);
       expect(chained).toBe(canonical);
     }
     for (const m of members) expect(canonical.has(m)).toBe(true);
@@ -123,9 +123,9 @@ describe('total-collision trie (degenerate hasher)', () => {
     expect(b).toBe(a);
     for (const [k, v] of entries) expect(a.get(k)).toBe(v);
     expect(a.get('nope')).toBeUndefined();
-    expect(a.delete('nope')).toBe(a); // collision-node miss on remove
+    expect(a.deleted('nope')).toBe(a); // collision-node miss on remove
     let drained = a;
-    for (const [k] of entries) drained = drained.delete(k);
+    for (const [k] of entries) drained = drained.deleted(k);
     expect(drained).toBe(ValueMap.empty());
   });
 
@@ -136,9 +136,9 @@ describe('total-collision trie (degenerate hasher)', () => {
     expect(b).toBe(a);
     expect(a.size).toBe(6);
     for (const x of members) expect(a.has(x)).toBe(true);
-    expect(a.delete('a').add('a')).toBe(a);
+    expect(a.deleted('a').added('a')).toBe(a);
     let drained = a;
-    for (const x of members) drained = drained.delete(x);
+    for (const x of members) drained = drained.deleted(x);
     expect(drained).toBe(ValueSet.empty());
   });
 });
@@ -147,7 +147,7 @@ describe('total-collision trie — diff through collision nodes', () => {
   it('trieDiff walks two collision nodes as one merge, and reports what difference() builds', () => {
     const xs = ['a', 'b', 'c', 'd', 1, 2, 3, 4];
     const A = ValueSet.from(xs);
-    const B = A.delete('b').delete(3).add('e').add(9);
+    const B = A.deleted('b').deleted(3).added('e').added(9);
     const onlyA: unknown[] = [];
     const onlyB: unknown[] = [];
     ValueSet._diff(A, B, (m) => onlyA.push(m), (m) => onlyB.push(m));
@@ -158,7 +158,7 @@ describe('total-collision trie — diff through collision nodes', () => {
     ValueSet._diff(A, A, (m) => only.push(m), (m) => only.push(m));
     expect(only).toEqual([]);
     const M = ValueMap.from<unknown, unknown>(xs.map((x) => [x, String(x)]));
-    const N = M.set('a', 'changed').delete(2).set(7, '7');
+    const N = M.with('a', 'changed').deleted(2).with(7, '7');
     const changed: unknown[] = [];
     const gone: unknown[] = [];
     const added: unknown[] = [];
@@ -230,10 +230,10 @@ describe('symbols inside a collision node', () => {
 
   it('as map keys, with updates and deletes inside the node', () => {
     let m = ValueMap.empty<symbol, number>();
-    registered.forEach((s, i) => (m = m.set(s, i)));
+    registered.forEach((s, i) => (m = m.with(s, i)));
     expect(m.size).toBe(4);
     registered.forEach((s, i) => expect(m.get(s)).toBe(i));
-    m = m.set(registered[1]!, 99).delete(registered[0]!);
+    m = m.with(registered[1]!, 99).deleted(registered[0]!);
     expect(m.get(registered[1]!)).toBe(99);
     expect(m.has(registered[0]!)).toBe(false);
     expect(m.size).toBe(3);
@@ -248,7 +248,7 @@ describe('symbols inside a collision node', () => {
     // Canonical order is a function of the members, not of insertion order.
     expect([...ValueSet.from(members.slice().reverse())]).toEqual([...a]);
     let shrunk = a;
-    for (const s of registered) shrunk = shrunk.delete(s);
+    for (const s of registered) shrunk = shrunk.deleted(s);
     expect(shrunk).toBe(ValueSet.from(members.filter((v) => !registered.includes(v as symbol))));
   });
 });

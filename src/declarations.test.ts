@@ -120,6 +120,70 @@ describe('the published declarations, as a consumer compiles them', () => {
     expect(diagnostics).toEqual([]);
   });
 
+  it('a value has no mutator: the imperative verbs do not compile on a value (D59)', () => {
+    // An unused @ts-expect-error is itself a diagnostic, so each line below
+    // fails the day a value grows a verb; draft-surface.test.ts checks the
+    // same at runtime, over the prototypes.
+    const diagnostics = compileConsumer(
+      declarations,
+      `
+      import { ValueList, ValueMap, ValueSet, OrderedMap, OrderedSet } from '/published/index.js';
+      const list = ValueList.of(1);
+      // @ts-expect-error
+      list.push(2);
+      // @ts-expect-error
+      list.pop();
+      // @ts-expect-error
+      list.shift();
+      // @ts-expect-error
+      list.unshift(0);
+      // @ts-expect-error
+      list.set(0, 2);
+      // @ts-expect-error
+      list.splice(0, 1);
+      // @ts-expect-error
+      list.insert(0, 2);
+      // @ts-expect-error
+      list.remove(0);
+      // @ts-expect-error
+      list.setMany([[0, 2]]);
+      // @ts-expect-error
+      list.toSpliced(0, undefined);
+      const map = ValueMap.from([['a', 1]]);
+      // @ts-expect-error
+      map.set('b', 2);
+      // @ts-expect-error
+      map.delete('a');
+      const set = ValueSet.of(1);
+      // @ts-expect-error
+      set.add(2);
+      // @ts-expect-error
+      set.delete(1);
+      const oset = OrderedSet.of(1);
+      // @ts-expect-error
+      oset.add(2);
+      // @ts-expect-error
+      oset.delete(1);
+      // @ts-expect-error
+      oset.insertAt(0, 2);
+      const omap = OrderedMap.from([['a', 1]]);
+      // @ts-expect-error
+      omap.set('b', 2);
+      // @ts-expect-error
+      omap.delete('a');
+      // @ts-expect-error
+      omap.insertAt(0, 'b', 2);
+      // And the copying names compile, chained, since each returns the value.
+      list.pushed(2).popped().with(0, 3).toSpliced(0, 1).inserted(0, 4).removed(0).shifted().unshifted(5);
+      map.with('b', 2).deleted('a');
+      set.added(2).deleted(1);
+      oset.added(2).deleted(1).insertedAt(0, 3);
+      omap.with('b', 2).deleted('a').insertedAt(0, 'c', 3);
+      `,
+    );
+    expect(diagnostics).toEqual([]);
+  });
+
   it('a consumer sees no internal member: the test hooks and the plumbing are gone', () => {
     // An unused @ts-expect-error is itself a diagnostic, so each line below
     // fails the day its member comes back.

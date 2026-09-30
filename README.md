@@ -148,7 +148,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Iterating a `Map` or `Set` draft | yields drafts | a `DraftMap`'s values (and a `DraftList`'s elements) come as drafts too, so `for (const [, v] of d.m) v.x = 1` edits; keys and set members come as the **values** they are, since a set member's content is its identity. A loop that only reads is cheaper over `current(d.m)`, which drafts nothing |
 | `castDraft()` | for a `readonly` value headed into a mutable slot | the same, and also for every whole collection assigned into a slot: `d.todos = castDraft(ValueList.of(a, b))`, since a `ValueList` slot is typed as a `DraftList` |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draftOf(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
-| Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.remove(-1)` throw, so `get` returns `T`), while `at` and ranges are `Array`'s: `list.at(-1)` is the last element, `list.at(99)` is `undefined`, `slice(0, 10)` clamps |
+| Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.removed(-1)` throw, so `get` returns `T`), while `at` and ranges are `Array`'s: `list.at(-1)` is the last element, `list.at(99)` is `undefined`, `slice(0, 10)` clamps |
 | `produce(draft, recipe)` inside a recipe | a new value; the outer draft is untouched, so use the result | the same, for every kind of draft: the draft stands for `current(draft)` |
 | Async recipes | silently wrong | rejected with an error |
 
@@ -159,6 +159,27 @@ const next = produce(state, (d) => {
 });
 produce(next, () => {}) === next; // true — no edits, same value (and the same for edits that net out)
 ```
+
+### Coming from Immutable.js
+
+Immutable.js gives its persistent collections the mutators' names (`push`,
+`set`, `delete`) and returns the new collection, so a dropped result is a
+silent no-op. valsem names a value's edits for their **result**, and keeps
+the verbs for what mutates: a mutator's name compiles only on a draft (or a
+`HashMap`/`HashSet`), and `list.pushed(x);` as a statement reads as wrong as
+it is. Positions are checked as well: Immutable's negative indices and its
+growth by `set(size, x)` are a `RangeError` here (`at` and `slice` keep
+`Array`'s bounds).
+
+| Immutable.js | valsem, on the value | valsem, on the draft inside `produce` |
+| --- | --- | --- |
+| `list.push(x)`, `list.pop()` | `list.pushed(x)`, `list.popped()` | `d.list.push(x)`, `d.list.pop()` |
+| `list.unshift(x)`, `list.shift()` | `list.unshifted(x)`, `list.shifted()` | `d.list.unshift(x)`, `d.list.shift()` |
+| `list.set(i, x)`, `list.insert(i, x)`, `list.remove(i)`, `list.splice(…)` | `list.with(i, x)`, `list.inserted(i, x)`, `list.removed(i)`, `list.toSpliced(…)` | `d.list.set(i, x)`, `insert`, `remove`, `splice` |
+| `map.set(k, v)`, `map.delete(k)` | `map.with(k, v)`, `map.deleted(k)` | `d.map.set(k, v)`, `d.map.delete(k)` |
+| `set.add(x)`, `set.delete(x)` | `set.added(x)`, `set.deleted(x)` | `d.set.add(x)`, `d.set.delete(x)` |
+| `list.first()`, `list.last()` | the same | the same, handing out drafts |
+| `withMutations(fn)` | `produce(value, fn)` | |
 
 ## Value semantics in sixty seconds
 
@@ -223,20 +244,24 @@ object, however they were built:
 import { ValueMap, ValueSet, ValueList, OrderedMap, HashMap } from 'valsem';
 
 const m1 = ValueMap.from([['a', 1], ['b', 2]]);
-const m2 = ValueMap.empty<string, number>().set('b', 2).set('a', 1);
+const m2 = ValueMap.empty<string, number>().with('b', 2).with('a', 1);
 m1 === m2;                                                   // true — different history, same value
-m1.set('a', 1) === m1;                                       // true — a no-op edit is the same value
+m1.with('a', 1) === m1;                                      // true — a no-op edit is the same value
 ValueSet.from([1, 2, 3]) === ValueSet.from([3, 2, 1]);       // true — order is not part of a set
 OrderedMap.from([['a', 1], ['b', 2]]) === OrderedMap.from([['b', 2], ['a', 1]]); // false — here it is
-ValueList.of(1, 2, 3) === ValueList.empty<number>().push(1).push(2).push(3);      // true
+ValueList.of(1, 2, 3) === ValueList.empty<number>().pushed(1).pushed(2).pushed(3); // true
 
 const cache = new HashMap<{ table: string; id: number }, Row>();
 cache.set({ table: 'users', id: 1 }, row);
 cache.get({ id: 1, table: 'users' });                        // row — mutable map, keyed by value
 ```
 
-Inside `produce` the collections draft as mutable twins (`DraftMap`,
-`DraftSet`, `DraftList`, …) with the native-looking API, and an update
+A value's edits are named for their result and return the new value —
+`with`, `pushed`, `popped`, `inserted`, `added`, `deleted`, `toSpliced` —
+while the imperative verbs (`set`, `push`, `add`, `delete`, …) belong to the
+drafts, which edit in place: `list.push(x)` on a value is a type error, not a
+silent no-op. Inside `produce` the collections draft as mutable twins
+(`DraftMap`, `DraftSet`, `DraftList`, …) with the native API, and an update
 path-copies O(log n) nodes and shares the rest. The
 [collections guide](https://andershessellund.github.io/valsem/guide/collections)
 covers each of them: the persistent `ValueMap`/`ValueSet`/`ValueList`, the
@@ -355,7 +380,7 @@ it costs.
 | `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
-| `OrderedMap`, `OrderedSet` | the same, insertion-ordered — order is part of the value; `indexOf`, `at`, `insertAt` in O(log n) (`DraftOrderedMap`/`DraftOrderedSet` inside recipes) |
+| `OrderedMap`, `OrderedSet` | the same, insertion-ordered — order is part of the value; `indexOf`, `at`, `insertedAt` in O(log n) (`DraftOrderedMap`/`DraftOrderedSet` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `InternedString`, `RawArray` | a string with its hash paid once; a large response admitted slice by slice |
 | `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |

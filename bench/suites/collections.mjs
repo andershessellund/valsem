@@ -52,11 +52,11 @@ The last rows use record values, where the semantics differ by design: valsem ca
       await cmp(`${t}: build from entries`, () => ValueMap.from(entries).size, () => IMap(entries).size, perWalk, assertEq);
       await cmp(`${t}: get (hit)`, (i) => vm.get(keys[i % N]), (i) => im.get(keys[i % N]), perOp, assertEq);
       await cmp(`${t}: has (miss)`, (i) => vm.has('nope' + (i % N)), (i) => im.has('nope' + (i % N)), perOp, assertEq);
-      await cmp(`${t}: set existing key → novel value`, (i) => vm.set(keys[i % N], -i).size, (i) => im.set(keys[i % N], -i).size, perOp, assertEq);
-      await cmp(`${t}: set new key`, (i) => vm.set('new' + i, i).size, (i) => im.set('new' + i, i).size, perOp, assertEq);
-      await cmp(`${t}: delete existing`, (i) => vm.delete(keys[i % N]).size, (i) => im.delete(keys[i % N]).size, perOp, assertEq);
+      await cmp(`${t}: set existing key → novel value`, (i) => vm.with(keys[i % N], -i).size, (i) => im.set(keys[i % N], -i).size, perOp, assertEq);
+      await cmp(`${t}: set new key`, (i) => vm.with('new' + i, i).size, (i) => im.set('new' + i, i).size, perOp, assertEq);
+      await cmp(`${t}: delete existing`, (i) => vm.deleted(keys[i % N]).size, (i) => im.delete(keys[i % N]).size, perOp, assertEq);
       await cmp(`${t}: iterate entries`, () => { let s = 0; for (const [, v] of vm) s += v; return s; }, () => { let s = 0; for (const [, v] of im) s += v; return s; }, perWalk, assertEq);
-      await cmp(`${t}: set one key, then hash`, (i) => deepHash(vm.set(keys[i % N], -i)), (i) => iHash(im.set(keys[i % N], -i)), Math.max(50, 200_000 / N), (a, b) => assertEq(typeof a, typeof b));
+      await cmp(`${t}: set one key, then hash`, (i) => deepHash(vm.with(keys[i % N], -i)), (i) => iHash(im.set(keys[i % N], -i)), Math.max(50, 200_000 / N), (a, b) => assertEq(typeof a, typeof b));
       await cmp(`${t}: equals = (independent builds)`, () => deepEqual(vm, vm2), () => iIs(im, im2), perWalk * 4, both(true));
       await cmp(`${t}: equals ≠ (one entry differs), cold`, () => deepEqual(vm, vmDiff), () => iIs(im, imDiff), perWalk * 4, both(false));
       iHash(im); iHash(imDiff);
@@ -72,10 +72,10 @@ The last rows use record values, where the semantics differ by design: valsem ca
       const t = `Set ${N}`;
       await cmp(`${t}: build from members`, () => ValueSet.from(members).size, () => ISet(members).size, perWalk, assertEq);
       await cmp(`${t}: has (hit)`, (i) => vs.has(members[i % N]), (i) => is.has(members[i % N]), perOp, assertEq);
-      await cmp(`${t}: add new member`, (i) => vs.add('new' + i).size, (i) => is.add('new' + i).size, perOp, assertEq);
-      await cmp(`${t}: delete existing`, (i) => vs.delete(members[i % N]).size, (i) => is.delete(members[i % N]).size, perOp, assertEq);
+      await cmp(`${t}: add new member`, (i) => vs.added('new' + i).size, (i) => is.add('new' + i).size, perOp, assertEq);
+      await cmp(`${t}: delete existing`, (i) => vs.deleted(members[i % N]).size, (i) => is.delete(members[i % N]).size, perOp, assertEq);
       await cmp(`${t}: iterate members`, () => { let n = 0; for (const m of vs) n += m.length; return n; }, () => { let n = 0; for (const m of is) n += m.length; return n; }, perWalk, assertEq);
-      await cmp(`${t}: add one member, then hash`, (i) => deepHash(vs.add('new' + i)), (i) => iHash(is.add('new' + i)), Math.max(50, 200_000 / N), (a, b) => assertEq(typeof a, typeof b));
+      await cmp(`${t}: add one member, then hash`, (i) => deepHash(vs.added('new' + i)), (i) => iHash(is.add('new' + i)), Math.max(50, 200_000 / N), (a, b) => assertEq(typeof a, typeof b));
       await cmp(`${t}: equals = (independent builds)`, () => deepEqual(vs, vs2), () => iIs(is, is2), perWalk * 4, both(true));
       await cmp(`${t}: equals ≠ (one member differs), cold`, () => deepEqual(vs, vsDiff), () => iIs(is, isDiff), perWalk * 4, both(false));
       iHash(is); iHash(isDiff);
@@ -85,7 +85,7 @@ The last rows use record values, where the semantics differ by design: valsem ca
       const arr = Array.from({ length: N }, (_, i) => i);
       const vl = ValueList.from(arr), il = IList(arr);
       let vl2 = ValueList.empty(), il2 = IList();
-      for (const x of arr) { vl2 = vl2.push(x); il2 = il2.push(x); }
+      for (const x of arr) { vl2 = vl2.pushed(x); il2 = il2.push(x); }
       const oneOff = arr.map((x, i) => (i === N >> 1 ? -1 : x));
       const vlDiff = ValueList.from(oneOff), ilDiff = IList(oneOff);
       const perOp = 2_000_000 / Math.log2(N + 2), perWalk = Math.max(20, 400_000 / N);
@@ -93,11 +93,11 @@ The last rows use record values, where the semantics differ by design: valsem ca
       const t = `List ${N}`;
       await cmp(`${t}: build from array`, () => ValueList.from(arr).length, () => IList(arr).size, perWalk, assertEq);
       await cmp(`${t}: get (mid index)`, (i) => vl.get((mid + i) % N), (i) => il.get((mid + i) % N), perOp, assertEq);
-      await cmp(`${t}: set (mid) → novel value`, (i) => vl.set(mid, -i).get(mid), (i) => il.set(mid, -i).get(mid), perOp, assertEq);
-      await cmp(`${t}: push`, (i) => vl.push(i).length, (i) => il.push(i).size, perOp, assertEq);
-      await cmp(`${t}: pop`, () => vl.pop().length, () => il.pop().size, perOp, assertEq);
+      await cmp(`${t}: set (mid) → novel value`, (i) => vl.with(mid, -i).get(mid), (i) => il.set(mid, -i).get(mid), perOp, assertEq);
+      await cmp(`${t}: push`, (i) => vl.pushed(i).length, (i) => il.push(i).size, perOp, assertEq);
+      await cmp(`${t}: pop`, () => vl.popped().length, () => il.pop().size, perOp, assertEq);
       await cmp(`${t}: iterate elements`, () => { let s = 0; for (const x of vl) s += x; return s; }, () => { let s = 0; for (const x of il) s += x; return s; }, perWalk, assertEq);
-      await cmp(`${t}: push one, then hash`, (i) => deepHash(vl.push(i)), (i) => iHash(il.push(i)), Math.max(50, 200_000 / N), (a, b) => assertEq(typeof a, typeof b));
+      await cmp(`${t}: push one, then hash`, (i) => deepHash(vl.pushed(i)), (i) => iHash(il.push(i)), Math.max(50, 200_000 / N), (a, b) => assertEq(typeof a, typeof b));
       await cmp(`${t}: equals = (from vs push chain)`, () => deepEqual(vl, vl2), () => iIs(il, il2), perWalk * 4, both(true));
       await cmp(`${t}: equals ≠ (one element differs), cold`, () => deepEqual(vl, vlDiff), () => iIs(il, ilDiff), perWalk * 4, both(false));
       iHash(il); iHash(ilDiff);
@@ -112,7 +112,7 @@ The last rows use record values, where the semantics differ by design: valsem ca
       // Canonical values: `entries` holds raw records (the ones `vm` interned copies of), so building from it re-admits every record.
       const canonical = entries.map(([k, v]) => [k, intern(v)]);
       await cmp('Map 10k with record values: build from canonical records', () => ValueMap.from(canonical).size, () => IMap(canonical).size, 20, assertEq);
-      await cmp('Map 10k with record values: set one raw record', (i) => vm.set('k1', { id: 1, label: 'item-1', tags: ['a', 'b'], v: i }).size, (i) => im.set('k1', { id: 1, label: 'item-1', tags: ['a', 'b'], v: i }).size, 50_000, assertEq);
+      await cmp('Map 10k with record values: set one raw record', (i) => vm.with('k1', { id: 1, label: 'item-1', tags: ['a', 'b'], v: i }).size, (i) => im.set('k1', { id: 1, label: 'item-1', tags: ['a', 'b'], v: i }).size, 50_000, assertEq);
     }
     return rows;
   },

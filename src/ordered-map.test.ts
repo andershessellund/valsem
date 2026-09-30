@@ -31,9 +31,9 @@ describe('OrderedMap — identity', () => {
   });
 
   it('equal entry sequences are the same object, however built', () => {
-    const viaSet = OrderedMap.empty<string, number>().set('a', 1).set('b', 2).set('c', 3);
+    const viaSet = OrderedMap.empty<string, number>().with('a', 1).with('b', 2).with('c', 3);
     const viaObject = OrderedMap.fromObject({ a: 1, b: 2, c: 3 });
-    const viaDetour = abc().set('d', 4).delete('d').set('b', 99).set('b', 2);
+    const viaDetour = abc().with('d', 4).deleted('d').with('b', 99).with('b', 2);
     expect(viaSet).toBe(abc());
     expect(viaObject).toBe(abc());
     expect(viaDetour).toBe(abc());
@@ -68,7 +68,7 @@ describe('OrderedMap — identity', () => {
     const m = abc();
     expect(m.keyList).toBe(ValueList.of('a', 'b', 'c'));
     expect(m.valueList).toBe(ValueList.of(1, 2, 3));
-    const changed = m.set('b', 20);
+    const changed = m.with('b', 20);
     expect(changed.keyList).toBe(m.keyList);
     expect(changed.valueList).not.toBe(m.valueList);
   });
@@ -103,7 +103,7 @@ describe('OrderedMap — reads', () => {
     expect(m.get({ tag: 'x', id: 1 })).toBe('one');
     expect(m.has({ tag: 'x', id: 1 })).toBe(true);
     expect(m.indexOf({ tag: 'x', id: 1 })).toBe(0);
-    expect(m.set({ tag: 'x', id: 1 }, 'one')).toBe(m);
+    expect(m.with({ tag: 'x', id: 1 }, 'one')).toBe(m);
   });
 
   it('iterates in insertion order: entries, keys, values, forEach, spread, new Map', () => {
@@ -138,7 +138,7 @@ describe('OrderedMap — reads', () => {
 
 describe('OrderedMap — writes', () => {
   it('set on a present key keeps its position; a new key appends', () => {
-    const m = abc().set('b', 20).set('d', 4);
+    const m = abc().with('b', 20).with('d', 4);
     expect([...m]).toEqual([
       ['a', 1],
       ['b', 20],
@@ -149,30 +149,30 @@ describe('OrderedMap — writes', () => {
 
   it('set with the same value returns this', () => {
     const m = abc();
-    expect(m.set('b', 2)).toBe(m);
+    expect(m.with('b', 2)).toBe(m);
   });
 
   it('delete removes; delete then set moves the key to the end (native Map semantics)', () => {
     const m = abc();
-    expect([...m.delete('b').keys()]).toEqual(['a', 'c']);
-    expect(m.delete('z')).toBe(m);
-    expect([...m.delete('a').set('a', 1).keys()]).toEqual(['b', 'c', 'a']);
-    expect(m.delete('a').delete('b').delete('c')).toBe(OrderedMap.empty());
+    expect([...m.deleted('b').keys()]).toEqual(['a', 'c']);
+    expect(m.deleted('z')).toBe(m);
+    expect([...m.deleted('a').with('a', 1).keys()]).toEqual(['b', 'c', 'a']);
+    expect(m.deleted('a').deleted('b').deleted('c')).toBe(OrderedMap.empty());
   });
 
   it('insertAt places a new entry; the end is an append; a present key or bad index throws', () => {
     const m = abc();
-    expect([...m.insertAt(0, 'z', 0).keys()]).toEqual(['z', 'a', 'b', 'c']);
-    expect([...m.insertAt(1, 'z', 0).keys()]).toEqual(['a', 'z', 'b', 'c']);
-    expect(m.insertAt(3, 'z', 0)).toBe(m.set('z', 0));
-    expect(() => m.insertAt(1, 'b', 0)).toThrow(/already present/);
-    expect(() => m.insertAt(4, 'z', 0)).toThrow(RangeError);
-    expect(() => m.insertAt(-1, 'z', 0)).toThrow(RangeError);
-    expect(() => m.insertAt(1.5, 'z', 0)).toThrow(RangeError);
+    expect([...m.insertedAt(0, 'z', 0).keys()]).toEqual(['z', 'a', 'b', 'c']);
+    expect([...m.insertedAt(1, 'z', 0).keys()]).toEqual(['a', 'z', 'b', 'c']);
+    expect(m.insertedAt(3, 'z', 0)).toBe(m.with('z', 0));
+    expect(() => m.insertedAt(1, 'b', 0)).toThrow(/already present/);
+    expect(() => m.insertedAt(4, 'z', 0)).toThrow(RangeError);
+    expect(() => m.insertedAt(-1, 'z', 0)).toThrow(RangeError);
+    expect(() => m.insertedAt(1.5, 'z', 0)).toThrow(RangeError);
   });
 
   it('values and keys are interned on entry: raw records come back canonical and frozen', () => {
-    const m = OrderedMap.empty<string, { n: number }>().set('a', { n: 1 });
+    const m = OrderedMap.empty<string, { n: number }>().with('a', { n: 1 });
     const v = m.get('a')!;
     expect(v).toBe(intern({ n: 1 }));
     expect(Object.isFrozen(v)).toBe(true);
@@ -180,7 +180,7 @@ describe('OrderedMap — writes', () => {
   });
 
   it('stored undefined is a real entry; fromObject drops undefined (record semantics)', () => {
-    const m = OrderedMap.empty<string, number | undefined>().set('a', undefined);
+    const m = OrderedMap.empty<string, number | undefined>().with('a', undefined);
     expect(m.size).toBe(1);
     expect(m.has('a')).toBe(true);
     expect(m.get('a')).toBeUndefined();
@@ -213,7 +213,7 @@ describe('OrderedMap — writes', () => {
     expect(nan.size).toBe(2);
     expect(nan.get(NaN)).toBe('z');
     expect(nan.indexOf(NaN)).toBe(0);
-    expect(nan.delete(NaN).size).toBe(1);
+    expect(nan.deleted(NaN).size).toBe(1);
   });
 
   it('undefined is a legitimate key, including where it starts a run and so anchors other keys', () => {
@@ -234,18 +234,18 @@ describe('OrderedMap — writes', () => {
       expect(m.indexOf(undefined)).toBe(at);
       for (let i = 0; i < entries.length; i += 5) expect(m.indexOf(entries[i]![0])).toBe(i);
       // The same value built incrementally, then edited around the undefined key.
-      const inc = OrderedMap.from(base).insertAt(at, undefined, -1);
+      const inc = OrderedMap.from(base).insertedAt(at, undefined, -1);
       expect(inc).toBe(m);
-      const next = inc.delete(entries[Math.min(at + 1, N)]![0]).set('z', 0);
+      const next = inc.deleted(entries[Math.min(at + 1, N)]![0]).with('z', 0);
       for (let i = 0; i < next.size; i += 5) expect(next.indexOf(next.at(i)![0])).toBe(i);
-      expect(next.delete(undefined).has(undefined)).toBe(false);
+      expect(next.deleted(undefined).has(undefined)).toBe(false);
     }
   });
 
   it('rejects non-value keys and values with the teaching error', () => {
-    expect(() => OrderedMap.empty<Date, number>().set(new Date(0), 1)).toThrow(/ValueDate/);
-    expect(() => OrderedMap.empty<string, Map<string, string>>().set('a', new Map())).toThrow(/ValueMap/);
-    expect(OrderedMap.empty<string, ValueDate>().set('a', ValueDate.from(0)).get('a')).toBe(ValueDate.from(0));
+    expect(() => OrderedMap.empty<Date, number>().with(new Date(0), 1)).toThrow(/ValueDate/);
+    expect(() => OrderedMap.empty<string, Map<string, string>>().with('a', new Map())).toThrow(/ValueMap/);
+    expect(OrderedMap.empty<string, ValueDate>().with('a', ValueDate.from(0)).get('a')).toBe(ValueDate.from(0));
   });
 });
 
@@ -267,7 +267,7 @@ describe('OrderedMap — sizes across tree levels', () => {
     check();
     // Deletes spread across the list, front and back included.
     for (const k of ['k0', 'k1', 'k1500', 'k2000', 'k2999', 'k2998']) {
-      m = m.delete(k);
+      m = m.deleted(k);
       model.splice(
         model.findIndex(([x]) => x === k),
         1,
@@ -279,7 +279,7 @@ describe('OrderedMap — sizes across tree levels', () => {
       [1000, 'n1'],
       [model.length, 'n2'],
     ] as [number, string][]) {
-      m = m.insertAt(i, k, -1);
+      m = m.insertedAt(i, k, -1);
       model.splice(i, 0, [k, -1]);
     }
     check();

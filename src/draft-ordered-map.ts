@@ -34,7 +34,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, newEntryIndex } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
@@ -66,7 +66,13 @@ export interface OrderedMapState<K = unknown, V = unknown> extends DraftState<Or
   draft: DraftOrderedMap<K, V>;
 }
 
-/** Mutable draft twin of {@link OrderedMap}, handed out inside produce(); `get()` returns drafts. */
+/**
+ * Mutable draft twin of {@link OrderedMap}, handed out inside produce(); `get()`
+ * returns drafts. The verbs (`set`, `delete`, `insertAt`, `clear`) edit in
+ * place, and the value's copying edits (`with`, `deleted`, `insertedAt`) are
+ * what-ifs, each built from a snapshot of the pending edits, O(k log n) for k
+ * of them; in a loop, `current(d.map)` once.
+ */
 export class DraftOrderedMap<K, V> {
   declare readonly [DRAFT_STATE]: OrderedMapState<K, V>;
 
@@ -170,7 +176,7 @@ export class DraftOrderedMap<K, V> {
     markChanged(s);
     const entry: Entry = { v: value, assigned: true };
     s.edits.set(k, entry);
-    if (!existed) s.work = s.work.set(k, undefined);
+    if (!existed) s.work = s.work.with(k, undefined);
     s.ops.push({ t: 'set', key: k, entry, old, existed });
     return this;
   }
@@ -182,20 +188,18 @@ export class DraftOrderedMap<K, V> {
     markChanged(s);
     const index = s.work.indexOf(k);
     const old = this.#current(s, k);
-    s.work = s.work.delete(k);
+    s.work = s.work.deleted(k);
     s.edits.delete(k);
     s.ops.push({ t: 'delete', key: k, index, old });
     return true;
   }
 
-  /** Insert a new entry before `index`; throws if the key is present. */
+  /** Insert a new entry before `index` (0 ≤ index ≤ size); throws if the key is present — a key has one position; delete it first to move it. */
   insertAt(index: number, key: K, value: V): this {
     const s = this.#state;
     const k = intern(key);
-    if (s.work.has(k)) {
-      throw new Error('valsem: OrderedMap.insertAt: the key is already present — delete it first to move it');
-    }
-    const next = s.work.insertAt(index, k, undefined); // validates the index
+    newEntryIndex(index, s.work.size, () => s.work.has(k), 'DraftOrderedMap.insertAt', 'key', 'delete');
+    const next = s.work.insertedAt(index, k, undefined);
     assertAssignable(value, s);
     markChanged(s);
     const entry: Entry = { v: value, assigned: true };
@@ -212,6 +216,28 @@ export class DraftOrderedMap<K, V> {
     s.ops.push({ t: 'clear', before: s.work, edits: s.edits });
     s.work = s.empty();
     s.edits = new Map();
+  }
+
+  // The value's copying edits are what-ifs here: the `OrderedMap` the edit
+  // would give, from the map as it is right now, and nothing edited (D59).
+  // `set`, `delete` and `insertAt` are the edits.
+
+  /** The map as it is right now with `key` → `value` (a present key keeps its position): an `OrderedMap`, as `OrderedMap.with`. To edit, `set`. */
+  with(key: K, value: V): OrderedMap<K, V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).with(key, value);
+  }
+
+  /** The map as it is right now without a structurally equal `key`: an `OrderedMap`, as `OrderedMap.deleted`. To edit, `delete`. */
+  deleted(key: K): OrderedMap<K, V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).deleted(key);
+  }
+
+  /** The map as it is right now with a new entry before `index`: an `OrderedMap`, as `OrderedMap.insertedAt`, with `insertAt`'s checks. To edit, `insertAt`. */
+  insertedAt(index: number, key: K, value: V): OrderedMap<K, V> {
+    const s = this.#state;
+    const k = intern(key);
+    newEntryIndex(index, s.work.size, () => s.work.has(k), 'DraftOrderedMap.insertedAt', 'key', 'delete');
+    return (snapshotOf(this) as OrderedMap<K, V>).insertedAt(index, k as K, value);
   }
 
   /**
@@ -307,7 +333,7 @@ function withEdits(state: OrderedMapState, snap: boolean, recorder: PatchRecorde
   let result = state.work;
   for (const [k, e] of state.edits) {
     const v = snap ? snapshotOf(e.v) : resolve(e.v, !e.assigned && childPath !== null ? childPath(k) : null, recorder);
-    result = result.set(k, v);
+    result = result.with(k, v);
   }
   return result;
 }

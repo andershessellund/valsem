@@ -188,7 +188,7 @@ describe('set members stay values (D57)', () => {
     const outer = intern({ s: ValueSet.from([inner, ValueSet.from([1, 2, 3])]) });
     const next = produce(outer, (d) => {
       d.s.delete(inner);
-      d.s.add(inner.add(3)); // now equal to the other member
+      d.s.add(inner.added(3)); // now equal to the other member
     });
     expect(next.s).toBe(ValueSet.from([ValueSet.from([1, 2, 3])]));
   });

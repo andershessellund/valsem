@@ -34,6 +34,13 @@ export interface SetState<T = unknown> extends DraftState<ValueSet<T>> {
   draft: DraftSet<T>;
 }
 
+/**
+ * Mutable draft twin of {@link ValueSet}, handed out inside produce(). The
+ * verbs (`add`, `delete`, `clear`) edit in place, and the value's copying
+ * edits (`added`, `deleted`) and the algebra are what-ifs; every edit is
+ * applied to the working set as it happens, so a what-if here costs one
+ * persistent operation, not a fold of pending edits.
+ */
 export class DraftSet<T> {
   declare readonly [DRAFT_STATE]: SetState<T>;
 
@@ -60,7 +67,7 @@ export class DraftSet<T> {
 
   add(value: T): this {
     const s = this.#state;
-    const next = s.work.add(value);
+    const next = s.work.added(value);
     if (next === s.work) return this;
     markChanged(s);
     s.work = next;
@@ -69,7 +76,7 @@ export class DraftSet<T> {
 
   delete(value: T): boolean {
     const s = this.#state;
-    const next = s.work.delete(value);
+    const next = s.work.deleted(value);
     if (next === s.work) return false;
     markChanged(s);
     s.work = next;
@@ -126,6 +133,20 @@ export class DraftSet<T> {
   /** Whether no member is in `other`, as `ValueSet.isDisjointFrom`. */
   isDisjointFrom(other: Iterable<unknown>): boolean {
     return (snapshotOf(this) as ValueSet<T>).isDisjointFrom(other);
+  }
+
+  // The value's copying edits are what-ifs here: the `ValueSet` the edit
+  // would give, from the set as it is right now, and nothing edited (D59).
+  // `add` and `delete` are the edits.
+
+  /** The set as it is right now with `value` as a member: a `ValueSet`, as `ValueSet.added`. To edit, `add`. */
+  added(value: T): ValueSet<T> {
+    return (snapshotOf(this) as ValueSet<T>).added(value);
+  }
+
+  /** The set as it is right now without a structurally equal `value`: a `ValueSet`, as `ValueSet.deleted`. To edit, `delete`. */
+  deleted(value: T): ValueSet<T> {
+    return (snapshotOf(this) as ValueSet<T>).deleted(value);
   }
 
   /** `[value, value]` pairs, as `Set.prototype.entries` gives them. */
