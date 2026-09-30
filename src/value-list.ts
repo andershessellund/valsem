@@ -568,10 +568,12 @@ export class ValueList<T> implements Iterable<T> {
    * @internal `toSpliced` with its arguments already checked (`spliceArgs`:
    * `start` a place in the list, `deleteCount` an amount clamped to what is
    * there) and the items as an array: what the drafts, `pushed`, `shifted`
-   * and `unshifted` call, with no argument limit.
+   * and `unshifted` call, with no argument limit. The count is clamped again
+   * here, since that is free and a caller that forgot would otherwise walk
+   * past the end.
    */
   _spliceItems(start: number, deleteCount: number, items: readonly T[]): ValueList<T> {
-    const end = start + deleteCount;
+    const end = Math.min(this.length, start + deleteCount);
     const root = this.#full();
     if (root === null) return ValueList.from(items);
     const s = pathTo(root, start);

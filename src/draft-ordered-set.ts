@@ -45,7 +45,13 @@ export interface OrderedSetState<T = unknown> extends DraftState<OrderedSet<T>> 
   draft: DraftOrderedSet<T>;
 }
 
-/** Mutable draft twin of {@link OrderedSet}, handed out inside produce(). */
+/**
+ * Mutable draft twin of {@link OrderedSet}, handed out inside produce(). The
+ * verbs (`add`, `delete`, `insertAt`, `clear`) edit in place, and the value's
+ * copying edits (`added`, `deleted`, `insertedAt`) are what-ifs; every edit
+ * is applied to the working set as it happens, so a what-if here costs one
+ * persistent operation, not a fold of pending edits.
+ */
 export class DraftOrderedSet<T> implements Iterable<T> {
   declare readonly [DRAFT_STATE]: OrderedSetState<T>;
 

@@ -34,6 +34,13 @@ export interface SetState<T = unknown> extends DraftState<ValueSet<T>> {
   draft: DraftSet<T>;
 }
 
+/**
+ * Mutable draft twin of {@link ValueSet}, handed out inside produce(). The
+ * verbs (`add`, `delete`, `clear`) edit in place, and the value's copying
+ * edits (`added`, `deleted`) and the algebra are what-ifs; every edit is
+ * applied to the working set as it happens, so a what-if here costs one
+ * persistent operation, not a fold of pending edits.
+ */
 export class DraftSet<T> {
   declare readonly [DRAFT_STATE]: SetState<T>;
 

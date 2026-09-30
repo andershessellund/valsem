@@ -178,8 +178,10 @@ where `Array` reads the `undefined` as 0. A count left out means "the rest",
 as it does to `Array`; a count passed as an explicit `undefined` is refused
 everywhere, on a plain array draft, a `DraftList` and a `ValueList` alike,
 where `Array` reads it as 0 (and would delete nothing before items): leave
-it out, or pass `Infinity` for the rest. TypeScript refuses it as well, by
-the overloads of `splice` and `toSpliced`.
+it out, or pass `Infinity` for the rest. On a `DraftList` and a `ValueList`
+TypeScript refuses it as well, by the overloads of `splice` and `toSpliced`;
+a plain array's `splice` is typed by the standard library, so there only the
+runtime check applies.
 
 Patches are exact for the same reason: `applyPatches` refuses a `list.set`
 or `list.splice` whose index or count does not fit the value, because a
