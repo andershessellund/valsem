@@ -100,15 +100,34 @@ as they always have. DESIGN.md §2.6.
 
 ### D10. Canonical key order is the first spelling's, not sorted
 
+A canonical record keeps the key order of the spelling that created it: the
+first one admitted while no equal record was alive. The pool is weak, so
+once that record is collected the next spelling admitted sets the order
+again, and the same `intern` can enumerate differently within one process.
+DESIGN.md §2.4.
+
 **Why.** Key order is not part of the value: equality is lookup-based and
-the record hash is an order-independent sum, so sorting bought only a
-deterministic layout across processes, which nothing else in valsem
-promises (hashes are seeded per process). **Rejected:** sorted keys, the
-first design. Sorting cost ~280 ns per record at admission and forced
-`produce` onto a slow path whenever a recipe added a key. A copy built in
-the raw object's own order also shares its hidden class. Records now follow
-the rule `ValueMap`/`ValueSet` already had: order is stable within a
-process and never meaningful. DESIGN.md §2.4.
+the record hash is an order-independent sum. A copy built in the raw
+object's own order shares its hidden class, and `produce` defines an added
+key at the end of its copy. **Cost.** History shows in an observable that
+is declared meaningless; unlike D22's `-0`, no arithmetic sees it.
+**Rejected:** sorted keys, twice. The first design sorted every record at
+admission (~280 ns per record) and forced `produce` onto a slow path
+whenever a recipe added a key. Reconsidered in 2026-09 with the
+permutations of recent key lists cached: admission moved within noise, and
+records with the same keys shared one hidden class, which speeds reads only
+at a site that sees five or more spellings (eight: 9.95 → 2.60 ns per record
+for three fields). But `produce` must rebuild a copy whenever an added key
+does not sort last, which for a new key among n is n times in n + 1, and
+for a key the engine has not seen in that position the rebuild also builds
+new hidden classes: adding one entry to a record keyed by UUIDs went from
+4.6 to 14 µs at 30 entries, 6.0 to 46 µs at 100, and 31 µs to 1.56 ms at
+1,000 (M2 Pro, Node 26.8.1). The cache fell off at nine interleaved record
+types (+25–33% admission), and the sort added 0.8 KB gzipped to an
+`intern` + `produce` bundle. **Rejected:** keys ordered by their seeded
+hash. The sort is no cheaper where the cost is (any order but insertion
+order rebuilds), the order changes on every run, and every serialised
+record would show bits of the seeded hash (D28).
 
 ### D22. `-0` is normalised to `+0` at admission
 
@@ -533,6 +552,26 @@ incoherent by construction. Web Crypto is universal in every supported
 runtime; an exotic host without it fails at import, which is the honest
 place. Hashes are process-local by design and never cross the wire.
 DESIGN.md §3.3.
+
+That holds for applications too: the seed protects hashes an attacker
+cannot see. The combiners are public and `mix` is invertible, so a record's
+hash gives back the sum of its entry terms, a one-field record's hash gives
+that field's term, and terms add. Measured in 2026-09 (M2 Pro, Node 26.8.1):
+from the hashes of 8,192 one-field records, a meet-in-the-middle search over
+the sums found ~4,000 distinct four-field records with one hash in 1.4 s,
+offline; interning them took 656 ms, against 6.4 ms for as many random
+records, and the cost grows with the square of the count. HMAC-SHA256 as
+the leaf hash made no difference: the attack never computes a leaf hash.
+Serialised `ValueMap`/`ValueSet` order, which follows the low bits of the
+members' hashes, is the same channel at a lower rate, and not enough for a
+flood on its own: the intern pool's slots and a full collision in a trie
+need all 32 bits. **Rejected:** sorting `ValueMap`/`ValueSet` iteration to
+hide the trie order. It needs a total order over every value (a class with
+only `[equals]` and `[hashCode]` has none), costs O(n log n) deep
+comparisons per new version, and leaves published hashes open.
+**Deferred:** a keyed PRF as the last step of every container hash, which
+would make published hashes safe at a cost on every `intern`; the hardening
+guide rules out publishing them instead.
 
 ### D19. Hardening rules
 

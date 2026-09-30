@@ -131,9 +131,11 @@ unordered kinds order is still *observable*, and it is never meaningful:
 - `ValueMap`/`ValueSet` iterate in a content-determined order (the trie's
   structure, driven by seeded key hashes): equal collections iterate
   identically, stable within a process, different across runs.
-- A canonical record's key layout is that of the first spelling interned
-  in this process (string keys, then symbol keys). Equal records are one
-  object, so this too is stable within a process and meaningless (D10).
+- A canonical record's key layout is that of the spelling that created it,
+  the first one admitted while no equal record was alive (string keys, then
+  symbol keys). Equal records are one object, so everyone holding it sees
+  one order; but the pool is weak, and once that object is collected the
+  next spelling admitted sets the order again. Meaningless either way (D10).
 
 If order carries meaning, put it in the value: an array or `ValueList`, or
 an ordered collection.
@@ -219,7 +221,8 @@ first two words of a 128-bit seed drawn once per process from
 primitives once, before any leaf has been hashed, and throws afterwards;
 `getHashSeed()` exposes the seed for a keyed PRF such as SipHash.
 `createMarvin32Hasher(k0, k1)` builds the default with a chosen key. Hashes
-are process-local and never cross the wire. Why: D28.
+are process-local and never cross the wire, and an application must not send
+them either (§3.4). Why: D28.
 
 ### 3.4 Canonical meta and the incremental accumulators
 
@@ -246,7 +249,10 @@ added: `produce`'s finalize delta-updates a canonical base's accumulator in
 O(changes) and interns the successor prehashed (§7.4). Both terms are
 non-linear in a **seeded** quantity, the key's hash or the position's, and
 that is what makes the sum flood-resistant: a cancelling combination of
-terms cannot be computed without the seed. (The array term was once
+terms cannot be computed without the seed, or without seeing hashes. `mix`
+is invertible with public constants, so a visible hash gives back its `acc`,
+a one-entry record's gives back its term, and seen terms add up to
+collisions whatever the leaf hasher (D28). (The array term was once
 `hash(element_i) · Pⁱ` with a public `P`; position subsets with equal `Σ Pⁱ`
 then collided any two elements under any seed. D38.) The helpers
 (`_entryTerm`, `_elementTerm`, `_recordHashOf`, `_arrayHashOf`) are the
@@ -927,8 +933,8 @@ history that costs its distinct states (D40). Numbers: BENCHMARKS.md.
   reconfigurable at any time, with a teaching error; cyclic input hits the
   cap. `deepEqual` is uncapped and total over admitted values; on raw cyclic
   input it recurses until the engine throws. There are no size limits.
-- **Seeded hashing** (§3.3) closes hash flooding; `configureHasher` is
-  one-shot.
+- **Seeded hashing** (§3.3) closes hash flooding while hash values stay in
+  the process (§3.4); `configureHasher` is one-shot.
 - **Weak pools** hold nothing alive (§4.2).
 
 Why: D19, D28. Tested in `src/hardening.test.ts` and `src/adversarial.test.ts`.

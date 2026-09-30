@@ -149,11 +149,14 @@ or which canonical instance you get. On `ValueMap`/`ValueSet` the order is
 driven by the per-process, seeded hashes of the contents — stable within a
 process, different across runs, and never meaningful. Treat it as arbitrary.
 
-Interned records follow the same rule: the canonical record's key order is
-that of the **first spelling** interned in this process — stable within a
-process (equal records are one object), possibly different across runs, and
-never meaningful. If you need identical bytes for equal values across
-processes, sort at serialisation.
+Interned records keep the key order of the **spelling that created them**:
+the first one admitted while no equal record was alive. Keys a `produce`
+recipe adds come last. Equal records are one object, so everyone holding it
+sees one order, but the pool holds records weakly: once every reference to
+a canonical record is gone and it has been collected, the next spelling
+admitted sets the order. So the order can differ between runs and even
+within one, and it is never meaningful. If you need identical bytes for
+equal values, sort at serialisation.
 
 If order carries meaning, put it in the value: an array or `ValueList`, or,
 for a map or set whose insertion order means something, `OrderedMap` /
