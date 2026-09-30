@@ -1936,7 +1936,7 @@ draft would type as its value. It would duplicate what `draftOf` already
 does for a draft of the running recipe, minus the scope check, and make the
 lie above a typed one. **Cost.** None new. Two installed copies of valsem see
 each other's collections as different types, which is what the runtime does
-with them (D25's duplicate-install position), and a test double for a
+with them (D4), and a test double for a
 collection is built with the factories, `ValueList.of(…)`, since a value
 needs no mocking.
 
