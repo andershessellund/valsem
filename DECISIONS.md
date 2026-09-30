@@ -1892,6 +1892,54 @@ reverses D58's rejection of `toSpliced` and `with`, which are the names now,
 not aliases. Left for later: a lint rule for a discarded copying result,
 generic over the `[interned]` brand.
 
+### D60. A collection's public type is its class, not an interface
+
+`ValueList`, `ValueMap`, `ValueSet`, `OrderedMap`, `OrderedSet` and their
+drafts are exported as the classes they are, and the published declarations
+carry the classes, `#private` fields included. There is no `interface
+ValueList<T>` beside a companion object of statics, and none is planned.
+
+**Why.** A `ValueList<T>` in a type position promises that the object came
+out of ValueList's private constructor: canonical, frozen, hashed, and `===`
+to every other value of its content. TypeScript treats a class with
+`#private` fields as nominal, so the promise is exact and free: nothing else
+can inhabit the type. A structural interface weakens it to "anything shaped
+like one", and a brand member (`[toDraft]`, the one member `Draft<T>`
+inference needs) only narrows that to "anything that claims to be one". An
+impostor typed `ValueList<T>` would compare unequal to the canonical of its
+own content, silently, which is the one discernible difference between
+instances that canonicalisation forbids. The implementation relies on the
+promise as well: `concat` reads the other list's tree, `ValueList.diff` both
+operands', the set and map diffs both roots, and `ValueSet.from` takes an
+`instanceof` fast path, so an object that merely satisfied an interface
+would type-check into those calls and fail on a private member.
+
+The question was raised while the value edits were renamed (D59), for one
+benefit: passing a draft where a value is declared. That was refused on its
+own merits. A draft is not a value: its reads hand out drafts, `intern` gives
+back its snapshot rather than itself, and it dies with the recipe, so the
+type gap is the one compile-time guard against an escaped draft. Where a
+value is required, `current(draft)` is the bridge (D47), O(1) on an
+unmodified draft. Without that benefit, what an interface would buy is
+cosmetic, no `#private` marker in the declaration file, or hypothetical, a
+second implementation one day, against real costs: documentation moved onto
+interfaces, `instanceof` re-plumbed through `Symbol.hasInstance` or an `is`
+guard, and the declarations test reshaped.
+
+**Rejected:** interfaces with a companion statics object, the shape of
+lib.d.ts's `Map` and of Immutable.js's `List`. The precedents do not
+transfer: lib.d.ts declares interfaces because several engines implement
+them, Immutable.js because its factories are functions; valsem's collections
+are one class each, with private state the library reaches into.
+**Rejected:** a `[toDraft]` on the drafts returning themselves, so that a
+draft would type as its value. It would duplicate what `draftOf` already
+does for a draft of the running recipe, minus the scope check, and make the
+lie above a typed one. **Cost.** None new. Two installed copies of valsem see
+each other's collections as different types, which is what the runtime does
+with them (D4), and a test double for a
+collection is built with the factories, `ValueList.of(…)`, since a value
+needs no mocking.
+
 ## Non-goals
 
 Permanently out of scope: mutable built-ins as values; cycle support; wire
