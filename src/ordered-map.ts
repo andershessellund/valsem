@@ -14,7 +14,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, atIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, atIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, NOT_FOUND, type HNode } from './hamt.js';
@@ -178,14 +178,10 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
    * remove it first to move it.
    */
   insertedAt(index: number, key: K, value: V): OrderedMap<K, V> {
-    const n = this.#keys.length;
-    insertionIndex(index, n, 'OrderedMap.insertedAt');
     const k = intern(key);
     const v = intern(value);
     const h = internHash(k);
-    if (trieGet(CFG, this.#root, h, k) !== NOT_FOUND) {
-      throw new Error('valsem: OrderedMap.insertedAt: the key is already present — a key has one position; remove it first to move it');
-    }
+    newEntryIndex(index, this.#keys.length, () => trieGet(CFG, this.#root, h, k) !== NOT_FOUND, 'OrderedMap.insertedAt', 'key', 'remove');
     return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, index, k, h, [v]), this.#vals.inserted(index, v));
   }
 

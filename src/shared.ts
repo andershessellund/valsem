@@ -109,6 +109,30 @@ export function insertionIndex(index: number, length: number, operation: string,
   return index === 0 ? 0 : index;
 }
 
+/**
+ * The index of a new entry in an ordered collection, checked before anything
+ * is touched: a place in the sequence (`[0, size]`), and a member or key not
+ * already there, since each has one position. The one place the ordered
+ * values and their drafts check an insertion; `operation` names the caller,
+ * `subject` what is being inserted, and `verb` how to move one, `delete` on
+ * a draft (its verb) and `remove` on a value (a plain word).
+ */
+export function newEntryIndex(
+  index: number,
+  size: number,
+  present: () => boolean,
+  operation: string,
+  subject: 'member' | 'key',
+  verb: 'delete' | 'remove',
+): number {
+  const at = insertionIndex(index, size, operation);
+  if (present()) {
+    const what = subject === 'key' ? 'the key is already present — a key has one position' : 'the value is already a member — a member has one position';
+    throw new Error(`valsem: ${operation}: ${what}; ${verb} it first to move it`);
+  }
+  return at;
+}
+
 function notAnInteger(value: unknown, operation: string, name: string): RangeError {
   return new RangeError(`${operation}: ${name} must be an integer, got ${showArg(value)}`);
 }

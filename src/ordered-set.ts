@@ -18,7 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, NOT_FOUND, type HNode } from './hamt.js';
@@ -152,13 +152,9 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
    * position; remove it first to move it.
    */
   insertedAt(index: number, value: T): OrderedSet<T> {
-    const n = this.#list.length;
-    insertionIndex(index, n, 'OrderedSet.insertedAt');
     const v = intern(value);
     const h = internHash(v);
-    if (trieGet(CFG, this.#root, h, v) !== NOT_FOUND) {
-      throw new Error('valsem: OrderedSet.insertedAt: the value is already a member — a member has one position; remove it first to move it');
-    }
+    newEntryIndex(index, this.#list.length, () => trieGet(CFG, this.#root, h, v) !== NOT_FOUND, 'OrderedSet.insertedAt', 'member', 'remove');
     return OrderedSet.#of<T>(keyedInsert(CFG, this.#keyed, index, v, h, []));
   }
 

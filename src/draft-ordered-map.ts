@@ -34,7 +34,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, insertionIndex } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, newEntryIndex } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
@@ -198,7 +198,7 @@ export class DraftOrderedMap<K, V> {
   insertAt(index: number, key: K, value: V): this {
     const s = this.#state;
     const k = intern(key);
-    this.#insertable(s, index, k, 'DraftOrderedMap.insertAt');
+    newEntryIndex(index, s.work.size, () => s.work.has(k), 'DraftOrderedMap.insertAt', 'key', 'delete');
     const next = s.work.insertedAt(index, k, undefined);
     assertAssignable(value, s);
     markChanged(s);
@@ -207,14 +207,6 @@ export class DraftOrderedMap<K, V> {
     s.work = next;
     s.ops.push({ t: 'insert', index, key: k, entry });
     return this;
-  }
-
-  /** The checks of an insertion, in this draft's name: a place in the map, and a key that is not present. */
-  #insertable(s: OrderedMapState, index: number, k: unknown, operation: string): void {
-    insertionIndex(index, s.work.size, operation);
-    if (s.work.has(k)) {
-      throw new Error(`valsem: ${operation}: the key is already present — a key has one position; delete it first to move it`);
-    }
   }
 
   clear(): void {
@@ -244,7 +236,7 @@ export class DraftOrderedMap<K, V> {
   insertedAt(index: number, key: K, value: V): OrderedMap<K, V> {
     const s = this.#state;
     const k = intern(key);
-    this.#insertable(s, index, k, 'DraftOrderedMap.insertedAt');
+    newEntryIndex(index, s.work.size, () => s.work.has(k), 'DraftOrderedMap.insertedAt', 'key', 'delete');
     return (snapshotOf(this) as OrderedMap<K, V>).insertedAt(index, k as K, value);
   }
 

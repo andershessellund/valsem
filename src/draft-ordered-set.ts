@@ -22,7 +22,7 @@ import {
   snapshotOf,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn, insertionIndex } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn, newEntryIndex } from './shared.js';
 import type { OrderedSet } from './ordered-set.js';
 import type { ValueList } from './value-list.js';
 
@@ -124,20 +124,12 @@ export class DraftOrderedSet<T> implements Iterable<T> {
   insertAt(index: number, value: T): this {
     const s = this.#state;
     const v = intern(value);
-    this.#insertable(s, index, v, 'DraftOrderedSet.insertAt');
+    newEntryIndex(index, s.work.size, () => s.work.has(v), 'DraftOrderedSet.insertAt', 'member', 'delete');
     const next = s.work.insertedAt(index, v);
     markChanged(s);
     s.work = next;
     s.ops.push({ t: 'insert', index, value: v });
     return this;
-  }
-
-  /** The checks of an insertion, in this draft's name: a place in the set, and a value that is not a member. */
-  #insertable(s: OrderedSetState, index: number, v: unknown, operation: string): void {
-    insertionIndex(index, s.work.size, operation);
-    if (s.work.has(v)) {
-      throw new Error(`valsem: ${operation}: the value is already a member — a member has one position; delete it first to move it`);
-    }
   }
 
   clear(): void {
@@ -166,7 +158,7 @@ export class DraftOrderedSet<T> implements Iterable<T> {
   insertedAt(index: number, value: T): OrderedSet<T> {
     const s = this.#state;
     const v = intern(value);
-    this.#insertable(s, index, v, 'DraftOrderedSet.insertedAt');
+    newEntryIndex(index, s.work.size, () => s.work.has(v), 'DraftOrderedSet.insertedAt', 'member', 'delete');
     return (snapshotOf(this) as OrderedSet<T>).insertedAt(index, v as T);
   }
 
