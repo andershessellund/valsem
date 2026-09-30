@@ -16,6 +16,8 @@ import { ValueMap } from './value-map.js';
 import { OrderedMap } from './ordered-map.js';
 import { OrderedSet } from './ordered-set.js';
 
+type Loose = (...args: unknown[]) => unknown;
+
 describe('ValueList: the copying edit gives what the draft’s verb leaves behind', () => {
   const list = ValueList.of('a', 'b', 'c');
   it.each([
@@ -52,7 +54,10 @@ describe('ValueList: the copying edit gives what the draft’s verb leaves behin
     expect(() => list.removed(-1)).toThrow('ValueList.removed: index -1 out of range [0, 3)');
     expect(() => list.inserted(4, 'x')).toThrow('ValueList.inserted: index 4 out of range [0, 3]');
     expect(() => list.toSpliced(-1, 1)).toThrow('ValueList.toSpliced: start -1 out of range [0, 3]');
-    expect(() => list.toSpliced(0, undefined, 'x')).toThrow('ValueList.toSpliced: deleteCount must be an integer when items follow it');
+    const loose = list as unknown as Record<string, Loose>; // the overloads refuse an `undefined` count at compile time
+    expect(() => loose.toSpliced!(0, undefined, 'x')).toThrow('ValueList.toSpliced: deleteCount must be an integer, got undefined');
+    expect(() => loose.toSpliced!(0, undefined)).toThrow('ValueList.toSpliced: deleteCount must be an integer, got undefined');
+    expect(list.toSpliced(0)).toBe(ValueList.empty()); // left out, the count is the rest
   });
 });
 

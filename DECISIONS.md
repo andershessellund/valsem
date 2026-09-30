@@ -802,8 +802,9 @@ stopped being a `ValueList<unknown>`. DESIGN.md §6.2, §7.2, §9.
 **Since (2026-09, D59):** the value-side names are `with`, `removed`,
 `inserted`, `insertedAt` and `toSpliced` (`setMany` is the internal
 `_setMany`); `set`, `remove`, `insert`, `insertAt` and `splice` are the
-drafts'. The checks are as described, and a draft's what-if
-(`d.list.with(i, v)`) runs them in the draft's name.
+drafts'. The checks are as described, plus one: an explicit `undefined`
+count throws (D52's note). A draft's what-if (`d.list.with(i, v)`) runs the
+checks in the draft's name.
 
 ### D23. Ordered collections find a key's position through content-derived anchors
 
@@ -982,7 +983,13 @@ array form.
 value's methods are `pushed(...items)` and `toSpliced(start, count,
 ...items)`, and `push` and `splice` are the draft's alone, so the two no
 longer share a name; what this decision made them share, the arguments,
-they still do.
+they still do. One reading went with the review of D59's PR: an explicit
+`undefined` count is refused with or without items after it, as a plain
+array draft refused it already. `toSpliced(i)` is the rest,
+`toSpliced(i, undefined)` a `RangeError`, and the overloads, `(start)` and
+`(start, deleteCount, ...items)`, make it a type error as well; the same on
+`DraftList.splice`. Nothing is left that reads differently from `Array`
+without throwing: where `Array` coerces, valsem checks.
 
 ### D46. `JSON.stringify` sees the collections: arrays, and `[key, value]` pairs
 
@@ -1822,7 +1829,8 @@ and every draft passed as an argument, and later edits through them go
 nowhere, where `d.todos.push(x)` keeps them live; and the patch is a
 whole-slot replacement where `push` records one `list.splice`. A what-if also
 builds the snapshot on every call. `with` and `toSpliced` keep D45's checked
-positions where `Array`'s accept a negative start: a borrowed name brings its
+positions where `Array`'s accept a negative start, and refuse an explicit
+`undefined` count where `Array` reads it as 0: a borrowed name brings its
 arguments for a read (D56), but a write to a place that does not exist is an
 upstream error, and every deviation is a loud `RangeError`.
 

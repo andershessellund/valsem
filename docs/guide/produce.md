@@ -175,13 +175,11 @@ nothing is half-done when it throws. So every call `Array` would have
 coerced throws here, a required position that is missing included:
 `splice()`, `splice(undefined)` and `copyWithin(undefined, 1)` are `RangeError`s
 where `Array` reads the `undefined` as 0. A count left out means "the rest",
-as it does to `Array`. An explicit `undefined` count is where the two part:
-`Array` reads it as 0; a plain array draft, which sees its argument list,
-refuses it; a `ValueList` or `DraftList` cannot tell `toSpliced(i, undefined)`
-from `toSpliced(i)`, so it reads it as "the rest" when nothing follows and
-throws when items do (`splice(i, undefined, x)`, `toSpliced(i, undefined,
-x)`), since `Array` would delete nothing there. Pass the count (`Infinity`
-for the rest), or leave it out.
+as it does to `Array`; a count passed as an explicit `undefined` is refused
+everywhere, on a plain array draft, a `DraftList` and a `ValueList` alike,
+where `Array` reads it as 0 (and would delete nothing before items): leave
+it out, or pass `Infinity` for the rest. TypeScript refuses it as well, by
+the overloads of `splice` and `toSpliced`.
 
 Patches are exact for the same reason: `applyPatches` refuses a `list.set`
 or `list.splice` whose index or count does not fit the value, because a

@@ -157,12 +157,15 @@ describe('ValueList: an edit names a place that exists', () => {
         const toEnd = range(n);
         toEnd.splice(start);
         expect([...list.toSpliced(start)]).toEqual(toEnd);
-        expect([...list.toSpliced(start, undefined)]).toEqual(toEnd);
-        // The items follow the count as Array takes them, and Array reads an
-        // `undefined` count before items as 0: "the rest, and insert" is Infinity.
+        // An explicit `undefined` count is refused, with or without items:
+        // Array reads it as 0 (and deletes nothing before items), a list has
+        // no such reading, and the overloads refuse it at compile time, so
+        // these calls go through a loose cast. "The rest, and insert" is Infinity.
+        const loose = list as unknown as Record<string, Loose>;
+        expect(() => loose.toSpliced!(start, undefined)).toThrow(/ValueList\.toSpliced: deleteCount must be an integer, got undefined/);
         expect([...list.toSpliced(start, Infinity, ...items)]).toEqual([...toEnd, ...items]);
         if (items.length !== 0) {
-          expect(() => list.toSpliced(start, undefined, ...items)).toThrow(/ValueList\.toSpliced: deleteCount must be an integer when items follow it, got undefined/);
+          expect(() => loose.toSpliced!(start, undefined, ...items)).toThrow(/ValueList\.toSpliced: deleteCount must be an integer, got undefined/);
         }
         expect(list.toSpliced(start, del, ...items)).toBe(ValueList.from(withCount)); // and it is the canonical of that content
       }),
@@ -408,20 +411,22 @@ describe('the other index-taking entry points', () => {
     for (const bad of [...JUNK, -1]) {
       expect(() => produce(base, (d) => void (d.splice as Loose)(0, bad, 99))).toThrow(RangeError);
     }
-    // An `undefined` count before items: Array reads it as 0, "left out" reads
-    // as through the end, so it throws, and the draft is untouched.
+    // An explicit `undefined` count: Array reads it as 0, a list has no such
+    // reading, so it throws (with or without items) and the draft is untouched.
+    // The overloads refuse it at compile time, hence the loose casts.
     let threw: unknown;
     const kept = produce(base, (d) => {
       try {
-        d.splice(2, undefined, 99);
+        (d as unknown as Record<string, Loose>).splice!(2, undefined, 99);
       } catch (e) {
         threw = e;
       }
     });
     expect(threw).toBeInstanceOf(RangeError);
-    expect((threw as Error).message).toMatch(/^DraftList\.splice: deleteCount must be an integer when items follow it, got undefined/);
+    expect((threw as Error).message).toMatch(/^DraftList\.splice: deleteCount must be an integer, got undefined/);
     expect(kept).toBe(base);
-    expect([...produce(base, (d) => void d.splice(2, undefined))]).toEqual(range(2)); // with no items it is the default
+    expect(() => produce(base, (d) => void (d as unknown as Record<string, Loose>).splice!(2, undefined))).toThrow(/^DraftList\.splice: deleteCount must be an integer, got undefined/);
+    expect([...produce(base, (d) => void d.splice(2))]).toEqual(range(2)); // left out, it is the rest
     produce(base, (d) => {
       d.push(8);
       expect(d.at(8)).toBe(8); // the tail counts

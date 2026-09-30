@@ -196,13 +196,16 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return removed as T;
   }
 
-  splice(start: number, deleteCount?: number, ...values: T[]): T[] {
+  /** Replace `deleteCount` elements at `start` with `values` and return the removed ones, as `Array.prototype.splice`, with the arguments as `ValueList.toSpliced` takes them: a start that is a place in the list, a count that means "up to" or is left out, never `undefined` (D45). */
+  splice(start: number): T[];
+  splice(start: number, deleteCount: number, ...values: T[]): T[];
+  splice(start: number, ...rest: unknown[]): T[] {
     const s = this.#state;
-    for (const v of values) assertAssignable(v, s);
     // As ValueList.toSpliced: the start is a place in the list, the count means
     // "up to". Checked before anything moves.
     const len = s.work.length + s.tail.length;
-    const [at, rc] = spliceArgs(start, deleteCount, values.length, len, 'DraftList.splice');
+    const [at, rc, values] = spliceArgs<T>(start, rest, len, 'DraftList.splice');
+    for (const v of values) assertAssignable(v, s);
     flushTail(s);
     markChanged(s);
     const removed: unknown[] = [];
@@ -307,9 +310,11 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   }
 
   /** The list as it is right now with `deleteCount` elements at `start` replaced by `items`, as `ValueList.toSpliced` (its checks too): a value. To edit, `splice`. */
-  toSpliced(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
-    spliceArgs(start, deleteCount, items.length, this.length, 'DraftList.toSpliced');
-    return (snapshotOf(this) as ValueList<T>).toSpliced(start, deleteCount, ...items);
+  toSpliced(start: number): ValueList<T>;
+  toSpliced(start: number, deleteCount: number, ...items: T[]): ValueList<T>;
+  toSpliced(start: number, ...rest: unknown[]): ValueList<T> {
+    const [at, count, items] = spliceArgs<T>(start, rest, this.length, 'DraftList.toSpliced');
+    return (snapshotOf(this) as ValueList<T>)._spliceItems(at, count, items);
   }
 
   // The functional reads do not draft: their callbacks get values (a drafted

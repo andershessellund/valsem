@@ -550,15 +550,17 @@ export class ValueList<T> implements Iterable<T> {
    * `slice` are all this. `start` is where the edit lands, so it must be a
    * place in the list: an integer in `[0, length]`, not counted from the end,
    * or a `RangeError`. `deleteCount` is how much, and means "up to": an
-   * integer ≥ 0 clamped to what is there, with an omitted (or `undefined`)
-   * count, or `Infinity`, removing through the end (with items after it, an
-   * `undefined` count throws: `Array` reads that one as 0). The items follow the
-   * count as `Array.prototype.splice` takes them, so spreading an array is
-   * bounded by the engine's argument limit: for a long one, `concat` a
-   * `ValueList.from(array)`.
+   * integer ≥ 0 clamped to what is there, or `Infinity`; left out, the rest.
+   * An explicit `undefined` count throws, with or without items after it,
+   * where `Array` reads it as 0, and the overloads refuse it at compile time.
+   * The items follow the count as `Array.prototype.splice` takes them, so
+   * spreading an array is bounded by the engine's argument limit: for a long
+   * one, `concat` a `ValueList.from(array)`.
    */
-  toSpliced(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
-    const [at, count] = spliceArgs(start, deleteCount, items.length, this.length, 'ValueList.toSpliced');
+  toSpliced(start: number): ValueList<T>;
+  toSpliced(start: number, deleteCount: number, ...items: T[]): ValueList<T>;
+  toSpliced(start: number, ...rest: unknown[]): ValueList<T> {
+    const [at, count, items] = spliceArgs<T>(start, rest, this.length, 'ValueList.toSpliced');
     return this._spliceItems(at, count, items);
   }
 

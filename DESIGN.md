@@ -451,8 +451,8 @@ and does not pretend to be (D29).
   an integer in `[0, length]`, not counted from the end. A *range*
   has an answer wherever it points, the part that exists: `slice`'s bounds
   keep `Array`'s clamping whole, and `toSpliced`'s count is an amount, an
-  integer ≥ 0 or `Infinity`, clamped to what is there (a negative one
-  throws). `Array`'s
+  integer ≥ 0 or `Infinity`, clamped to what is there, or left out for the
+  rest (a negative or an explicit `undefined` one throws). `Array`'s
   coercion is nowhere: `NaN`, `1.5` and `'2'` throw. `first()`/`last()`
   answer `undefined` when empty; keyed lookups are queries and a miss is an
   answer (D45).

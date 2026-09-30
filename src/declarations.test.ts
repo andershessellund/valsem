@@ -147,6 +147,8 @@ describe('the published declarations, as a consumer compiles them', () => {
       list.remove(0);
       // @ts-expect-error
       list.setMany([[0, 2]]);
+      // @ts-expect-error
+      list.toSpliced(0, undefined);
       const map = ValueMap.from([['a', 1]]);
       // @ts-expect-error
       map.set('b', 2);

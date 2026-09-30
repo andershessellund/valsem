@@ -104,10 +104,10 @@ names, and what fails throws a `RangeError` before anything is touched:
   meaning, and a count that came out negative is a computation gone wrong.
   `pushed` and `toSpliced` take their items as `Array`'s `push` and `splice`
   do, `list.pushed(a, b)` and `list.toSpliced(i, 1, a, b)`, and return the
-  new list. One reading differs, so it throws: `toSpliced(i, undefined, x)`
-  deletes nothing for `Array`'s `splice` and would
-  remove through the end here. Leave the count out, or pass `Infinity` for
-  "the rest, and insert".
+  new list. A count passed as an explicit `undefined` is a `RangeError`, with
+  or without items after it, where `Array` reads it as 0: leave it out for
+  "the rest", or pass `Infinity`, which with items is "the rest, and insert".
+  TypeScript refuses it too, by the overloads.
 - **A non-integer** (`NaN`, `1.5`, `'2'`) throws everywhere. `Array` would
   make it index 0 or 1; here that edit would land in a canonical value.
 
@@ -161,8 +161,7 @@ stable sort, `undefined` last, by string with no comparator), and a list
 already in order comes back as itself. `with` and `toSpliced` are `Array`'s
 names for the copying `set` and `splice`, with valsem's positions rather than
 `Array`'s (above): `with(-1, x)` throws where `Array` counts from the end,
-and an explicit `undefined` count is read as "the rest" when nothing follows
-it, where `Array` reads 0, and refused when items do.
+and an explicit `undefined` count throws where `Array` reads it as 0.
 
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
 read with `get(i)` (a size-table walk; sequential reads stay in one leaf),

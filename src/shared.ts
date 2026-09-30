@@ -37,9 +37,11 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
  *   state, so the place it names must exist: no counting from the end, where
  *   an `indexOf` miss (-1) would name the last element;
  * - a RANGE. `slice`'s bounds ({@link indexArg}) are any integer or
- *   ±Infinity, clamped as `Array` clamps them; `splice`'s count
+ *   ±Infinity, clamped as `Array` clamps them; `toSpliced`'s count
  *   ({@link extentArg}) is an amount, an integer ≥ 0 or Infinity, clamped to
- *   what is there, and a negative one throws where `Array` reads it as 0. A
+ *   what is there, or left out for the rest; a negative one throws where
+ *   `Array` reads it as 0, and so does an explicit `undefined`
+ *   ({@link spliceArgs}), which `Array` reads as 0 as well. A
  *   range has an answer wherever it points, the part of it that exists, and
  *   correct programs overshoot on purpose: the top ten of seven, the short
  *   last page, "the rest".
@@ -62,31 +64,23 @@ export function extentArg(value: number, operation: string, name: string): numbe
 }
 
 /**
- * `splice`'s count when items follow it. Left out, the count means "through
- * the end"; but `Array` reads an explicit `undefined` before items as 0, so
- * one of the two readings deletes data, and the call throws. `Infinity` is
- * how to say "the rest, and insert".
+ * `toSpliced`'s arguments after the start, checked as D45 says and clamped.
+ * `start` is a place in the list (`[0, length]`); `rest` is what followed it
+ * in the call, so that a count left out ("the rest") can be told from one
+ * passed as `undefined`, which is refused with or without items after it,
+ * where `Array` reads it as 0 and a plain array draft refuses it too. The
+ * count is an amount ("up to", clamped to what is there) or `Infinity`. The
+ * one place the values and the drafts check a splice, so that their checks
+ * cannot drift; `operation` names the caller in the error.
  */
-export function spliceCount(deleteCount: number | undefined, itemCount: number, operation: string): number | undefined {
-  if (deleteCount === undefined && itemCount !== 0) {
-    throw new RangeError(`${operation}: deleteCount must be an integer when items follow it, got undefined (Infinity removes through the end)`);
-  }
-  return deleteCount;
-}
-
-/**
- * `toSpliced`'s arguments, checked as D45 says and clamped: `start` a place in
- * the list (`[0, length]`), the count an amount ("up to", clamped to what is
- * there; left out, "the rest"), and an explicit `undefined` count refused
- * where items follow it ({@link spliceCount}). The one place the values and
- * the drafts check a splice, so that their checks cannot drift; `operation`
- * names the caller in the error.
- */
-export function spliceArgs(start: number, deleteCount: number | undefined, itemCount: number, length: number, operation: string): [at: number, count: number] {
-  spliceCount(deleteCount, itemCount, operation);
+export function spliceArgs<T>(start: number, rest: readonly unknown[], length: number, operation: string): [at: number, count: number, items: readonly T[]] {
   const at = insertionIndex(start, length, operation, 'start');
-  const count = deleteCount === undefined ? length - at : Math.min(extentArg(deleteCount, operation, 'deleteCount'), length - at);
-  return [at, count];
+  if (rest.length === 0) return [at, length - at, []];
+  if (rest[0] === undefined) {
+    throw new RangeError(`${operation}: deleteCount must be an integer, got undefined (leave it out, or pass Infinity, for the rest)`);
+  }
+  const count = Math.min(extentArg(rest[0] as number, operation, 'deleteCount'), length - at);
+  return [at, count, rest.slice(1) as T[]];
 }
 
 /**

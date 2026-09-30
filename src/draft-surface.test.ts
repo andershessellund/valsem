@@ -26,6 +26,8 @@ import { OrderedSet } from './ordered-set.js';
 import { expectPatchRoundTrip } from './patches.test-helpers.js';
 import { COLLECTIONS, VALUE_TYPES } from './roster.test-helpers.js';
 
+type Loose = (...args: unknown[]) => unknown;
+
 const members = (proto: object): string[] =>
   Object.getOwnPropertyNames(proto).filter((name) => name !== 'constructor' && !name.startsWith('_'));
 
@@ -146,7 +148,8 @@ describe('what does not edit answers about the value the draft would be right no
       expect(() => d.l.removed(-1)).toThrow('DraftList.removed: index -1 out of range [0, 3)');
       expect(() => d.l.inserted(4, 0)).toThrow('DraftList.inserted: index 4 out of range [0, 3]');
       expect(() => d.l.toSpliced(4)).toThrow('DraftList.toSpliced: start 4 out of range [0, 3]');
-      expect(() => d.l.toSpliced(0, undefined, 9)).toThrow('DraftList.toSpliced: deleteCount must be an integer when items follow it');
+      expect(() => (d.l as unknown as Record<string, Loose>).toSpliced!(0, undefined, 9)).toThrow('DraftList.toSpliced: deleteCount must be an integer, got undefined');
+      expect(() => (d.l as unknown as Record<string, Loose>).toSpliced!(0, undefined)).toThrow('DraftList.toSpliced: deleteCount must be an integer, got undefined');
       expect(() => d.l.toSpliced(0, -1)).toThrow('DraftList.toSpliced: deleteCount must not be negative');
     });
   });
