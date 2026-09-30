@@ -439,10 +439,9 @@ and does not pretend to be (D29).
   Set(s)` for a mutable copy (D30).
 - **Copying edits, named for their result.** `with`, `pushed`, `popped`,
   `shifted`, `unshifted`, `inserted`, `removed`, `toSpliced`, `added`,
-  `deleted`, `insertedAt` return the canonical successor; an unchanged edit
-  returns `this`. The
-  imperative verbs (`set`, `push`, `add`, `delete`, …) are the drafts', which
-  edit in place, so no value has one (D59).
+  `deleted` and `insertedAt` return the canonical successor; an unchanged
+  edit returns `this`. The imperative verbs (`set`, `push`, `add`, `delete`,
+  …) are the drafts', which edit in place, so no value has one (D59).
 - **Checked positions.** A positional argument is checked by what it names,
   and fails with a `RangeError` before anything is touched. An *element*
   (`get`, `with`, `removed`) is an integer in `[0, length)`, so `get` returns

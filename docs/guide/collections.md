@@ -159,7 +159,10 @@ collection (`list.filter(() => true) === list`), and a set's `map` merges
 equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s too (a
 stable sort, `undefined` last, by string with no comparator), and a list
 already in order comes back as itself. `with` and `toSpliced` are `Array`'s
-too: its names for the copying `set` and `splice`.
+names for the copying `set` and `splice`, with valsem's positions rather than
+`Array`'s (above): `with(-1, x)` throws where `Array` counts from the end,
+and an explicit `undefined` count is read as "the rest" when nothing follows
+it, where `Array` reads 0, and refused when items do.
 
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
 read with `get(i)` (a size-table walk; sequential reads stay in one leaf),
@@ -234,7 +237,7 @@ rows.get('r1');                    // { title: 'a' }
 rows.indexOf('r1');                // 1
 rows.at(0);                        // ['r2', { title: 'b' }]
 rows.with('r1', { title: 'A' });   // r1 keeps its position — native Map semantics
-rows.deleted('r2').with('r2', { title: 'b' }); // …and a deleted-then-set key moves to the end
+rows.deleted('r2').with('r2', { title: 'b' }); // …and a key deleted and put back moves to the end
 rows.insertedAt(1, 'r3', { title: 'c' });    // r2, r3, r1 — what a native Map cannot do
 [...rows.keys()];                  // ['r2', 'r1'] — always insertion order
 

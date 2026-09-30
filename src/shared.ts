@@ -75,6 +75,21 @@ export function spliceCount(deleteCount: number | undefined, itemCount: number, 
 }
 
 /**
+ * `toSpliced`'s arguments, checked as D45 says and clamped: `start` a place in
+ * the list (`[0, length]`), the count an amount ("up to", clamped to what is
+ * there; left out, "the rest"), and an explicit `undefined` count refused
+ * where items follow it ({@link spliceCount}). The one place the values and
+ * the drafts check a splice, so that their checks cannot drift; `operation`
+ * names the caller in the error.
+ */
+export function spliceArgs(start: number, deleteCount: number | undefined, itemCount: number, length: number, operation: string): [at: number, count: number] {
+  spliceCount(deleteCount, itemCount, operation);
+  const at = insertionIndex(start, length, operation, 'start');
+  const count = deleteCount === undefined ? length - at : Math.min(extentArg(deleteCount, operation, 'deleteCount'), length - at);
+  return [at, count];
+}
+
+/**
  * `Array.prototype.at`'s reading of an index: counted from the end when
  * negative, and -1 when it names nothing, which is `at`'s `undefined`. Its
  * bounds are `Array`'s; its type is not, as everywhere (D45): a non-integer

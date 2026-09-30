@@ -66,7 +66,13 @@ export interface OrderedMapState<K = unknown, V = unknown> extends DraftState<Or
   draft: DraftOrderedMap<K, V>;
 }
 
-/** Mutable draft twin of {@link OrderedMap}, handed out inside produce(); `get()` returns drafts. */
+/**
+ * Mutable draft twin of {@link OrderedMap}, handed out inside produce(); `get()`
+ * returns drafts. The verbs (`set`, `delete`, `insertAt`, `clear`) edit in
+ * place, and the value's copying edits (`with`, `deleted`, `insertedAt`) are
+ * what-ifs, each built from a snapshot of the pending edits, O(k log n) for k
+ * of them; in a loop, `current(d.map)` once.
+ */
 export class DraftOrderedMap<K, V> {
   declare readonly [DRAFT_STATE]: OrderedMapState<K, V>;
 

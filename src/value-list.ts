@@ -33,7 +33,7 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, extentArg, spliceCount, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, spliceArgs } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
@@ -558,15 +558,18 @@ export class ValueList<T> implements Iterable<T> {
    * `ValueList.from(array)`.
    */
   toSpliced(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
-    return this._spliceItems(start, spliceCount(deleteCount, items.length, 'ValueList.toSpliced'), items);
+    const [at, count] = spliceArgs(start, deleteCount, items.length, this.length, 'ValueList.toSpliced');
+    return this._spliceItems(at, count, items);
   }
 
-  /** @internal `toSpliced` with the items as an array: what the drafts, `pushed`, `shifted` and `unshifted` call, with no argument limit. */
-  _spliceItems(start: number, deleteCount: number | undefined, items: readonly T[]): ValueList<T> {
-    const n = this.length;
-    start = insertionIndex(start, n, 'ValueList.toSpliced', 'start');
-    const end =
-      deleteCount === undefined ? n : Math.min(n, start + extentArg(deleteCount, 'ValueList.toSpliced', 'deleteCount'));
+  /**
+   * @internal `toSpliced` with its arguments already checked (`spliceArgs`:
+   * `start` a place in the list, `deleteCount` an amount clamped to what is
+   * there) and the items as an array: what the drafts, `pushed`, `shifted`
+   * and `unshifted` call, with no argument limit.
+   */
+  _spliceItems(start: number, deleteCount: number, items: readonly T[]): ValueList<T> {
+    const end = start + deleteCount;
     const root = this.#full();
     if (root === null) return ValueList.from(items);
     const s = pathTo(root, start);

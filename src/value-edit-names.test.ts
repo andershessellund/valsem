@@ -142,4 +142,16 @@ describe('a what-if on a draft', () => {
     expect(next.extra).toEqual({ n: 10 });
     expect(next.l).toBe(base.l);
   });
+
+  it('takes a collection draft argument the same way, as the value it holds right now', () => {
+    const base = intern({ l: ValueList.of<unknown>(1), sub: ValueList.of(2) });
+    const next = produce(base, (d) => {
+      d.sub.push(3);
+      expect(d.l.pushed(d.sub)).toBe(ValueList.of<unknown>(1, ValueList.of(2, 3)));
+      d.sub.push(4);
+      expect(d.l.pushed(d.sub)).toBe(ValueList.of<unknown>(1, ValueList.of(2, 3, 4)));
+    });
+    expect(next.sub).toBe(ValueList.of(2, 3, 4));
+    expect(next.l).toBe(base.l);
+  });
 });

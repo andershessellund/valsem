@@ -75,6 +75,13 @@ export interface MapState<K = unknown, V = unknown> extends DraftState<ValueMap<
   draft: DraftMap<K, V>;
 }
 
+/**
+ * Mutable draft twin of {@link ValueMap}, handed out inside produce(); `get()`
+ * returns drafts. The verbs (`set`, `delete`, `clear`) edit in place, and the
+ * value's copying edits (`with`, `deleted`) are what-ifs, each built from a
+ * snapshot of the pending edits, O(k log n) for k of them; in a loop,
+ * `current(d.map)` once.
+ */
 export class DraftMap<K, V> {
   declare readonly [DRAFT_STATE]: MapState<K, V>;
 

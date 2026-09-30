@@ -36,7 +36,7 @@ import {
 import { intern } from './intern.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
-import { atIndex, extentArg, spliceCount, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { atIndex, spliceArgs, elementIndex, insertionIndex, findIndexIn, reduceIn, INSPECT, type Inspect, type InspectOptions } from './shared.js';
 
 const INTERNAL = Symbol('valsem.draft-list');
 
@@ -67,6 +67,12 @@ function flushTail(s: ListState): void {
   s.tail = [];
 }
 
+/**
+ * Mutable draft twin of {@link ValueList}, handed out inside produce(): the
+ * verbs (`set`, `push`, `splice`, …) edit in place, and the value's copying
+ * edits (`with`, `pushed`, …) are what-ifs, each built from a snapshot of the
+ * pending edits, O(k log n) for k of them; in a loop, `current(d.list)` once.
+ */
 export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   declare readonly [DRAFT_STATE]: ListState<T>;
 
@@ -196,9 +202,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     // As ValueList.toSpliced: the start is a place in the list, the count means
     // "up to". Checked before anything moves.
     const len = s.work.length + s.tail.length;
-    const at = insertionIndex(start, len, 'DraftList.splice', 'start');
-    spliceCount(deleteCount, values.length, 'DraftList.splice');
-    const rc = deleteCount === undefined ? len - at : Math.min(extentArg(deleteCount, 'DraftList.splice', 'deleteCount'), len - at);
+    const [at, rc] = spliceArgs(start, deleteCount, values.length, len, 'DraftList.splice');
     flushTail(s);
     markChanged(s);
     const removed: unknown[] = [];
@@ -304,9 +308,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
 
   /** The list as it is right now with `deleteCount` elements at `start` replaced by `items`, as `ValueList.toSpliced` (its checks too): a value. To edit, `splice`. */
   toSpliced(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
-    spliceCount(deleteCount, items.length, 'DraftList.toSpliced');
-    insertionIndex(start, this.length, 'DraftList.toSpliced', 'start');
-    if (deleteCount !== undefined) extentArg(deleteCount, 'DraftList.toSpliced', 'deleteCount');
+    spliceArgs(start, deleteCount, items.length, this.length, 'DraftList.toSpliced');
     return (snapshotOf(this) as ValueList<T>).toSpliced(start, deleteCount, ...items);
   }
 
