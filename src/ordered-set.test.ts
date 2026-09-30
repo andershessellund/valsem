@@ -64,7 +64,7 @@ describe('OrderedSet', () => {
     expect(s.deleted({ x: 1 })).toBe(OrderedSet.from([{ x: 2 }]));
   });
 
-  it('add appends (a present member stays put); delete then add moves to the end', () => {
+  it('added appends (a present member stays put); deleted then added moves to the end', () => {
     const s = OrderedSet.of('a', 'b', 'c');
     expect([...s.added('d')]).toEqual(['a', 'b', 'c', 'd']);
     expect(s.added('a')).toBe(s);
@@ -73,7 +73,7 @@ describe('OrderedSet', () => {
     expect(s.deleted('a').deleted('b').deleted('c')).toBe(OrderedSet.empty());
   });
 
-  it('insertAt places a new member; a present member or a bad index throws', () => {
+  it('insertedAt places a new member; a present member or a bad index throws', () => {
     const s = OrderedSet.of('a', 'b', 'c');
     expect([...s.insertedAt(0, 'z')]).toEqual(['z', 'a', 'b', 'c']);
     expect([...s.insertedAt(2, 'z')]).toEqual(['a', 'b', 'z', 'c']);

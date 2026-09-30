@@ -193,7 +193,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   splice(start: number, deleteCount?: number, ...values: T[]): T[] {
     const s = this.#state;
     for (const v of values) assertAssignable(v, s);
-    // As ValueList.splice: the start is a place in the list, the count means
+    // As ValueList.toSpliced: the start is a place in the list, the count means
     // "up to". Checked before anything moves.
     const len = s.work.length + s.tail.length;
     const at = insertionIndex(start, len, 'DraftList.splice', 'start');
@@ -219,7 +219,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return removed as T[];
   }
 
-  /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.insert`. */
+  /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.inserted` places it. */
   insert(index: number, value: T): this {
     const s = this.#state;
     this.splice(insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insert'), 0, value);
@@ -304,10 +304,9 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
 
   /** The list as it is right now with `deleteCount` elements at `start` replaced by `items`, as `ValueList.toSpliced` (its checks too): a value. To edit, `splice`. */
   toSpliced(start: number, deleteCount?: number, ...items: T[]): ValueList<T> {
+    spliceCount(deleteCount, items.length, 'DraftList.toSpliced');
     insertionIndex(start, this.length, 'DraftList.toSpliced', 'start');
-    if (spliceCount(deleteCount, items.length, 'DraftList.toSpliced') !== undefined) {
-      extentArg(deleteCount!, 'DraftList.toSpliced', 'deleteCount');
-    }
+    if (deleteCount !== undefined) extentArg(deleteCount, 'DraftList.toSpliced', 'deleteCount');
     return (snapshotOf(this) as ValueList<T>).toSpliced(start, deleteCount, ...items);
   }
 

@@ -1184,7 +1184,7 @@
     {
       "id": "list-draft",
       "title": "ValueList inside produce — batched updates",
-      "description": "\nOne `produce` per row over a 100,000-record `ValueList`, through its draft. The draft never materialises: structural\nops go to a persistent working list as they happen, point edits and child drafts sit in an overlay by current index,\npushes wait in a tail, and finalize applies the overlay with `setMany` (one bottom-up pass that rebuilds each touched\nleaf and ancestor once) and the tail as one splice. The last row is the direct persistent operations for reference.\n",
+      "description": "\nOne `produce` per row over a 100,000-record `ValueList`, through its draft. The draft never materialises: structural\nops go to a persistent working list as they happen, point edits and child drafts sit in an overlay by current index,\npushes wait in a tail, and finalize applies the overlay with `_setMany` (one bottom-up pass that rebuilds each touched\nleaf and ancestor once) and the tail as one splice. The last row is the direct persistent operations for reference.\n",
       "columns": [
         "per produce"
       ],

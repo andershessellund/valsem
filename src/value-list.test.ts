@@ -31,14 +31,14 @@ describe('ValueList', () => {
     expect(ValueList.empty()[interned]).toBe(true);
   });
 
-  it('push: incremental hash matches from-scratch', () => {
+  it('pushed: incremental hash matches from-scratch', () => {
     const a = ValueList.of(1, 2, 3);
     const b = a.pushed(4);
     expect(b).toBe(ValueList.of(1, 2, 3, 4));
     expect(b[hashCode]).toBe(ValueList.of(1, 2, 3, 4)[hashCode]);
   });
 
-  it('push takes its values as Array.prototype.push does', () => {
+  it('pushed takes its values as Array.prototype.push does', () => {
     const a = ValueList.of(1, 2);
     expect(a.pushed(3, 4, 5)).toBe(ValueList.of(1, 2, 3, 4, 5));
     expect(a.pushed()).toBe(a);
@@ -53,35 +53,35 @@ describe('ValueList', () => {
     }
   });
 
-  it('push: pool hit avoids new allocation', () => {
+  it('pushed: pool hit avoids new allocation', () => {
     const target = ValueList.of('x', 'y');
     const built = ValueList.of('x').pushed('y');
     expect(built).toBe(target);
   });
 
-  it('pop: incremental hash matches from-scratch', () => {
+  it('popped: incremental hash matches from-scratch', () => {
     const a = ValueList.of(1, 2, 3, 4);
     const b = a.popped();
     expect(b).toBe(ValueList.of(1, 2, 3));
   });
 
-  it('pop on empty returns this', () => {
+  it('popped on empty returns this', () => {
     const e = ValueList.empty<number>();
     expect(e.popped()).toBe(e);
   });
 
-  it('set: incremental hash matches from-scratch', () => {
+  it('with: incremental hash matches from-scratch', () => {
     const a = ValueList.of('a', 'b', 'c');
     const b = a.with(1, 'B');
     expect(b).toBe(ValueList.of('a', 'B', 'c'));
   });
 
-  it('set with same value returns this', () => {
+  it('with the same value returns this', () => {
     const a = ValueList.of(1, 2, 3);
     expect(a.with(1, 2)).toBe(a);
   });
 
-  it('set out of range throws', () => {
+  it('with out of range throws', () => {
     const a = ValueList.of(1, 2);
     expect(() => a.with(5, 9)).toThrow(RangeError);
     expect(() => a.with(-1, 9)).toThrow(RangeError);
@@ -117,12 +117,12 @@ describe('ValueList', () => {
     expect(a[equals]([1])).toBe(false);
   });
 
-  it('round-trip push/pop produces same instance', () => {
+  it('round-trip pushed/popped produces same instance', () => {
     const a = ValueList.of(1, 2, 3);
     expect(a.pushed(4).popped()).toBe(a);
   });
 
-  it('NaN elements are SameValueZero (no canonical split, set is unchanged)', () => {
+  it('NaN elements are SameValueZero (no canonical split, with is unchanged)', () => {
     const a = ValueList.of(NaN);
     expect(ValueList.of(NaN)).toBe(a);
     expect(a.with(0, NaN)).toBe(a);
@@ -133,7 +133,7 @@ describe('ValueList', () => {
 describe('ValueList — hash-consed canonicality across the tree/tail boundary', () => {
   const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
 
-  it('push construction equals from() at every size through two tree levels', () => {
+  it('pushed construction equals from() at every size through two tree levels', () => {
     // Runs close on content (a boundary element, or 64 elements), not at a
     // fixed width, so this is a spread of sizes across several leaves and
     // branch levels rather than a list of known boundaries.
@@ -152,7 +152,7 @@ describe('ValueList — hash-consed canonicality across the tree/tail boundary',
     }
   });
 
-  it('pop walks back down the identical canonical instances', () => {
+  it('popped walks back down the identical canonical instances', () => {
     let l = ValueList.from(range(1100));
     for (let n = 1100; n > 1090; n--) {
       l = l.popped();
@@ -164,7 +164,7 @@ describe('ValueList — hash-consed canonicality across the tree/tail boundary',
     expect(m).toBe(ValueList.from(range(1024)));
   });
 
-  it('set() detours in the tree and the tail return to the same instance', () => {
+  it('with() detours in the tree and the tail return to the same instance', () => {
     const base = ValueList.from(range(200));
     expect(base.with(5, 999).with(5, 5)).toBe(base); // in the tree (runs cap at 64)
     expect(base.with(199, 999).with(199, 199)).toBe(base); // the last element: tail, unless it closes a run
@@ -197,7 +197,7 @@ describe('ValueList — size sweep through several tree levels', () => {
   // with from() — the canonical-form oracle — at each step.
   const N = 1_125; // roughly 35 leaves: enough for two or three branch levels
 
-  it('push-chain === from() at every size up to N', () => {
+  it('pushed-chain === from() at every size up to N', () => {
     let list = ValueList.empty<number>();
     for (let n = 1; n <= N; n++) {
       list = list.pushed(n);
@@ -206,7 +206,7 @@ describe('ValueList — size sweep through several tree levels', () => {
     }
   });
 
-  it('pop walks back down through the level collapses onto the same instances', () => {
+  it('popped walks back down through the level collapses onto the same instances', () => {
     const items = Array.from({ length: N }, (_, i) => i + 1);
     let list = ValueList.from(items);
     for (let n = N; n > 0; n--) {
@@ -225,7 +225,7 @@ describe('ValueList — size sweep through several tree levels', () => {
     expect(() => list.get(N)).toThrow(RangeError);
   });
 
-  it('set() deep in the tree detours and returns', () => {
+  it('with() deep in the tree detours and returns', () => {
     const items = Array.from({ length: N }, (_, i) => i);
     const list = ValueList.from(items);
     for (const i of [0, 31, 32, 1_023, 1_024, 1_040, N - 1]) {
@@ -313,6 +313,8 @@ describe('ValueList — property: every operation agrees with an array mirror an
   const op = fc.oneof(
     fc.record({ kind: fc.constant('push' as const), v: item }),
     fc.record({ kind: fc.constant('pop' as const) }),
+    fc.record({ kind: fc.constant('shift' as const) }),
+    fc.record({ kind: fc.constant('unshift' as const), v: item }),
     fc.record({ kind: fc.constant('set' as const), i: fc.nat(), v: item }),
     fc.record({ kind: fc.constant('insert' as const), i: fc.nat(), v: item }),
     fc.record({ kind: fc.constant('remove' as const), i: fc.nat() }),
@@ -330,6 +332,8 @@ describe('ValueList — property: every operation agrees with an array mirror an
           switch (o.kind) {
             case 'push': mirror = [...mirror, o.v]; list = list.pushed(o.v); break;
             case 'pop': mirror = mirror.slice(0, -1); list = list.popped(); break;
+            case 'shift': mirror = mirror.slice(1); list = list.shifted(); break;
+            case 'unshift': mirror = [o.v, ...mirror]; list = list.unshifted(o.v); break;
             case 'set': if (n === 0) break; { const i = o.i % n; mirror = mirror.map((x, k) => (k === i ? o.v : x)); list = list.with(i, o.v); } break;
             case 'insert': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), o.v, ...mirror.slice(i)]; list = list.inserted(i, o.v); } break;
             case 'remove': if (n === 0) break; { const i = o.i % n; mirror = [...mirror.slice(0, i), ...mirror.slice(i + 1)]; list = list.removed(i); } break;

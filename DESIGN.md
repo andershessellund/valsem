@@ -438,8 +438,9 @@ and does not pretend to be (D29).
   `OrderedSet` carry the `ReadonlySet` read API. `new Map(m)` / `new
   Set(s)` for a mutable copy (D30).
 - **Copying edits, named for their result.** `with`, `pushed`, `popped`,
-  `inserted`, `removed`, `toSpliced`, `added`, `deleted`, `insertedAt`
-  return the canonical successor; an unchanged edit returns `this`. The
+  `shifted`, `unshifted`, `inserted`, `removed`, `toSpliced`, `added`,
+  `deleted`, `insertedAt` return the canonical successor; an unchanged edit
+  returns `this`. The
   imperative verbs (`set`, `push`, `add`, `delete`, …) are the drafts', which
   edit in place, so no value has one (D59).
 - **Checked positions.** A positional argument is checked by what it names,

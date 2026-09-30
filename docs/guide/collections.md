@@ -52,18 +52,21 @@ m1.get('sp');                      // 5
 
 Every edit on a value is a copying one, and its name says so: it is named
 for its **result**. `with(i, v)` and `with(k, v)` are the list or map with
-that entry, `Array.prototype.with`'s name for the copying `set`; the
-removals are `deleted(k)`, `deleted(v)` and `removed(i)`; and the sequence
-edits are the past participle of the verb the draft uses — `pushed`,
-`popped`, `shifted`, `unshifted`, `inserted`, `insertedAt`, `added` — with
-`toSpliced`, `toSorted` and `toReversed` spelled as `Array` spells its
-copies. The imperative verbs belong to what mutates: the drafts inside
+that entry, `Array.prototype.with`'s name for the copying `set`; the keyed
+additions and removals are `added(v)`, `deleted(k)`, `deleted(v)` and
+`removed(i)`; and the sequence edits are the past participle of the verb the
+draft uses — `pushed`, `popped`, `shifted`, `unshifted`, `inserted`,
+`insertedAt` — with `toSpliced`, `toSorted` and `toReversed` spelled as
+`Array` spells its copies. The imperative verbs belong to what mutates: the drafts inside
 `produce` (`push`, `set`, `add`, `delete`, `splice`, …) and
 `HashMap`/`HashSet`. So a value has no method named `push`, `list.push(x)` is
 a type error rather than a silent no-op, and `list.pushed(x);` as a statement
 reads as wrong as it is. A draft has the value's methods too, as what-ifs:
 `d.todos.pushed(x)` is the `ValueList` the push would give, from the draft
-as it is right now, and edits nothing.
+as it is right now, and edits nothing. In a recipe, prefer the verbs: an
+assigned what-if is a snapshot, so `d.todos = castDraft(d.todos.pushed(x))`
+cuts off the child drafts handed out earlier, where `d.todos.push(x)` keeps
+them live ([the produce guide](./produce) has the details).
 
 | The draft edits in place | The value returns the result |
 | --- | --- |
@@ -73,7 +76,7 @@ as it is right now, and edits nothing.
 | `unshift(…v)`, `shift()` | `unshifted(…v)`, `shifted()` — the element is `first()` |
 | `insert(i, v)`, `insertAt(i, …)` | `inserted(i, v)`, `insertedAt(i, …)` |
 | `splice(…)` | `toSpliced(…)` |
-| `clear()` | `ValueList.empty()`, `ValueMap.empty()`, … |
+| `clear()`, on the map and set drafts | `ValueMap.empty()`, `ValueSet.empty()`, … |
 
 **A position is checked.** What happens to an index depends on what it
 names, and what fails throws a `RangeError` before anything is touched:
@@ -155,8 +158,8 @@ passes, `(value, value, set)`. What they build is canonical like any other
 collection (`list.filter(() => true) === list`), and a set's `map` merges
 equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s too (a
 stable sort, `undefined` last, by string with no comparator), and a list
-already in order comes back as itself, as are `with` and `toSpliced`,
-`Array`'s names for the copying `set` and `splice`.
+already in order comes back as itself. `with` and `toSpliced` are `Array`'s
+too: its names for the copying `set` and `splice`.
 
 `ValueList` is a hash-consed, content-chunked tree behind the same rule:
 read with `get(i)` (a size-table walk; sequential reads stay in one leaf),

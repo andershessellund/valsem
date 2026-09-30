@@ -166,7 +166,10 @@ Immutable.js gives its persistent collections the mutators' names (`push`,
 `set`, `delete`) and returns the new collection, so a dropped result is a
 silent no-op. valsem names a value's edits for their **result**, and keeps
 the verbs for what mutates: a mutator's name compiles only on a draft (or a
-`HashMap`), and `list.pushed(x);` as a statement reads as wrong as it is.
+`HashMap`/`HashSet`), and `list.pushed(x);` as a statement reads as wrong as
+it is. Positions are checked as well: Immutable's negative indices and its
+growth by `set(size, x)` are a `RangeError` here (`at` and `slice` keep
+`Array`'s bounds).
 
 | Immutable.js | valsem, on the value | valsem, on the draft inside `produce` |
 | --- | --- | --- |

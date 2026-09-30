@@ -52,7 +52,7 @@ type ReadonlySetReads<T> = Pick<
  * because the backing trie is hash-consed: sets built independently, in
  * different orders, or via add/delete detours converge on one canonical
  * instance, and deep equality is a pointer comparison. Membership probes
- * are canonicalized, so `has`/`delete` accept any structurally equal value.
+ * are canonicalized, so `has`/`deleted` accept any structurally equal value.
  *
  * **Iteration order is unspecified but content-determined.** Element order is
  * not part of the value — `{1, 2}` and `{2, 1}` are the *same* canonical

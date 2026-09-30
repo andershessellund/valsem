@@ -24,41 +24,41 @@ describe('ValueMap', () => {
     expect(ValueMap.fromObject({ a: 1 })[interned]).toBe(true);
   });
 
-  it('set: new key — incremental hash matches from-scratch', () => {
+  it('with: new key — incremental hash matches from-scratch', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
     const b = a.with('y', 2);
     expect(b).toBe(ValueMap.fromObject({ x: 1, y: 2 }));
     expect(b[hashCode]).toBe(ValueMap.fromObject({ x: 1, y: 2 })[hashCode]);
   });
 
-  it('set: existing key with new value', () => {
+  it('with: existing key, new value', () => {
     const a = ValueMap.fromObject<number>({ x: 1, y: 2 });
     const b = a.with('y', 99);
     expect(b).toBe(ValueMap.fromObject({ x: 1, y: 99 }));
   });
 
-  it('set with same value returns this', () => {
+  it('with the same value returns this', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
     expect(a.with('x', 1)).toBe(a);
   });
 
-  it('delete: incremental hash matches from-scratch', () => {
+  it('deleted: incremental hash matches from-scratch', () => {
     const a = ValueMap.fromObject<number>({ x: 1, y: 2, z: 3 });
     const b = a.deleted('y');
     expect(b).toBe(ValueMap.fromObject({ x: 1, z: 3 }));
   });
 
-  it('delete missing returns this', () => {
+  it('deleted missing returns this', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
     expect(a.deleted('y')).toBe(a);
   });
 
-  it('delete to empty returns canonical empty', () => {
+  it('deleted to empty returns canonical empty', () => {
     const a = ValueMap.fromObject<number>({ x: 1 });
     expect(a.deleted('x')).toBe(ValueMap.empty<string, number>());
   });
 
-  it('round-trip set/delete produces same instance', () => {
+  it('round-trip with/deleted produces same instance', () => {
     const a = ValueMap.fromObject<number>({ x: 1, y: 2 });
     expect(a.with('z', 3).deleted('z')).toBe(a);
   });

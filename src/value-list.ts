@@ -26,7 +26,7 @@
 // to a cut in this list), head elements, and a cursor over a right context
 // (the remainder of a list after a cut), re-chunk level by level until each
 // level resynchronises with the right context's existing nodes. `from`,
-// `push`, `splice`, `concat` and `slice` are all calls to it.
+// `pushed`, `toSpliced`, `concat` and `slice` are all calls to it.
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';

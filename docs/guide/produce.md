@@ -28,8 +28,13 @@ value the draft would be right now, as `current(draft)` would, and returns a
 value, not a draft (`toArray` included). The value's own copying edits —
 `with`, `pushed`, `added`, `deleted`, … — are among what does not edit: on a
 draft they are what-ifs, the value the edit would give. In a recipe, prefer
-the verbs: `d.todos.push(x)` records one `list.splice` patch, where
-`d.todos = castDraft(d.todos.pushed(x))` records a whole-slot replacement.
+the verbs, for two reasons. An assigned what-if is a snapshot:
+`d.todos = castDraft(d.todos.pushed(x))` puts a value in the slot, so a child
+draft handed out earlier (`const first = d.todos.get(0)`) and a draft passed
+as the argument are cut off, and a later `first.done = true` goes nowhere,
+where `d.todos.push(x)` keeps them live. And the patch is a whole-slot
+replacement, where `push` records one `list.splice`. A what-if also builds
+the snapshot on every call, so in a loop take `current(d.todos)` once.
 Iterating a `DraftList`, a `DraftMap`
 or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
 out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
@@ -171,10 +176,10 @@ coerced throws here, a required position that is missing included:
 `splice()`, `splice(undefined)` and `copyWithin(undefined, 1)` are `RangeError`s
 where `Array` reads the `undefined` as 0. An *optional* argument left
 `undefined` means its default, as it does to `Array`, with one exception:
-`splice(i, undefined, x)` throws, on a plain array, a `DraftList` and a
-`ValueList` alike, since `Array` takes that count as 0 and valsem's lists
-read a missing one as "through the end"; pass the count (`Infinity` for the
-rest), or leave it out.
+`splice(i, undefined, x)` throws, on a plain array and a `DraftList`, as
+`toSpliced(i, undefined, x)` does on a `ValueList`, since `Array` takes that
+count as 0 and valsem's lists read a missing one as "through the end"; pass
+the count (`Infinity` for the rest), or leave it out.
 
 Patches are exact for the same reason: `applyPatches` refuses a `list.set`
 or `list.splice` whose index or count does not fit the value, because a

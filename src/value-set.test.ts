@@ -28,33 +28,33 @@ describe('ValueSet', () => {
     expect(ValueSet.from([1])[interned]).toBe(true);
   });
 
-  it('add: new value', () => {
+  it('added: new value', () => {
     const a = ValueSet.from([1, 2]);
     const b = a.added(3);
     expect(b).toBe(ValueSet.from([1, 2, 3]));
   });
 
-  it('add: existing value returns this', () => {
+  it('added: existing value returns this', () => {
     const a = ValueSet.from([1, 2]);
     expect(a.added(1)).toBe(a);
   });
 
-  it('delete: existing value', () => {
+  it('deleted: existing value', () => {
     const a = ValueSet.from([1, 2, 3]);
     const b = a.deleted(2);
     expect(b).toBe(ValueSet.from([1, 3]));
   });
 
-  it('delete: missing value returns this', () => {
+  it('deleted: missing value returns this', () => {
     const a = ValueSet.from([1, 2]);
     expect(a.deleted(99)).toBe(a);
   });
 
-  it('delete to empty returns canonical empty', () => {
+  it('deleted to empty returns canonical empty', () => {
     expect(ValueSet.from([1]).deleted(1)).toBe(ValueSet.empty<number>());
   });
 
-  it('round-trip add/delete', () => {
+  it('round-trip added/deleted', () => {
     const a = ValueSet.from([1, 2]);
     expect(a.added(3).deleted(3)).toBe(a);
   });

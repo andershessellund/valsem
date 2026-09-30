@@ -62,7 +62,7 @@ without throwing. DESIGN.md §3.1.
 ### D25. `undefined` is not a value in records; `ValueMap` keeps it
 
 `{ a: undefined }` equals `{}`, and the canonical form drops the key.
-Arrays keep `undefined` (they are positional), and `ValueMap.set(k,
+Arrays keep `undefined` (they are positional), and `ValueMap.with(k,
 undefined)` is a real entry distinct from absence.
 
 **Why.** In a record the distinction is almost always an accident of
@@ -953,11 +953,12 @@ type, its markers moved from own class fields to prototype getters over a
 private field (9 ns more to construct, no own symbol properties), so a
 spread copy carries no marker. DESIGN.md §6.7.
 
-### D52. `ValueList.push` and `splice` take their items as `Array` does
+### D52. `ValueList.pushed` and `toSpliced` take their items as `Array`'s `push` and `splice` do
 
-`list.push(a, b)` and `list.splice(start, count, a, b)`: the items are rest
-arguments, as on `Array.prototype` and on `DraftList`, and the result is the
-new list.
+`list.pushed(a, b)` and `list.toSpliced(start, count, a, b)`: the items are
+rest arguments, as on `Array.prototype` and on `DraftList`'s `push` and
+`splice`, and the result is the new list. (Written for `push` and `splice`,
+the names the value's methods had until D59; the shapes are unchanged.)
 
 **Why.** A draft has every method of its value, and until now two of them
 shared a name and not a shape: `DraftList.push(a, b)` appended both,
@@ -1735,7 +1736,7 @@ everywhere since D45: `at(0.5)` and `at(NaN)` throw, where `Array` reads
 index 0. **Cost.** Breaking on the ordered collections: `at` returns
 `T | undefined` where it threw, and `keyAt` / `valueAt` are removed.
 
-### D58. `toSorted` and `toReversed`, and no `toSpliced` or `with`
+### D58. `toSorted` and `toReversed`, `Array`'s copying reorders
 
 `ValueList` has `Array`'s ES2023 copying reorders, `toSorted(compare?)` and
 `toReversed()`, with `Array`'s contract whole: a stable sort, `undefined`
@@ -1752,29 +1753,27 @@ result is dropped would do nothing and say nothing. The default comparator is
 `[1, 10, 9]`. Both are `Array`'s own `sort` and `reverse` on a copy, so there
 is no second implementation to disagree with the first, and a list already in
 order comes back as itself, since equal content is the same instance.
-**Rejected:** `toSpliced` and `with`. `Array` needed those names because
-`splice` and `arr[i] = x` mutate; a list's `splice` and `set` are the copying
-versions already, and an alias is surface with no capability behind it (the
-argument of D56 about `get` and `at`, from the other side). **Left for
-later,** all additive: `findLast` / `findLastIndex`, `indexOf` / `includes` by
-value, `flatMap`, and `sort` / `reverse` in place on `DraftList`, where a
-recipe for now assigns: `d.todos = castDraft(d.todos.toSorted(byId))`.
-
-**Since (2026-09, D59):** reversed in part. `toSpliced` and `with` are the
-list's copying `splice` and `set` now, not aliases beside them: a value has
-no `splice` or `set`. The argument stands, that an alias is surface without
-capability; these are not aliases.
+**Rejected, then reversed (D59):** `toSpliced` and `with` as aliases beside
+`splice` and `set`. `Array` needed those names because `splice` and `arr[i] =
+x` mutate; a list's `splice` and `set` were the copying versions already, and
+an alias is surface with no capability behind it (the argument of D56 about
+`get` and `at`, from the other side). D59 then took `splice` and `set` off
+the values altogether, and `toSpliced` and `with` became the names, not
+aliases; the argument against aliases stands. **Left for later,** all
+additive: `findLast` / `findLastIndex`, `indexOf` / `includes` by value,
+`flatMap`, and `sort` / `reverse` in place on `DraftList`, where a recipe
+for now assigns: `d.todos = castDraft(d.todos.toSorted(byId))`.
 
 ### D59. A value's edits are named for their result; the imperative verbs are the drafts'
 
 On the value collections every edit is a copying one, and its name says so.
 `with(i, v)` and `with(k, v)` are the list or map with that entry,
-`Array.prototype.with`'s name for the copying `set`; the removals are
-`deleted(k)`, `deleted(v)` and `removed(i)`; the sequence edits are the past
-participle of the verb the draft uses, `pushed(...v)`, `popped()`,
-`shifted()`, `unshifted(...v)`, `inserted(i, v)`, `insertedAt(i, ...)`,
-`added(v)`; and `toSpliced(...)` joins `toSorted` and `toReversed` as
-`Array` spells its copies. The rule has two clauses: the value's method is
+`Array.prototype.with`'s name for the copying `set`; the keyed additions
+and removals are `added(v)`, `deleted(k)`, `deleted(v)` and `removed(i)`;
+the sequence edits are the past participle of the verb the draft uses,
+`pushed(...v)`, `popped()`, `shifted()`, `unshifted(...v)`, `inserted(i, v)`
+and `insertedAt(i, ...)`; and `toSpliced(...)` joins `toSorted` and
+`toReversed` as `Array` spells its copies. The rule has two clauses: the value's method is
 the past participle of the draft's verb, except where ES2023 already named
 the copy (`with`, `toSpliced`, `toSorted`, `toReversed`); `with` is the
 participle of `set`, the one irregular verb, by the language's own choice.
@@ -1800,21 +1799,24 @@ had already made the argument, for `toSorted` over `sort`: a dropped
 `set`, `splice`, `add` and `delete` exactly as much. Named this way, the
 type system does the work: a value has no `push`, so the mistake is a
 compile error, and `list.pushed(x);` as a statement reads as wrong as it is.
-The pairing is mechanical (draft `insertAt`, value `insertedAt`), so D56's
-`At` rule carries over untouched. Participles over a preposition family
-(`without`): `without(i)` on a list would read as removal by content, which
-`without` is everywhere else (lodash, Kotlin's `minus`, this library's own
-sets and maps), so `rows.without(3)` on a list of numbers would silently
-remove the wrong thing; and a preposition has no form for `pop`, `shift` or
-`insert`. `popped()` and `shifted()` return the list, as Immutable.js's
+The pairing is mechanical (draft `insertAt`, value `insertedAt`), so the
+`At` rule, positional where the unsuffixed name is keyed, carries over
+untouched. Participles over a preposition family (`without`): `without(i)`
+on a list would read as removal by content, which `without` is everywhere
+else (lodash, Kotlin's `minus`) and how this library's own sets and maps
+remove, so `rows.without(3)` on a list of numbers would silently remove the
+wrong thing; and a preposition has no form for `pop`, `shift` or `insert`. `popped()` and `shifted()` return the list, as Immutable.js's
 `pop`/`shift` and Clojure's `pop` do; the element is `last()`/`first()`,
 which is why the list gained them. The drafts keep the copying edits so that
 "a draft has every method of its value" stays one sentence and one test, and
 because their meaning was already decided: a non-editing method on a draft
-answers about the value the draft would be right now (D53); inside a recipe
-the verbs are still preferred, since `d.todos.push(x)` records one
-`list.splice` patch where an assigned `pushed` records a whole-slot
-replacement. `with` and `toSpliced` keep D45's checked positions where
+answers about the value the draft would be right now (D47, D58). Inside a
+recipe the verbs are still preferred, for two reasons: an assigned what-if
+is a snapshot, so `d.todos = castDraft(d.todos.pushed(x))` cuts off every
+child draft handed out earlier and every draft passed as an argument, and
+later edits through them go nowhere, where `d.todos.push(x)` keeps them
+live; and the patch is a whole-slot replacement where `push` records one
+`list.splice`. A what-if also builds the snapshot on every call. `with` and `toSpliced` keep D45's checked positions where
 `Array`'s accept a negative start: a borrowed name brings its arguments for
 a read (D56), but a write to a place that does not exist is an upstream
 error, and every deviation is a loud `RangeError`.

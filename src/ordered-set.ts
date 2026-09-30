@@ -47,9 +47,10 @@ type ReadonlySetReads<T> = Pick<ReadonlySet<T>, 'size' | 'has' | 'keys' | 'value
  * built. Members are interned on entry and probes are canonicalized, as in
  * every valsem collection.
  *
- * `add` appends (a present member stays where it is); `delete` removes;
- * `insertAt` places a new member at an index. `has`, `indexOf`, `at`,
- * `add`, `delete` and `insertAt` are all O(log n) expected. Iteration is in
+ * `added` appends (a present member stays where it is); `deleted` removes;
+ * `insertedAt` places a new member at an index (the draft's verbs are `add`,
+ * `delete`, `insertAt`). `has`, `indexOf`, `at`, `added`, `deleted` and
+ * `insertedAt` are all O(log n) expected. Iteration is in
  * order, O(n), and `valueList` is the canonical `ValueList` of the members,
  * shared with every other structure holding that sequence.
  */

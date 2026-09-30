@@ -50,7 +50,7 @@ const CFG = createTrieConfig(2);
  * built independently, in different orders, or via insert/delete detours all
  * converge on one canonical instance, and deep equality between any two
  * ValueMaps is a pointer comparison. Lookups canonicalize their probe, so
- * `get`/`has`/`delete` accept any structurally equal key.
+ * `get`/`has`/`deleted` accept any structurally equal key.
  *
  * **Iteration order is unspecified but content-determined.** Entry order is
  * not part of the value — `{a→1, b→2}` and `{b→2, a→1}` are the *same*

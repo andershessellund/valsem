@@ -207,7 +207,7 @@ export class DraftOrderedMap<K, V> {
   #insertable(s: OrderedMapState, index: number, k: unknown, operation: string): void {
     insertionIndex(index, s.work.size, operation);
     if (s.work.has(k)) {
-      throw new Error(`valsem: ${operation}: the key is already present — a key has one position; remove it first to move it`);
+      throw new Error(`valsem: ${operation}: the key is already present — a key has one position; delete it first to move it`);
     }
   }
 

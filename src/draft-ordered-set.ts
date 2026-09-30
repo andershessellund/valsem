@@ -130,7 +130,7 @@ export class DraftOrderedSet<T> implements Iterable<T> {
   #insertable(s: OrderedSetState, index: number, v: unknown, operation: string): void {
     insertionIndex(index, s.work.size, operation);
     if (s.work.has(v)) {
-      throw new Error(`valsem: ${operation}: the value is already a member — a member has one position; remove it first to move it`);
+      throw new Error(`valsem: ${operation}: the value is already a member — a member has one position; delete it first to move it`);
     }
   }
 

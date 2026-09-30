@@ -37,9 +37,10 @@ const SEED = 0x0a4d;
  * are one `===` instance however they were built. Keys and values are
  * interned on entry and probes are canonicalized.
  *
- * `set` on a present key keeps its position, as a native `Map` does; on a
- * new key it appends. `delete` removes; `insertAt` places a new entry at an
- * index. `get`, `has`, `indexOf`, `at`, `set`, `delete` and `insertAt` are
+ * `with` on a present key keeps its position, as a native `Map`'s `set`
+ * does; on a new key it appends. `deleted` removes; `insertedAt` places a
+ * new entry at an index (the draft's verbs are `set`, `delete`, `insertAt`).
+ * `get`, `has`, `indexOf`, `at`, `with`, `deleted` and `insertedAt` are
  * O(log n) expected. Iteration is in order, O(n). `keyList` and `valueList`
  * are the canonical `ValueList`s of the keys and values: two maps with the
  * same keys in the same order share one key list, whatever their values

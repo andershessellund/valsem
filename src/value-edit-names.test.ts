@@ -113,6 +113,33 @@ describe('first and last', () => {
     });
     expect(next.l).toBe(ValueList.of({ id: 1, done: false }, { id: 2, done: true }));
     const empty = intern({ l: ValueList.empty<number>() });
-    expect(produce(empty, (d) => void expect(d.l.last()).toBeUndefined())).toBe(empty);
+    expect(produce(empty, (d) => void expect([d.l.first(), d.l.last()]).toEqual([undefined, undefined]))).toBe(empty);
+  });
+});
+
+describe('a what-if on a draft', () => {
+  it('on an untouched draft answers as the base would, and touches nothing', () => {
+    const base = intern({ l: ValueList.of(1, 2), s: ValueSet.of(1), m: ValueMap.from([['a', 1]]) });
+    expect(
+      produce(base, (d) => {
+        expect(d.l.pushed(3)).toBe(base.l.pushed(3));
+        expect(d.l.popped()).toBe(base.l.popped());
+        expect(d.l.shifted()).toBe(base.l.shifted());
+        expect(d.s.added(2)).toBe(base.s.added(2));
+        expect(d.m.deleted('a')).toBe(base.m.deleted('a'));
+      }),
+    ).toBe(base);
+  });
+
+  it('takes a draft argument as the value it holds right now: a later edit through the draft does not reach the what-if', () => {
+    const base = intern({ l: ValueList.of({ n: 1 }), extra: { n: 9 } });
+    const next = produce(base, (d) => {
+      const what = d.l.pushed(d.extra);
+      expect(what).toBe(ValueList.of({ n: 1 }, { n: 9 }));
+      d.extra.n = 10;
+      expect(what).toBe(ValueList.of({ n: 1 }, { n: 9 })); // a value, fixed at the call
+    });
+    expect(next.extra).toEqual({ n: 10 });
+    expect(next.l).toBe(base.l);
   });
 });

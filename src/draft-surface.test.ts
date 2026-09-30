@@ -24,7 +24,7 @@ import { ValueMap } from './value-map.js';
 import { OrderedMap } from './ordered-map.js';
 import { OrderedSet } from './ordered-set.js';
 import { expectPatchRoundTrip } from './patches.test-helpers.js';
-import { COLLECTIONS } from './roster.test-helpers.js';
+import { COLLECTIONS, VALUE_TYPES } from './roster.test-helpers.js';
 
 const members = (proto: object): string[] =>
   Object.getOwnPropertyNames(proto).filter((name) => name !== 'constructor' && !name.startsWith('_'));
@@ -38,9 +38,9 @@ describe('a draft has its value\u2019s methods', () => {
 });
 
 describe('a value has no mutator\u2019s name (D59)', () => {
-  // What mutates on `Array`, `Map` and `Set`, and the drafts' own verbs.
-  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'insert', 'remove', 'insertAt', 'setMany'];
-  it.each(COLLECTIONS.map((c) => [c.name, c.type] as const))('%s', (_, Value) => {
+  // What mutates on `Array`, `Map` (Node 26's `getOrInsert` pair included) and `Set`, and the drafts' own verbs.
+  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'getOrInsert', 'getOrInsertComputed', 'insert', 'remove', 'insertAt', 'setMany'];
+  it.each(VALUE_TYPES.map((c) => [c.name, c.type] as const))('%s', (_, Value) => {
     expect(members(Value.prototype).filter((name) => MUTATORS.includes(name))).toEqual([]);
   });
 });
@@ -177,9 +177,9 @@ describe('what does not edit answers about the value the draft would be right no
 
   it('the ordered drafts\u2019 insertAt reports in the draft\u2019s name', () => {
     produce(intern({ os: OrderedSet.of('p'), om: OrderedMap.from([['a', 1]]) }), (d) => {
-      expect(() => d.os.insertAt(0, 'p')).toThrow('DraftOrderedSet.insertAt: the value is already a member — a member has one position; remove it first to move it');
+      expect(() => d.os.insertAt(0, 'p')).toThrow('DraftOrderedSet.insertAt: the value is already a member — a member has one position; delete it first to move it');
       expect(() => d.os.insertAt(2, 'z')).toThrow('DraftOrderedSet.insertAt: index 2 out of range [0, 1]');
-      expect(() => d.om.insertAt(0, 'a', 0)).toThrow('DraftOrderedMap.insertAt: the key is already present — a key has one position; remove it first to move it');
+      expect(() => d.om.insertAt(0, 'a', 0)).toThrow('DraftOrderedMap.insertAt: the key is already present — a key has one position; delete it first to move it');
       expect(() => d.om.insertAt(2, 'z', 0)).toThrow('DraftOrderedMap.insertAt: index 2 out of range [0, 1]');
     });
   });
