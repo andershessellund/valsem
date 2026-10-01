@@ -11,6 +11,7 @@ import { createInternPool } from './intern-pool.js';
 import { hashString } from './hasher.js';
 
 const pool = createInternPool<InternedString>();
+const INTERNAL = Symbol('valsem.interned-string');
 
 /**
  * Opaque interned-string wrapper carrying a precomputed hash.
@@ -24,7 +25,9 @@ export class InternedString {
   readonly value: string;
   readonly #hash: number;
 
-  private constructor(value: string, hash: number) {
+  /** The token keeps construction inside the class: from JavaScript, `new InternedString(s, h)` would mint an unpooled instance that claims to be canonical. */
+  private constructor(token: symbol, value: string, hash: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: InternedString instances are created by InternedString.for()');
     this.value = value;
     this.#hash = hash;
     Object.freeze(this);
@@ -61,7 +64,7 @@ export class InternedString {
     const hash = hashString(value);
     const found = pool.lookup(hash, c => c.value === value);
     if (found !== undefined) return found;
-    return pool.register(new InternedString(value, hash), hash);
+    return pool.register(new InternedString(INTERNAL, value, hash), hash);
   }
 }
 

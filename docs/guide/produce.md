@@ -39,15 +39,25 @@ Iterating a `DraftList`, a `DraftMap`
 or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
 out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
 the same as on a plain array; keys, and the members of a set, come as the
-values they are. A set holds its members by content, so there is no editing
+values they are. So do the removal verbs: `pop`, `shift`, `splice` and the
+list's `remove` hand back what they removed drafted, as `get` would have
+handed it out, so the immer idiom `const t = d.todos.shift(); t.done = true;
+d.done.push(t)` edits, on a plain array and a `DraftList` alike (the recipe's
+own raw material comes back raw, as a read of it does); and `sort`,
+`reverse`, `fill` and `copyWithin` on a plain array return the draft, as
+`Array`'s return `this`, so `d.todos.sort(byId)[0].done = true` edits too. A
+walk is a native one: an entry deleted before the walk reaches it is not
+visited, a `DraftMap` visits the keys added during the walk after the base's,
+and a `DraftList`'s `for…of` is live by index where its `forEach` reads the
+length once, as `Array`'s do. A set holds its members by content, so there is no editing
 one in place: changing a member is removing it and adding another, which may
 already be there. Say so: for every member,
 `d.tags = castDraft(d.tags.map((t) => ({ ...t, n: 0 })))`, where two members
 that become equal are one member, as `map` on a set always gives; for one,
 `d.tags.delete(t); d.tags.add({ ...t, n: 0 })`. In a loop, walk a copy
 (`for (const t of [...d.tags])`): a member added to the set being walked is
-visited too, as on a native `Set`, and a loop that re-adds what it visits
-does not end. Going in, it is the same rule from the other side: where a
+visited too, as on a native `Set`, and a loop that replaces what it visits
+with a changed member does not end. Going in, it is the same rule from the other side: where a
 value is required (a set member, a map key, an argument to `intern` or a
 memoized function), a draft stands for the value it holds right now, as
 `current(draft)` would give it. So `d.seen.add(t); t.done = true` leaves the

@@ -301,8 +301,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // protocol symbol is an ordinary key, so an own `[interned]: true` on a
   // record cannot forge canonicality.)
   if (
-    ((a as Record<symbol, unknown>)[interned] === true && !_isPlainRecord(a)) ||
-    ((b as Record<symbol, unknown>)[interned] === true && !_isPlainRecord(b))
+    ((a as Record<symbol, unknown>)[interned] === true && !_isPlainData(a)) ||
+    ((b as Record<symbol, unknown>)[interned] === true && !_isPlainData(b))
   ) {
     return false;
   }
@@ -342,7 +342,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     // potentially O(n) [equals].
     const ha = (a as Record<symbol, unknown>)[hashCode];
     const hb = (b as Record<symbol, unknown>)[hashCode];
-    if (typeof ha === 'number' && typeof hb === 'number' && ha !== hb) return false;
+    // Read as deepHash reads them (`>>> 0`): -1 and 0xffffffff are one hash.
+    if (typeof ha === 'number' && typeof hb === 'number' && ha >>> 0 !== hb >>> 0) return false;
     return (eqA as (this: unknown, o: unknown) => boolean).call(a, b) === true;
   }
 
@@ -384,24 +385,31 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 
   const ra = a as Record<string | symbol, unknown>;
   const rb = b as Record<string | symbol, unknown>;
-  const aKeys = _recordKeys(ra); // own enumerable only — no per-key hasOwn on a
+  // Both sides' keys: own and enumerable (`_recordKeys`), the keys that make
+  // up a record — an inherited (polluted) prototype property is never read,
+  // and a non-enumerable own property, which intern drops, matches nothing
+  // from either side. Two records built the same way share their layout, so
+  // a's key is found at the same position in b's keys, one comparison; off
+  // that layout the probe is `propertyIsEnumerable` (own AND enumerable in
+  // one call — `hasOwn` would admit a hidden property from b's side alone).
+  // Measured: the positional match is cheaper than a per-key `hasOwn` was,
+  // b's enumeration included.
+  const aKeys = _recordKeys(ra);
+  const bKeys = _recordKeys(rb);
   let count = 0;
   for (let i = 0; i < aKeys.length; i++) {
     const k = aKeys[i]!;
     const va = ra[k];
     if (va === undefined) continue; // undefined-valued key ≡ absent
-    // hasOwn on b guards against reading inherited (polluted) prototype
-    // properties; an absent key and an undefined-valued key both fail here,
-    // as they must (va is defined at this point).
-    if (!Object.hasOwn(rb, k)) return false;
+    // An absent key and an undefined-valued key both fail here, as they must
+    // (va is defined at this point).
+    if (bKeys[i] !== k && !Object.prototype.propertyIsEnumerable.call(rb, k)) return false;
     const vb = rb[k];
     if (vb === undefined || !deepEqual(va, vb)) return false;
     count++;
   }
-  // b's keys are only needed now — unequal pairs return above without the
-  // allocation. If b has exactly `count` own keys, they are precisely the
-  // matched (populated) ones: no extra populated keys exist.
-  const bKeys = _recordKeys(rb);
+  // If b has exactly `count` keys, they are precisely the matched (populated)
+  // ones: no extra populated keys exist.
   if (bKeys.length === count) return true;
   // Undefined-valued keys present somewhere: count b's populated keys.
   let bCount = 0;
@@ -525,10 +533,26 @@ export function _missingValueSemantics(obj: object): string | undefined {
   if (hasHash) {
     return `${name} has a hash but no equality to pool by. Add [equals] (or register with deepEqual.register)`;
   }
+  // A Temporal value is a value — behind an import. The hint deepHash gives.
+  if (ctor !== undefined && _isTemporalType(name, ctor)) {
+    return `Temporal.${name} is not registered as a value. Add Temporal support with a side-effect import: import 'valsem/temporal'`;
+  }
   return (
     `class instance '${name}' has no [hashCode] or registered hash handler, and no equality: ` +
     `it is not a value. Implement [equals] and [hashCode], or deepEqual.register(${name}, equalsFn, hashFn)`
   );
+}
+
+/** Names of the Temporal types that `valsem/temporal` registers. */
+const TEMPORAL_KINDS = new Set([
+  'PlainDate', 'PlainDateTime', 'PlainTime', 'PlainYearMonth',
+  'PlainMonthDay', 'Instant', 'ZonedDateTime', 'Duration',
+]);
+
+/** @internal Whether `ctor`, named `name`, is one of the host's own `Temporal` types — the ones `valsem/temporal` would register. */
+export function _isTemporalType(name: string, ctor: Function): boolean {
+  const T = (globalThis as { Temporal?: Record<string, unknown> }).Temporal;
+  return T !== undefined && TEMPORAL_KINDS.has(name) && T[name] === ctor;
 }
 
 /**
@@ -586,6 +610,17 @@ export function _ctorOf(obj: object): Function | undefined {
 export function _isPlainRecord(obj: object): boolean {
   const proto = Object.getPrototypeOf(obj);
   return proto === Object.prototype || proto === null || _isForeignObjectPrototype(proto);
+}
+
+/**
+ * @internal Plain data — a record or an array: the two shapes whose content
+ * is their own properties, where a protocol symbol is a key (a record) or
+ * dropped (an array), never the protocol. The `[interned]` marker is read
+ * off class instances only; checked here so that an own `[interned]: true`
+ * on an array cannot forge canonicality any more than on a record.
+ */
+export function _isPlainData(obj: object): boolean {
+  return Array.isArray(obj) || _isPlainRecord(obj);
 }
 
 /**

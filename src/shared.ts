@@ -14,6 +14,45 @@ export function same(a: unknown, b: unknown): boolean {
   return a === b || (a !== a && b !== b);
 }
 
+/**
+ * The spread an engine takes in one call: `push(...items)` and `splice(i, n,
+ * ...items)` pass every item as an argument, and a few tens of thousands
+ * overflow the stack. Below this many the spread is the fast path; above it
+ * the same edit is made without one.
+ */
+const SPREAD_MAX = 4096;
+
+/** `arr.push(...items)` for any number of items. */
+export function pushAll<T>(arr: T[], items: readonly T[]): void {
+  if (items.length <= SPREAD_MAX) {
+    if (items.length !== 0) arr.push(...items);
+    return;
+  }
+  for (let i = 0; i < items.length; i++) arr.push(items[i]!);
+}
+
+/** `arr.splice(start, deleteCount, ...items)` for any number of items; the removed elements. */
+export function spliceAll<T>(arr: T[], start: number, deleteCount: number, items: readonly T[]): T[] {
+  if (items.length <= SPREAD_MAX) return arr.splice(start, deleteCount, ...items);
+  const removed = arr.splice(start, deleteCount);
+  const tail = arr.splice(start);
+  pushAll(arr, items);
+  pushAll(arr, tail);
+  return removed;
+}
+
+/**
+ * One entry of an entries iterable, read as `new Map(entries)` reads it: any
+ * object, by its `0` and `1` properties (an array, or an array-like), and
+ * anything else — a string, a number — a `TypeError`, as `Map`'s.
+ */
+export function entryOf(entry: unknown): readonly [unknown, unknown] {
+  if (entry === null || typeof entry !== 'object') {
+    throw new TypeError(`Iterator value ${typeof entry === 'symbol' ? entry.description : String(entry)} is not an entry object`);
+  }
+  return [(entry as Record<number, unknown>)[0], (entry as Record<number, unknown>)[1]];
+}
+
 /** Pairwise {@link same} over two slot arrays — the consing predicate for a node's children. */
 export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean {
   if (a.length !== b.length) return false;

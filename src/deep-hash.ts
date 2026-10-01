@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
-import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype } from './deep-equal.js';
+import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype, _isTemporalType } from './deep-equal.js';
 import { hashString, hashNumber, mix } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _undraft } from './shared.js';
@@ -184,11 +184,6 @@ export function _arrayHashOf(length: number, acc: number): number {
 // Diagnostics
 // ---------------------------------------------------------------------------
 
-/** Names of the Temporal types that `valsem/temporal` registers. */
-const TEMPORAL_KINDS = new Set([
-  'PlainDate', 'PlainDateTime', 'PlainTime', 'PlainYearMonth',
-  'PlainMonthDay', 'Instant', 'ZonedDateTime', 'Duration',
-]);
 
 /**
  * Build the error for a value with no way to hash it. Mutable built-ins and
@@ -205,8 +200,7 @@ function unhashableMessage(obj: object): string {
       `immutable values only, and ${reason}.`;
   }
 
-  const T = (globalThis as { Temporal?: Record<string, unknown> }).Temporal;
-  if (T !== undefined && TEMPORAL_KINDS.has(name) && T[name] === ctor) {
+  if (ctor !== undefined && _isTemporalType(name, ctor)) {
     return `deepHash: Temporal.${name} has no registered hash handler. ` +
       `Add Temporal support with a side-effect import: import 'valsem/temporal';`;
   }
@@ -255,7 +249,12 @@ export function deepHash(value: unknown): number {
     case 'boolean':
       return value ? TAG_TRUE : TAG_FALSE;
     case 'number':
-      return mix(TAG_NUMBER, hashNumber(value === 0 ? 0 : value)); // normalize -0 → +0
+      // One value, one hash, whatever its bits: -0 → +0, and every NaN → the
+      // NaN literal. The hasher reads the double's bits, and a NaN's sign and
+      // payload are whatever the CPU left there (0/0 is fff8… on x86-64 and
+      // 7ff8… on arm64; V8 keeps the bits), where `deepEqual` and `same` say
+      // equal — so the hash must too (the companion invariant, §3.2).
+      return mix(TAG_NUMBER, hashNumber(value === 0 ? 0 : value !== value ? NaN : value));
     case 'string':
       return mix(TAG_STRING, hashString(value));
     case 'bigint':

@@ -354,3 +354,18 @@ describe('corpus — draft introspection', () => {
     expect((next as Record<symbol, unknown>)[sym]).toBe(1);
   });
 });
+
+describe('corpus — a removed element is a draft (immer: `const t = d.todos.shift(); t.done = true; d.done.push(t)`)', () => {
+  type Todo = { id: number; done: boolean };
+  const base = intern({ todos: [{ id: 1, done: false }, { id: 2, done: false }] as Todo[], done: [] as Todo[] });
+
+  it('shift, edit, push elsewhere', () => {
+    expect(produce(base, (d) => { const t = d.todos.shift()!; t.done = true; d.done.push(t); }))
+      .toBe(intern({ todos: [{ id: 2, done: false }], done: [{ id: 1, done: true }] }));
+  });
+
+  it('sort, then edit through what it returns', () => {
+    expect(produce(base, (d) => { d.todos.sort((a, b) => b.id - a.id)[0]!.done = true; }))
+      .toBe(intern({ todos: [{ id: 2, done: true }, { id: 1, done: false }], done: [] }));
+  });
+});

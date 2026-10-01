@@ -3,6 +3,7 @@ import { memoize } from './memoize.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueDate } from './value-date.js';
+import { hashCode } from './deep-equal.js';
 
 describe('memoize', () => {
   it('runs once per distinct argument tuple, by value', () => {
@@ -164,5 +165,20 @@ describe('memoize', () => {
     expect(visible(todos, { done: true })).toBe(first); // a fresh filter literal — same value, same instance
     expect(visible(todos.pushed({ text: 'd', done: true }), { done: true })).toEqual(['a', 'c', 'd']);
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('memoize — an argument that is not a value is refused before fn runs', () => {
+  it('a class with a hash but no equality: fn never runs, nothing is cached', () => {
+    class H {
+      get [hashCode](): number {
+        return 7;
+      }
+    }
+    let runs = 0;
+    const f = memoize(() => { runs++; return 1; });
+    expect(() => (f as unknown as (x: unknown) => unknown)(new H())).toThrow(/an argument of the function is not a value/);
+    expect(runs).toBe(0);
+    expect(f.size).toBe(0);
   });
 });

@@ -46,16 +46,40 @@ interface Entry {
   assigned: boolean;
 }
 
+/**
+ * The state behind a {@link DraftList}. Its bookkeeping is not API: the
+ * fields below the two the protocol needs (`kind`, `draft`) are tagged
+ * internal, out of the published declarations, free to change in any release.
+ */
 export interface ListState<T = unknown> extends DraftState<ValueList<T>> {
   kind: 'list';
-  /** Positions and canonical placeholders for everything but the tail. */
+  /** @internal Positions and canonical placeholders for everything but the tail. */
   work: ValueList<unknown>;
-  /** Current index (below `work.length`) → what the recipe sees there. */
+  /** @internal Current index (below `work.length`) → what the recipe sees there. */
   overlay: Map<number, Entry>;
-  /** Pushed values not yet in `work` — flushed as one splice by a structural op, or at finalize. */
+  /** @internal The highest index the overlay has held: an upper bound, so a splice past it has nothing to re-index. */
+  overlayHi: number;
+  /** @internal Pushed values not yet in `work` — flushed as one splice by a structural op, or at finalize. */
   tail: Entry[];
+  /** @internal */
   ops: SeqOp[];
   draft: DraftList<T>;
+}
+
+/** What the recipe sees at `index`, if it is overlaid or in the tail, else undefined (the value is then `work`'s). */
+function entryAt(s: ListState, index: number): Entry | undefined {
+  const wl = s.work.length;
+  return index < wl ? s.overlay.get(index) : s.tail[index - wl];
+}
+
+function readAt(s: ListState, index: number): unknown {
+  const e = entryAt(s, index);
+  return e !== undefined ? e.v : s.work.get(index);
+}
+
+function overlaySet(s: ListState, index: number, entry: Entry): void {
+  s.overlay.set(index, entry);
+  if (index > s.overlayHi) s.overlayHi = index;
 }
 
 /** Move the tail into `work` (as placeholders) and the overlay — before a splice needs exact positions. */
@@ -63,8 +87,60 @@ function flushTail(s: ListState): void {
   if (s.tail.length === 0) return;
   const len = s.work.length;
   s.work = s.work._spliceItems(len, 0, new Array<unknown>(s.tail.length).fill(undefined));
-  for (let j = 0; j < s.tail.length; j++) s.overlay.set(len + j, s.tail[j]!);
+  for (let j = 0; j < s.tail.length; j++) overlaySet(s, len + j, s.tail[j]!);
   s.tail = [];
+}
+
+/**
+ * What a removal verb hands back: the removed element as `get` would have
+ * handed it out — its child draft if it has one; drafted if it can be (an
+ * element of the base, or a frozen value the recipe assigned); the recipe's
+ * own raw material raw — so `const t = d.todos.shift(); t.done = true;
+ * d.done.push(t)` edits, as on a plain array.
+ */
+function handOut(s: ListState, e: Entry | undefined, value: unknown): unknown {
+  if (s.finalized || !isDraftable(value) || stateOf(value) !== undefined) return value;
+  if (e === undefined || isImmutable(value)) return createChildDraft(value, s);
+  return value;
+}
+
+/**
+ * The splice every path shares — the verbs and a `list.splice` patch — with
+ * the arguments checked already: `at` in `[0, length]`, `rc` clamped to what
+ * is there, the values as an array (a patch may insert 150,000 of them: no
+ * spread). Returns the removed elements, raw.
+ */
+function spliceList(s: ListState, at: number, rc: number, values: readonly unknown[]): { removed: unknown[]; entries: (Entry | undefined)[] } {
+  for (const v of values) assertAssignable(v, s);
+  flushTail(s);
+  markChanged(s);
+  const removed: unknown[] = [];
+  const entries: (Entry | undefined)[] = [];
+  for (let i = at; i < at + rc; i++) {
+    const e = s.overlay.get(i);
+    entries.push(e);
+    removed.push(e !== undefined ? e.v : s.work.get(i));
+  }
+  s.ops.push({ t: 'splice', i: at, rc, inserted: values.slice(), removed: removed.slice() });
+  s.work = s.work._spliceItems(at, rc, new Array<unknown>(values.length).fill(undefined));
+  // Re-index the overlay around the edit — only the entries at or past `at`
+  // move or go, so an edit past every overlaid index (a push replayed as a
+  // tail splice, 5,000 times) touches none of them.
+  const delta = values.length - rc;
+  if (s.overlay.size !== 0 && at <= s.overlayHi && (delta !== 0 || rc !== 0)) {
+    const next = new Map<number, Entry>();
+    let hi = -1;
+    for (const [i, e] of s.overlay) {
+      if (i < at) next.set(i, e);
+      else if (i >= at + rc) next.set(i + delta, e);
+      else continue;
+      if (next.size !== 0 && (i < at ? i : i + delta) > hi) hi = i < at ? i : i + delta;
+    }
+    s.overlay = next;
+    s.overlayHi = hi;
+  }
+  for (let j = 0; j < values.length; j++) overlaySet(s, at + j, { v: values[j], assigned: true });
+  return { removed, entries };
 }
 
 /**
@@ -94,16 +170,6 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return s.work.length + s.tail.length;
   }
 
-  /** The entry at `index` if it is overlaid or in the tail, else undefined (the value is then `work`'s). */
-  #entry(s: ListState, index: number): Entry | undefined {
-    const wl = s.work.length;
-    return index < wl ? s.overlay.get(index) : s.tail[index - wl];
-  }
-
-  #read(s: ListState, index: number): unknown {
-    const e = this.#entry(s, index);
-    return e !== undefined ? e.v : s.work.get(index);
-  }
 
   /**
    * The element at `index` (drafted, if it can be), as `ValueList.at` and
@@ -140,33 +206,27 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   get(index: number): Draft<T> | (T & undefined) {
     const s = this.#state;
     elementIndex(index, s.work.length + s.tail.length, 'DraftList.get');
-    const e = this.#entry(s, index);
+    const e = entryAt(s, index);
     const value = e !== undefined ? e.v : s.work.get(index);
-    if (
-      isDraftable(value) &&
-      !s.finalized &&
-      stateOf(value) === undefined &&
-      (e === undefined || isImmutable(value))
-    ) {
-      const child = createChildDraft(value, s);
+    const child = handOut(s, e, value);
+    if (child !== value) {
       const entry: Entry = { v: child, assigned: e !== undefined && e.assigned };
-      if (index < s.work.length) s.overlay.set(index, entry);
+      if (index < s.work.length) overlaySet(s, index, entry);
       else s.tail[index - s.work.length] = entry;
-      return child as Draft<T>;
     }
-    return value as Draft<T>;
+    return child as Draft<T>;
   }
 
   set(index: number, value: T): this {
     const s = this.#state;
     const len = s.work.length + s.tail.length;
     elementIndex(index, len, 'DraftList.set');
-    const current = this.#read(s, index);
+    const current = readAt(s, index);
     if (same(current, value)) return this;
     assertAssignable(value, s);
     markChanged(s);
     s.ops.push({ t: 'set', i: index, value, old: current });
-    if (index < s.work.length) s.overlay.set(index, { v: value, assigned: true });
+    if (index < s.work.length) overlaySet(s, index, { v: value, assigned: true });
     else s.tail[index - s.work.length] = { v: value, assigned: true };
     return this;
   }
@@ -181,73 +241,65 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return len + values.length;
   }
 
-  pop(): T | undefined {
+  /** Remove and return the last element (drafted, as `get` hands it out), `undefined` when empty, as `Array.prototype.pop`. */
+  pop(): Draft<T> | undefined {
     const s = this.#state;
     const len = s.work.length + s.tail.length;
     if (len === 0) return undefined;
     markChanged(s);
-    const removed = this.#read(s, len - 1);
+    const e = entryAt(s, len - 1);
+    const removed = e !== undefined ? e.v : s.work.get(len - 1);
     s.ops.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
     if (s.tail.length !== 0) s.tail.pop();
     else {
       s.work = s.work.popped();
       s.overlay.delete(len - 1);
     }
-    return removed as T;
+    return handOut(s, e, removed) as Draft<T>;
   }
 
-  /** Replace `deleteCount` elements at `start` with `values` and return the removed ones, as `Array.prototype.splice`, with the arguments as `ValueList.toSpliced` takes them: a start that is a place in the list, a count that means "up to" or is left out, never `undefined` (D45). */
-  splice(start: number): T[];
-  splice(start: number, deleteCount: number, ...values: T[]): T[];
-  splice(start: number, ...rest: unknown[]): T[] {
+  /** Replace `deleteCount` elements at `start` with `values` and return the removed ones (each drafted, as `get` hands it out), as `Array.prototype.splice`, with the arguments as `ValueList.toSpliced` takes them: a start that is a place in the list, a count that means "up to" or is left out, never `undefined` (D45). */
+  splice(start: number): (Draft<T> | (T & undefined))[];
+  splice(start: number, deleteCount: number, ...values: T[]): (Draft<T> | (T & undefined))[];
+  splice(start: number, ...rest: unknown[]): (Draft<T> | (T & undefined))[] {
     const s = this.#state;
     // As ValueList.toSpliced: the start is a place in the list, the count means
     // "up to". Checked before anything moves.
-    const len = s.work.length + s.tail.length;
-    const [at, rc, values] = spliceArgs<T>(start, rest, len, 'DraftList.splice');
-    for (const v of values) assertAssignable(v, s);
-    flushTail(s);
-    markChanged(s);
-    const removed: unknown[] = [];
-    for (let i = at; i < at + rc; i++) removed.push(this.#read(s, i));
-    s.ops.push({ t: 'splice', i: at, rc, inserted: values.slice(), removed: removed.slice() });
-    s.work = s.work._spliceItems(at, rc, new Array<unknown>(values.length).fill(undefined));
-    // Re-index the overlay around the edit.
-    const delta = values.length - rc;
-    if (s.overlay.size !== 0) {
-      const next = new Map<number, Entry>();
-      for (const [i, e] of s.overlay) {
-        if (i < at) next.set(i, e);
-        else if (i >= at + rc) next.set(i + delta, e);
-      }
-      s.overlay = next;
-    }
-    for (let j = 0; j < values.length; j++) s.overlay.set(at + j, { v: values[j], assigned: true });
-    return removed as T[];
+    const [at, rc, values] = spliceArgs<T>(start, rest, s.work.length + s.tail.length, 'DraftList.splice');
+    return this.#spliced(spliceList(s, at, rc, values));
+  }
+
+  /** The removed elements of a splice, handed out as `get` would. (The return types are spelled as `get`'s is, so the class stays covariant to the variance check.) */
+  #spliced({ removed, entries }: { removed: unknown[]; entries: (Entry | undefined)[] }): (Draft<T> | (T & undefined))[] {
+    const s = this[DRAFT_STATE];
+    for (let i = 0; i < removed.length; i++) removed[i] = handOut(s, entries[i], removed[i]);
+    return removed as (Draft<T> | (T & undefined))[];
   }
 
   /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.inserted` places it. */
   insert(index: number, value: T): this {
     const s = this.#state;
-    this.splice(insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insert'), 0, value);
+    spliceList(s, insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insert'), 0, [value]);
     return this;
   }
 
-  /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`). Returns it. */
-  remove(index: number): T {
+  /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`). Returns it, drafted as `get` hands it out. */
+  remove(index: number): Draft<T> | (T & undefined) {
     const s = this.#state;
-    return this.splice(elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1)[0] as T;
+    return this.#spliced(spliceList(s, elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1, []))[0] as Draft<T> | (T & undefined);
   }
 
-  /** Remove and return the first element, `undefined` when empty, as `Array.prototype.shift`. */
-  shift(): T | undefined {
-    return this.length === 0 ? undefined : this.splice(0, 1)[0];
+  /** Remove and return the first element (drafted, as `get` hands it out), `undefined` when empty, as `Array.prototype.shift`. */
+  shift(): Draft<T> | undefined {
+    const s = this.#state;
+    return s.work.length + s.tail.length === 0 ? undefined : this.#spliced(spliceList(s, 0, 1, []))[0];
   }
 
   /** Insert `values` at the front; the new length, as `Array.prototype.unshift`. */
   unshift(...values: T[]): number {
-    this.splice(0, 0, ...values);
-    return this.length;
+    const s = this.#state;
+    spliceList(s, 0, 0, values);
+    return s.work.length + s.tail.length;
   }
 
   // What does not edit answers about the VALUE this draft would be right now
@@ -379,10 +431,15 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return findIndexIn(this.#values(), this, true, fn as never, thisArg);
   }
 
-  /** Visit every element in index order, each drafted if it can be, as `get` hands it out: `d.todos.forEach((t) => { t.done = true; })` edits. */
+  /**
+   * Visit every element in index order, each drafted if it can be, as `get`
+   * hands it out: `d.todos.forEach((t) => { t.done = true; })` edits. As
+   * `Array.prototype.forEach`: the length is read once, so an element pushed
+   * during the walk is not visited (the iterator is the live one).
+   */
   forEach(fn: (value: Draft<T> | (T & undefined), index: number, list: DraftList<T>) => void, thisArg?: unknown): void {
-    let i = 0;
-    for (const v of this) fn.call(thisArg, v, i++, this);
+    const n = this.length;
+    for (let i = 0; i < n && i < this.length; i++) fn.call(thisArg, this.get(i), i, this);
   }
 
   /**
@@ -440,6 +497,7 @@ export function createListDraft<T>(
     base: base as ValueList<unknown>,
     work: base as ValueList<unknown>,
     overlay: new Map(),
+    overlayHi: -1,
     tail: [],
     ops: [],
     draft: null as unknown as DraftList<unknown>,
@@ -475,7 +533,7 @@ function applyListPatch(state: ListState, p: Patch): void {
         `valsem: a 'list.splice' patch (index ${String(p.index)}, remove ${String(p.remove)}) does not fit the list it is applied to (length ${len})`,
       );
     }
-    state.draft.splice(p.index, p.remove, ...(p.insert as unknown[]));
+    spliceList(state, p.index, p.remove, p.insert as unknown[]); // the items as the array they are: no 150,000-argument call
   }
   else throw new Error(`valsem: cannot apply a '${p.kind}' patch to a list draft`);
 }

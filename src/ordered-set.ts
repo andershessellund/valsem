@@ -18,7 +18,7 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
+import { INSPECT, inspectAs, atIndex, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, NOT_FOUND, type HNode } from './hamt.js';
@@ -119,7 +119,8 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
 
   /** The member at `index`, as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. */
   at(index: number): T | undefined {
-    return this.#list.at(index);
+    const i = atIndex(index, this.size, 'OrderedSet.at'); // checked in this set's name
+    return i === -1 ? undefined : this.#list.get(i);
   }
   /** The first member, or `undefined` when empty. */
   first(): T | undefined {
@@ -193,9 +194,11 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     return kept.length === this.size ? this : OrderedSet.from(kept);
   }
 
-  /** A fold over the members, from `initial`. */
-  reduce<U>(fn: (acc: U, value: T, value2: T, set: OrderedSet<T>) => U, initial: U): U {
-    return reduceIn(this, this, false, 'OrderedSet.reduce', [fn, initial]) as U;
+  /** A fold over the members, in order. With no initial value the first member starts it, and an empty set is a `TypeError`, as on `Array`. */
+  reduce(fn: (acc: T, value: T, value2: T, set: OrderedSet<T>) => T): T;
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: OrderedSet<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    return reduceIn(this, this, false, 'OrderedSet.reduce', args);
   }
 
   /** Whether `fn` accepts any member. */

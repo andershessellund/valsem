@@ -42,7 +42,7 @@ import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
 import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
 import { _freeze } from './checks.js';
-import { indexArg } from './shared.js';
+import { indexArg, pushAll, spliceAll } from './shared.js';
 import {
   toDraft,
   DRAFT_STATE,
@@ -203,6 +203,10 @@ const objectTraps: ProxyHandler<object> = {
       value === state.base[prop] ||
       (stateOf(value) === undefined && isImmutable(value))
     ) {
+      // A non-enumerable own property is not part of the record (`intern`
+      // drops it, `_recordKeys` never lists it): read raw, never drafted —
+      // drafting would write it into the copy, enumerable, and into the result.
+      if (!Object.prototype.propertyIsEnumerable.call(source, prop)) return value;
       prepareObjCopy(state);
       (state.drafted ??= new Set()).add(prop);
       return (state.copy![prop] = createChildDraft(value, state));
@@ -423,12 +427,53 @@ function materializeArr(state: ArrayState): unknown[] {
   if (state.copy === null) {
     const c = copyArr(state.base);
     for (const [i, v] of state.vEdits) c[i] = v;
-    c.push(...state.vTail);
+    pushAll(c, state.vTail); // no spread: the tail is every push so far, and 150,000 of them overflowed the stack
     state.copy = c;
     state.vEdits.clear();
     state.vTail.length = 0;
   }
   return state.copy;
+}
+
+/**
+ * What a removal verb hands back: the removed element as the read trap would
+ * have handed it out had the recipe read it first. A child already drafted
+ * comes back as that draft; a draftable base element, or a frozen or
+ * canonical value, is drafted (the recipe may edit it and place it
+ * elsewhere, the immer idiom `const t = d.todos.shift(); t.done = true;
+ * d.done.push(t)`; it has no index any more, so membership identifies a base
+ * element where the position rule cannot); the recipe's own raw inserts come
+ * back raw, as reads of them do. Without this, `shift` on a raw base handed
+ * the caller's own object to the recipe — and `produce` wrote into it.
+ */
+function handOut(state: ArrayState, value: unknown): unknown {
+  if (state.finalized || !isDraftable(value) || stateOf(value) !== undefined) return value;
+  if (isImmutable(value) || isBaseMember(state, value)) return createChildDraft(value, state);
+  return value;
+}
+
+/**
+ * The splice every path shares — the recipe's `d.arr.splice(…)` and a
+ * `list.splice` patch applied through `applyPatches` — taking the items as an
+ * array, so that a patch inserting 150,000 elements is no 150,000-argument call.
+ * `start` and `rc` are integers (or ±Infinity, from the recipe), clamped as
+ * `Array.prototype.splice` clamps them; `rc` is `undefined` when left out.
+ */
+function spliceArr(state: ArrayState, start: number, rc: number | undefined, items: readonly unknown[]): unknown[] {
+  const copy = materializeArr(state);
+  const len = copy.length;
+  start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
+  const count = rc === undefined ? len - start : Math.min(Math.max(rc, 0), len - start);
+  if (items.length !== count && start + count < len) state.opaqued = true; // survivors relocated
+  const removed = spliceAll(copy, start, count, items);
+  state.ops?.push({
+    t: 'splice',
+    i: start,
+    rc: count,
+    inserted: items.slice(),
+    removed: removed.slice(),
+  });
+  return removed;
 }
 
 /**
@@ -458,7 +503,7 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
       else if (state.vTail.length > 0) removed = state.vTail.pop();
       else removed = materializeArr(state).pop();
       state.ops?.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
-      return removed;
+      return handOut(state, removed);
     },
     shift(state) {
       const copy = materializeArr(state);
@@ -466,7 +511,7 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
       const removed = copy.shift();
       if (copy.length > 0) state.opaqued = true; // survivors relocated
       state.ops?.push({ t: 'splice', i: 0, rc: 1, inserted: [], removed: [removed] });
-      return removed;
+      return handOut(state, removed);
     },
     unshift(state, args) {
       const copy = materializeArr(state);
@@ -476,25 +521,12 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
       return copy.length;
     },
     splice(state, args) {
-      const copy = materializeArr(state);
-      const len = copy.length;
       // Both are integers or ±Infinity by now (checkIndexArgs), so what is
-      // left of Array.prototype.splice's argument rules is the clamping: a
-      // negative start counts from the end, and a start alone removes
-      // through the end.
-      let start = args[0] as number;
-      start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
-      const rc = args.length < 2 ? len - start : Math.min(Math.max(args[1] as number, 0), len - start);
-      const items = args.slice(2);
-      if (items.length !== rc && start + rc < len) state.opaqued = true; // survivors relocated
-      const removed = copy.splice(start, rc, ...items);
-      state.ops?.push({
-        t: 'splice',
-        i: start,
-        rc,
-        inserted: items.slice(),
-        removed: removed.slice(),
-      });
+      // left of Array.prototype.splice's argument rules is the clamping,
+      // which spliceArr does: a negative start counts from the end, and a
+      // start alone removes through the end.
+      const removed = spliceArr(state, args[0] as number, args.length < 2 ? undefined : (args[1] as number), args.slice(2));
+      for (let i = 0; i < removed.length; i++) removed[i] = handOut(state, removed[i]);
       return removed;
     },
   } satisfies Record<string, (state: ArrayState, args: unknown[]) => unknown>,
@@ -562,6 +594,7 @@ const arrayTraps: ProxyHandler<object> = {
       const captured = CAPTURED[prop];
       if (captured !== undefined) {
         return (...args: unknown[]) => {
+          assertUnrevoked(state); // the method may have been read off the draft inside the recipe and called after it
           checkIndexArgs(prop, args);
           for (const a of args) assertAssignable(a, state);
           markChanged(state);
@@ -573,6 +606,7 @@ const arrayTraps: ProxyHandler<object> = {
           prop
         ]!;
         return (...args: unknown[]) => {
+          assertUnrevoked(state);
           checkIndexArgs(prop, args);
           // `fill` is the one of these that takes a value: checked here, at the
           // line that passed it, as `push` and an index write do. (Finalize
@@ -582,7 +616,11 @@ const arrayTraps: ProxyHandler<object> = {
           markChanged(state);
           state.ops = null; // intent lost — net diff at finalize
           state.opaqued = true; // base refs may be relocated — see ArrayState
-          return fn.apply(copy, args);
+          fn.apply(copy, args);
+          // All four return `this`: the draft, not the working copy behind it,
+          // so `d.todos.sort(cmp)[0].done = true` reads through the trap and
+          // drafts, as `d.todos[0].done = true` does.
+          return state.draft;
         };
       }
     }
@@ -666,7 +704,12 @@ const arrayTraps: ProxyHandler<object> = {
     // `length` is not configurable on any array; routed through `set` it
     // became `copy.length = undefined`, a RangeError about array lengths.
     if (prop === 'length') throw new TypeError("valsem: cannot delete an array's length");
-    return arrayTraps.set!.call(this, target, prop, undefined, (target as [ArrayState])[0]!.draft);
+    const state = (target as [ArrayState])[0]!;
+    // Past the end there is nothing to delete, and `Array` leaves the length
+    // alone; routed through `set` it was sparse growth to that index.
+    const index = arrayIndex(prop);
+    if (index !== -1 && index >= arrLen(state)) return true;
+    return arrayTraps.set!.call(this, target, prop, undefined, state.draft);
   },
   getOwnPropertyDescriptor(target, prop) {
     const state = (target as [ArrayState])[0]!;
@@ -1343,13 +1386,21 @@ export function produce<T, Args extends unknown[]>(
   baseOrRecipe: T | ((draft: Draft<T>, ...args: Args) => RecipeReturn<T>),
   recipe?: (draft: Draft<T>) => RecipeReturn<T>,
 ): T | ((base: T, ...args: Args) => T) {
-  if (recipe === undefined) {
+  if (recipe === undefined && typeof baseOrRecipe === 'function') {
     const r = baseOrRecipe as (draft: Draft<T>, ...args: Args) => RecipeReturn<T>;
     // Curried form: extra call arguments flow into the recipe (immer's
     // convention — `setState(produce(toggle, id))` style).
     return (base: T, ...args: Args) => runProduce(base, (d) => r(d, ...args), undefined);
   }
+  // `produce(base, undefined)` is a call with its recipe missing, not the
+  // curried form with the base as its recipe: a function, silently, where
+  // a value was expected.
+  if (typeof recipe !== 'function') throw notARecipe('produce', recipe);
   return runProduce(baseOrRecipe as T, recipe, undefined);
+}
+
+function notARecipe(fn: string, recipe: unknown): TypeError {
+  return new TypeError(`valsem: ${fn} expects a recipe function as its second argument, got ${describeArg(recipe)}`);
 }
 
 /**
@@ -1418,6 +1469,7 @@ export function produceWithPatches<T>(
   base: T,
   recipe: (draft: Draft<T>) => RecipeReturn<T>,
 ): [T, readonly Patch[], readonly Patch[]] {
+  if (typeof recipe !== 'function') throw notARecipe('produceWithPatches', recipe);
   const recorder: PatchRecorder = { patches: [], inverse: [] };
   const result = runProduce(base, recipe, recorder);
   return [result, freezePatches(recorder.patches), freezePatches(recorder.inverse)];
@@ -1465,8 +1517,11 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
         : `valsem: applyPatches expects a list of patches, got ${describeArg(given)}`,
     );
   }
+  // Read once: an iterator (`patches.values()`, a generator) is consumed by
+  // the validation pass, and the application pass must see the same list.
+  const list: readonly Patch[] = Array.isArray(given) ? (given as Patch[]) : Array.from(given as Iterable<Patch>);
   let at = 0;
-  for (const p of patches as Iterable<unknown>) {
+  for (const p of list as readonly unknown[]) {
     const loose = p as { kind?: unknown; path?: unknown } | null;
     if (loose === null || typeof loose !== 'object' || typeof loose.kind !== 'string' || !Array.isArray(loose.path)) {
       throw new TypeError(
@@ -1475,7 +1530,7 @@ export function applyPatches<T>(base: T, patches: readonly Patch[]): T {
     }
     at++;
   }
-  for (const p of patches) {
+  for (const p of list) {
     if (p.kind === 'replace' && p.path.length === 0) {
       flush();
       current = intern(p.value);
@@ -1568,7 +1623,17 @@ function applyRun(draft: unknown, patches: readonly Patch[]): void {
           throw badPatch(p.kind, 'integer index and remove counts and an insert array');
         }
         if (p.index + p.remove > target.length) throw misfit(p.kind, `index ${p.index}, remove ${p.remove}`, target.length);
-        target.splice(p.index, p.remove, ...(p.insert as unknown[]));
+        // The target is a draft of this produce (navigate hands out drafts),
+        // so this is the draft's own splice, given the items as the array
+        // they are: `target.splice(i, n, ...insert)` passed every inserted
+        // element as an argument, and an undo of `length = 0` on 150,000
+        // elements overflowed the stack.
+        if (state?.kind === 'array') {
+          markChanged(state);
+          spliceArr(state as ArrayState, p.index, p.remove, p.insert as unknown[]);
+        } else {
+          spliceAll(target, p.index, p.remove, p.insert as unknown[]);
+        }
         break;
       }
       default:

@@ -51,7 +51,7 @@ import { intern, memoize, HashMap } from 'valsem';
 const users = intern(await (await fetch('/api/users')).json());
 users === previousUsers;                       // true whenever the content is unchanged → React.memo hits
 
-const visible = memoize((todos, filter) => todos.filter(matches(filter)));
+const visible = memoize((todos: Todo[], filter: Filter) => todos.filter(matches(filter)));
 visible(state.todos, { done: false });         // a fresh filter literal still hits: same value, same result
 
 const cache = new HashMap<Query, Response>();

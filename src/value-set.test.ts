@@ -216,3 +216,12 @@ describe('ValueSet — [equals]', () => {
     expect(a[equals](null)).toBe(false);
   });
 });
+
+describe('ValueSet.reduce', () => {
+  it('without an initial value folds from the first member; an empty set is a TypeError, as Array', () => {
+    expect(ValueSet.of(1, 2, 3).reduce((a, b) => a + b)).toBe(6);
+    expect(ValueSet.of(1, 2, 3).reduce((a, b) => a + b, 10)).toBe(16);
+    expect(() => ValueSet.empty<number>().reduce((a, b) => a + b)).toThrow(/reduce of an empty collection with no initial value/);
+    expect(ValueSet.empty<number>().reduce((a, b) => a + b, 0)).toBe(0);
+  });
+});

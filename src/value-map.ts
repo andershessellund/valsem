@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createMapDraft, type MapState } from './draft-map.js';
@@ -207,7 +207,8 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
     const keys: unknown[] = [];
     const vals: unknown[] = [];
-    for (const [rawK, rawV] of entries) {
+    for (const entry of entries) {
+      const [rawK, rawV] = entryOf(entry); // as `new Map(entries)` reads an entry
       keys.push(intern(rawK));
       vals.push(intern(rawV));
     }

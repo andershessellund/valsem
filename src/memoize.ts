@@ -122,6 +122,17 @@ export function memoize<F extends (...args: never[]) => unknown>(
       return hit.result;
     }
 
+    // A miss: the arguments are kept canonical, so intern them first — an
+    // argument that is not a value is refused here, before `fn` runs on it.
+    let canonical: unknown[];
+    try {
+      canonical = args.map(intern);
+    } catch (e) {
+      throw new TypeError(
+        `valsem: memoize — an argument of ${name} is not a value (${(e as Error).message}). ` +
+          'Memoization is by value: pass data, not functions or mutable objects.',
+      );
+    }
     const raw = fn.apply(this, args as never[]);
     let result: unknown;
     try {
@@ -146,7 +157,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
       }
       throw e;
     }
-    const e: Entry = { hash: h, args: args.map(intern), result, newer: null, older: null };
+    const e: Entry = { hash: h, args: canonical, result, newer: null, older: null };
     table.add(e);
     pushNewest(e);
     size++;

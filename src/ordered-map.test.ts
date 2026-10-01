@@ -296,3 +296,10 @@ describe('OrderedMap — what is not a key has no position and no anchor', () =>
     expect(m._anchorOf('a')).not.toBeUndefined();
   });
 });
+
+describe('OrderedMap.from reads entries as new Map does', () => {
+  it('by their 0 and 1: an array-like is an entry, a string is not', () => {
+    expect(OrderedMap.from([{ 0: 'k', 1: 'v' } as unknown as [string, string]]).get('k')).toBe('v');
+    expect(() => OrderedMap.from(['ab'] as unknown as [string, string][])).toThrow(/is not an entry object/);
+  });
+});

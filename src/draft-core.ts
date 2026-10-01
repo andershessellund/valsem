@@ -19,7 +19,7 @@
 import { same, inspectAs, DRAFT_STATE, _setDraftValue, _recipes, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
-import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
+import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord, _isPlainData } from './deep-equal.js';
 
 /**
  * Symbol under which a draftable type exposes its draft factory.
@@ -409,7 +409,7 @@ function snapshotForeign(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (
     _hashCacheHas(value) ||
-    ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainData(value))
   ) {
     return value; // canonical: cannot contain a draft
   }
@@ -460,7 +460,7 @@ export function adopt(value: unknown): unknown {
   // plain data and pooled value-type instances.
   if (
     _hashCacheHas(value) ||
-    ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainData(value))
   ) {
     return value;
   }
@@ -573,8 +573,14 @@ export function finalizeState(
     // the base, so whatever this container and its children wrote since the
     // mark describes no change. (Inverses are unshifted, so the entries added
     // since the mark are exactly the first ones.) A kind's own bookkeeping
-    // can miss cases — a map cleared and refilled to equal content did.
-    if (emitting && result === state.base) retractSeqPatches(recorder, patchMark, recorder.inverse.length - inverseMark);
+    // can miss cases — a map cleared and refilled to equal content did. A
+    // raw base (the caller's own object, or the snapshot a draft given as
+    // the base stands for, D47) is never `===` its canonical result: the
+    // comparison is then against its canonical, one intern of material the
+    // walk resolves anyway.
+    if (emitting && (result === state.base || (!isCanonical(state.base) && result === intern(state.base)))) {
+      retractSeqPatches(recorder, patchMark, recorder.inverse.length - inverseMark);
+    }
     return result;
   } finally {
     inProgress.delete(state);

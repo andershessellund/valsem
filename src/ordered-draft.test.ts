@@ -319,3 +319,44 @@ describe('DraftOrderedSet', () => {
     expect(next.valueList).toBe(ValueList.of({ x: 1 }));
   });
 });
+
+describe("the ordered drafts' walks, positions and iterators", () => {
+  it('an entry deleted before the walk reaches it is not visited (DraftOrderedMap, DraftOrderedSet)', () => {
+    const visited: string[] = [];
+    const next = produce(base(), (d) => {
+      for (const [k, v] of d) {
+        visited.push(k);
+        if (k === 'a') { d.delete('b'); d.delete('c'); }
+        v.n = v.n * 10; // never `undefined`: a deleted entry is not offered
+      }
+    });
+    expect(visited).toEqual(['a']);
+    expect(next).toBe(OrderedMap.from([['a', { n: 10 }]]));
+    const seen: string[] = [];
+    produce(OrderedSet.of('a', 'b', 'c'), (d) => { for (const v of d) { seen.push(v); if (v === 'a') { d.delete('b'); d.delete('c'); } } });
+    expect(seen).toEqual(['a']);
+  });
+
+  it("a bad position is reported in the draft's own name", () => {
+    produce(intern({ os: OrderedSet.of('a'), om: base() }), (d) => {
+      expect(() => d.os.at(NaN)).toThrow(/DraftOrderedSet\.at/);
+      expect(() => d.om.at(1.5)).toThrow(/DraftOrderedMap\.at/);
+    });
+    expect(() => OrderedSet.of('a').at(NaN)).toThrow(/OrderedSet\.at/);
+  });
+
+  it('an iterator that outlives its recipe throws on its next step', () => {
+    let it!: Iterator<string>;
+    produce(OrderedSet.of('a', 'b'), (d) => { it = d.values(); it.next(); });
+    expect(() => it.next()).toThrow(/escaped its produce\(\) call/);
+    let keys!: Iterator<string>;
+    produce(base(), (d) => { keys = d.keys(); });
+    expect(() => keys.next()).toThrow(/escaped/);
+  });
+
+  it('an ordered set reduce without an initial value folds from the first member, in order', () => {
+    expect(OrderedSet.of('a', 'b', 'c').reduce((acc, v) => acc + v)).toBe('abc');
+    expect(() => OrderedSet.empty<string>().reduce((acc, v) => acc + v)).toThrow(TypeError);
+    produce(OrderedSet.of('a', 'b'), (d) => { expect(d.reduce((acc, v) => acc + v)).toBe('ab'); });
+  });
+});

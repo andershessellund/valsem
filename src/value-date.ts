@@ -21,6 +21,7 @@ import { createInternPool } from './intern-pool.js';
 import { hashNumber, mix } from './hasher.js';
 
 const pool = createInternPool<ValueDate>();
+const INTERNAL = Symbol('valsem.value-date');
 
 /**
  * An immutable, canonical timestamp — the value a `Date` stands for.
@@ -44,7 +45,14 @@ export class ValueDate {
   readonly epochMs: number;
   readonly #hash: number;
 
-  private constructor(epochMs: number) {
+  /**
+   * `private` holds at compile time only: from JavaScript, `new ValueDate(ms)`
+   * would mint an instance that claims to be canonical (the type's marker)
+   * and is pooled nowhere — unequal to `ValueDate.from(ms)` and to itself
+   * by content. The token keeps construction inside the class.
+   */
+  private constructor(token: symbol, epochMs: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: ValueDate instances are created by ValueDate.from()');
     this.epochMs = epochMs;
     this.#hash = mix(0xda7e, hashNumber(epochMs));
     Object.freeze(this);
@@ -77,7 +85,7 @@ export class ValueDate {
     const hash = mix(0xda7e, hashNumber(normalized));
     const found = pool.lookup(hash, (c) => c.epochMs === normalized);
     if (found !== undefined) return found;
-    return pool.register(new ValueDate(normalized), hash);
+    return pool.register(new ValueDate(INTERNAL, normalized), hash);
   }
 
   /** A fresh, mutable `Date` for this instant. Mutating it does not touch the value. */

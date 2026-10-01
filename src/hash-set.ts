@@ -58,9 +58,9 @@ export class HashSet<T> {
     this.#set.clear();
   }
 
-  /** Iterate over all members, calling `fn` for each. */
-  forEach(fn: (value: T, value2: T, set: HashSet<T>) => void): void {
-    for (const v of this.#set) fn(v, v, this);
+  /** Iterate over all members, calling `fn` for each, with `thisArg` as its `this`, as `Set.prototype.forEach`. */
+  forEach(fn: (value: T, value2: T, set: HashSet<T>) => void, thisArg?: unknown): void {
+    for (const v of this.#set) fn.call(thisArg, v, v, this);
   }
 
   /** Yield all members, in insertion order — canonical values. */

@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { intern } from './intern.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect } from './shared.js';
 
 /**
  * Mutable map with value-keyed entries: `{ table: 'users', id: 1 }` and
@@ -31,9 +31,14 @@ import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.
 export class HashMap<K, V> {
   readonly #map = new Map<K, V>();
 
-  /** An empty map, or one holding `entries`, as `new Map(entries)`: a later entry with an equal key replaces an earlier one. */
+  /** An empty map, or one holding `entries`, as `new Map(entries)`: a later entry with an equal key replaces an earlier one, and an entry is read as `Map` reads one (by its `0` and `1`; a non-object entry is a `TypeError`). */
   constructor(entries?: Iterable<readonly [K, V]> | null) {
-    if (entries !== undefined && entries !== null) for (const [k, v] of entries) this.set(k, v);
+    if (entries !== undefined && entries !== null) {
+      for (const entry of entries) {
+        const [k, v] = entryOf(entry);
+        this.set(k as K, v as V);
+      }
+    }
   }
 
   /** A map holding `entries`: `new HashMap(entries)`. */
@@ -101,9 +106,9 @@ export class HashMap<K, V> {
     this.#map.clear();
   }
 
-  /** Iterate over all entries, calling `fn` for each. */
-  forEach(fn: (value: V, key: K, map: HashMap<K, V>) => void): void {
-    for (const [k, v] of this.#map) fn(v, k, this);
+  /** Iterate over all entries, calling `fn` for each, with `thisArg` as its `this`, as `Map.prototype.forEach`. */
+  forEach(fn: (value: V, key: K, map: HashMap<K, V>) => void, thisArg?: unknown): void {
+    for (const [k, v] of this.#map) fn.call(thisArg, v, k, this);
   }
 
   /** Yield all `[key, value]` pairs, in insertion order. Keys are canonical. */

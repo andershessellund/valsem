@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { deepHash } from './deep-hash.js';
 import { deepEqual, equals, hashCode } from './deep-equal.js';
+import { intern } from './intern.js';
 import { Temporal } from './temporal.test-helpers.js';
 
 describe('deepHash', () => {
@@ -269,5 +270,12 @@ describe('deepHash — diagnostic for unregistered Temporal', () => {
     expect(() => deepHash(new Whatever())).toThrow(
       /class instance 'Whatever' has no \[hashCode\] or registered hash handler/,
     );
+  });
+});
+
+describe('intern — diagnostic for unregistered Temporal', () => {
+  it('points at the valsem/temporal import, as deepHash does', () => {
+    expect(() => intern(Temporal.PlainDate.from('2026-08-31'))).toThrow(/import 'valsem\/temporal'/);
+    expect(() => intern({ at: Temporal.PlainDate.from('2026-08-31') })).toThrow(/import 'valsem\/temporal'/);
   });
 });

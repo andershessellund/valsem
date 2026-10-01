@@ -34,7 +34,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, newEntryIndex } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, atIndex, newEntryIndex } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
@@ -54,14 +54,20 @@ export type OrderedMapOp =
   /** The working map and overlay as they stood — walked only when patches are emitted. */
   | { t: 'clear'; before: OrderedMap<unknown, unknown>; edits: Map<unknown, Entry> };
 
+/**
+ * The state behind a {@link DraftOrderedMap}. Its bookkeeping is not API: the
+ * fields below the two the protocol needs (`kind`, `draft`) are tagged
+ * internal, out of the published declarations, free to change in any release.
+ */
 export interface OrderedMapState<K = unknown, V = unknown> extends DraftState<OrderedMap<K, V>> {
   kind: 'omap';
-  /** The canonical empty map (for `clear()`). */
+  /** @internal The canonical empty map (for `clear()`). */
   empty: () => OrderedMap<unknown, unknown>;
-  /** The base with every structural op applied persistently — the order and membership; a new key holds `undefined` until finalize. */
+  /** @internal The base with every structural op applied persistently — the order and membership; a new key holds `undefined` until finalize. */
   work: OrderedMap<unknown, unknown>;
-  /** Canonical key → what the recipe sees there. Absent = the base value, untouched. */
+  /** @internal Canonical key → what the recipe sees there. Absent = the base value, untouched. */
   edits: Map<unknown, Entry>;
+  /** @internal */
   ops: OrderedMapOp[];
   draft: DraftOrderedMap<K, V>;
 }
@@ -150,7 +156,9 @@ export class DraftOrderedMap<K, V> {
    * `OrderedMap<string, number>` was not an `OrderedMap<string, unknown>`.
    */
   at(index: number): [K, Draft<V> | (V & undefined)] | undefined {
-    const e = this.#state.work.at(index); // reads the index as Array.prototype.at does
+    const s = this.#state;
+    const i = atIndex(index, s.work.size, 'DraftOrderedMap.at'); // as Array.prototype.at reads it, checked in this draft's name
+    const e = i === -1 ? undefined : s.work.at(i);
     return e === undefined ? undefined : [e[0] as K, this.get(e[0] as K) as Draft<V> | (V & undefined)];
   }
 
@@ -246,11 +254,23 @@ export class DraftOrderedMap<K, V> {
    * reads is cheaper over `current(d.m)`, which drafts nothing.
    */
   *entries(): IterableIterator<[K, Draft<V> | (V & undefined)]> {
-    for (const k of this.#state.work.keys()) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
+    for (const k of this.keys()) yield [k, this.get(k) as Draft<V> | (V & undefined)];
   }
 
-  keys(): IterableIterator<K> {
-    return this.#state.work.keys() as IterableIterator<K>;
+  /**
+   * The keys in order, as the map stood when the walk began — the working map
+   * is persistent — except that an entry deleted before the walk reaches it is
+   * not visited, as on a native `Map` (asked of the current map only once
+   * something changed).
+   */
+  *keys(): IterableIterator<K> {
+    const s = this.#state;
+    const begun = s.work;
+    for (const k of begun.keys()) {
+      assertUnrevoked(s);
+      if (s.work !== begun && !s.work.has(k)) continue; // deleted since
+      yield k as K;
+    }
   }
 
   *values(): IterableIterator<Draft<V> | (V & undefined)> {

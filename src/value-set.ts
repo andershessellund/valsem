@@ -157,9 +157,11 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
     return kept.length === this.size ? this : ValueSet.from(kept);
   }
 
-  /** A fold over the members, from `initial`. */
-  reduce<U>(fn: (acc: U, value: T, value2: T, set: ValueSet<T>) => U, initial: U): U {
-    return reduceIn(this, this, false, 'ValueSet.reduce', [fn, initial]) as U;
+  /** A fold over the members. With no initial value the first member starts it, and an empty set is a `TypeError`, as on `Array`. */
+  reduce(fn: (acc: T, value: T, value2: T, set: ValueSet<T>) => T): T;
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: ValueSet<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    return reduceIn(this, this, false, 'ValueSet.reduce', args);
   }
 
   /** Whether `fn` accepts any member. */

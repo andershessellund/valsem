@@ -79,3 +79,12 @@ describe('HashSet', () => {
     for (let i = 1; i < 3000; i += 2) expect(s.has({ i, s: `k${i}` })).toBe(true);
   });
 });
+
+describe('HashSet.forEach', () => {
+  it('passes thisArg, as Set.prototype.forEach does', () => {
+    const ctx = {};
+    let seen: unknown;
+    new HashSet([1]).forEach(function (this: unknown) { seen = this; }, ctx);
+    expect(seen).toBe(ctx);
+  });
+});

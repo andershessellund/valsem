@@ -99,6 +99,23 @@ describe('the published declarations, as a consumer compiles them', () => {
     expect(diagnostics).toEqual([]);
   });
 
+  it("the drafts' bookkeeping is not reachable from the published types: a renamed field breaks no consumer", () => {
+    const diagnostics = compileConsumer(
+      declarations,
+      `
+      import { ValueList, DraftOrderedMap, toDraft } from '/published/index.js';
+      import { DRAFT_STATE } from '/published/draft.js';
+      // @ts-expect-error ListState.overlay is internal
+      export type ListOverlay = ReturnType<ValueList<number>[typeof toDraft]>['overlay'];
+      // @ts-expect-error OrderedMapState.ops is internal
+      export type OmapOps = DraftOrderedMap<string, number>[typeof DRAFT_STATE]['ops'];
+      // What the protocol needs stays reachable.
+      export type Still = [ReturnType<ValueList<number>[typeof toDraft]>['draft'], DraftOrderedMap<string, number>[typeof DRAFT_STATE]['kind']];
+      `,
+    );
+    expect(diagnostics).toEqual([]);
+  });
+
   // `stripInternal` keeps what is tagged `@internal` out of the declarations. A
   // tag on something they still need (a re-export, a helper type a public type
   // is spelled with) breaks every consumer's build and none of ours, so all
