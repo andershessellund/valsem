@@ -41,9 +41,11 @@ OrderedMap.from([['a', 1], ['b', 2]]) === OrderedMap.from([['b', 2], ['a', 1]]);
 
 **Equal means `===`.** The same holds for every value valsem hands back:
 `intern` collapses equal content to one frozen, canonical instance, and
-`produce` and the collections return that instance. Comparing two values is
-therefore a pointer check, at any size, and the bugs that come from
-comparing by reference cannot happen:
+`produce` and the collections return that instance. On such values
+reference equality *is* value equality, so code that compares by reference —
+React's dependency checks, `React.memo`, reselect, a native `Map` — needs no
+adapter and compares content without knowing it. For data that came through
+valsem, these bugs go away:
 
 - **An effect that fires on every render.** Refetch, re-derive, or reload
   the same content and you get the same object, so `useEffect`, `useMemo`
@@ -74,6 +76,12 @@ cache.get({ page: 2, path: '/users' });        // hits the entry stored under { 
 
 fastEqual(state, saved);                       // a pointer compare, at any size
 ```
+
+The condition is that both sides came through valsem: a fresh literal or an
+un-interned response is an ordinary object and compares as one. `HashMap`
+and `memoize` intern what they are given, so a raw key or argument still
+finds its entry, at the cost of a walk, and `fastEqual` throws on a raw
+object rather than answering a silent `false`.
 
 **Immutable, with immer's recipes.** Everything that comes out of `produce`,
 `intern` or a collection is frozen, all the way down, so a stray mutation
@@ -135,9 +143,13 @@ See [Extending](#extending).
 is hashed and canonicalised when it is created, so constructing and updating
 cost more than a plain copy: an edit to a large plain array costs two to
 seven times what immer charges with its auto-freeze off, and admitting a
-large API response three to five times parsing it. That is the trade: a win
-for state that is compared, memoized, keyed or kept in history more often
-than it is built, and a loss for state built once and thrown away.
+large API response three to five times parsing it. In absolute terms, on
+Node: one field edit in a three-key record is 1.3 µs against immer's 0.4 µs,
+and a 10,000-record response that `JSON.parse` delivers in 3.4 ms takes
+18 ms to intern when every record is new, 8 ms when an unchanged refetch
+finds them all in the pool. That is the trade: a win for state that is
+compared, memoized, keyed or kept in history more often than it is built,
+and a loss for state built once and thrown away.
 [Performance](#performance) below has what is fast and what is not, memory
 at scale, and the one engine where freezing is worth a thought;
 [BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first.
