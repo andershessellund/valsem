@@ -34,7 +34,7 @@
 | `configureLimits` | function | Decode-boundary guards: `{ maxDepth }` (default 512) caps the nesting `intern`/`deepHash`/`produce` will walk. `deepEqual` stays uncapped (total over admitted values; a plain recursive walk on raw input). |
 | `Draft` / `Undraft` / `RecipeReturn` | type | The draft of a value type and its inverse; a recipe's permitted return. |
 | `Patch` / `PatchPath` / `PatchKinds` / `Hunk` | type | Semantic patches and their paths (extend `PatchKinds` by declaration merging); one changed region from `ValueList.diff`. |
-| `Memoized` / `MemoizeOptions` | type | A memoized function (`clear()`, `size`); its options (`maxSize`). |
+| `Memoized<F>` / `MemoizeOptions` | type | A memoized function: `F` itself, overloads and type parameters kept, with `clear()` and `size`; its options (`maxSize`). |
 | `InternPool` / `Hasher` | type | Pool interface; pluggable leaf-hash interface. |
 
 ## `valsem/temporal`

@@ -33,14 +33,17 @@ export interface MemoizeOptions {
   maxSize?: number;
 }
 
-/** A memoized function: the original's signature plus cache control. */
-export interface Memoized<F extends (...args: never[]) => unknown> {
-  (...args: Parameters<F>): ReturnType<F>;
+/**
+ * A memoized function: the original, signature and all — overloads and type
+ * parameters included, which `Parameters<F>`/`ReturnType<F>` would flatten
+ * — plus cache control.
+ */
+export type Memoized<F> = F & {
   /** Drop every cached result. */
   clear(): void;
   /** Entries currently held. */
   readonly size: number;
-}
+};
 
 interface Entry extends TableEntry {
   readonly hash: number;
@@ -65,8 +68,14 @@ interface Entry extends TableEntry {
  * Arguments must be values; results must be values (they are interned).
  * `this` is passed through but is not part of the key — memoize functions
  * of their arguments only.
+ *
+ * `F extends Function`, not a function type: a function type would give an
+ * unannotated callback's parameters its own (`never`, or `any`), where
+ * `Function` gives them none, so `memoize((todos, filter) => …)` is the
+ * implicit-any error that says to annotate — and the memoized function is
+ * `F` itself, every overload and type parameter kept.
  */
-export function memoize<F extends (...args: never[]) => unknown>(
+export function memoize<F extends Function>(
   fn: F,
   options: MemoizeOptions = {},
 ): Memoized<F> {

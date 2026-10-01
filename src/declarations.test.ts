@@ -116,6 +116,27 @@ describe('the published declarations, as a consumer compiles them', () => {
     expect(diagnostics).toEqual([]);
   });
 
+  it("memoize keeps the function's own signature, and an unannotated callback is the implicit-any error", () => {
+    const diagnostics = compileConsumer(
+      declarations,
+      `
+      import { memoize } from '/published/index.js';
+      declare function over(x: number): number;
+      declare function over(x: string): string;
+      const m = memoize(over);
+      export const n: number = m(1);
+      export const s: string = m('s');
+      export const g = memoize(<T>(x: T): T => x);
+      export const gs: string = g('s');
+      m.clear();
+      export const size: number = m.size;
+      // @ts-expect-error an unannotated parameter is an implicit any: the error says to annotate
+      export const u = memoize((todos, filter) => [todos, filter]);
+      `,
+    );
+    expect(diagnostics).toEqual([]);
+  });
+
   // `stripInternal` keeps what is tagged `@internal` out of the declarations. A
   // tag on something they still need (a re-export, a helper type a public type
   // is spelled with) breaks every consumer's build and none of ours, so all

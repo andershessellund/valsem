@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import { memoize } from './memoize.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
@@ -180,5 +180,28 @@ describe('memoize — an argument that is not a value is refused before fn runs'
     expect(() => (f as unknown as (x: unknown) => unknown)(new H())).toThrow(/an argument of the function is not a value/);
     expect(runs).toBe(0);
     expect(f.size).toBe(0);
+  });
+});
+
+describe('memoize — the memoized function is the original, signature and all', () => {
+  it('overloads and type parameters survive; an unannotated callback is the implicit-any error that says to annotate', () => {
+    function over(x: number): number;
+    function over(x: string): string;
+    function over(x: number | string): number | string {
+      return x;
+    }
+    const m = memoize(over, { maxSize: 2 });
+    expectTypeOf(m(1)).toEqualTypeOf<number>();
+    expectTypeOf(m('s')).toEqualTypeOf<string>();
+    expect(m(1)).toBe(1);
+    expect(m('s')).toBe('s');
+    expectTypeOf(m.clear).toEqualTypeOf<() => void>();
+    expectTypeOf(m.size).toEqualTypeOf<number>();
+    const id = memoize(<T>(x: T): T => x, { maxSize: 2 });
+    expectTypeOf(id('s')).toEqualTypeOf<string>();
+    expect(id(intern({ a: 1 }))).toBe(intern({ a: 1 }));
+    // @ts-expect-error an unannotated parameter is an implicit any (TS7006): annotate it
+    const un = memoize((todos, filter) => [todos, filter]);
+    expect(un.size).toBe(0);
   });
 });
