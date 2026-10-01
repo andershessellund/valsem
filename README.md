@@ -6,57 +6,61 @@
 npm install valsem
 ```
 
-**Immutable.** Everything that comes out of `produce`, `intern`, or a
-collection is frozen, all the way down. A stray mutation throws instead of
-corrupting state.
+A value is its content: two with the same content are equal, are one
+object, and work as a key. valsem gives plain objects and arrays that
+property, builds a set of collections on it, lets your own classes join,
+edits all of it with immer's recipe syntax, and refuses anything that cannot
+be a value with an error that names the fix.
+
+**Maps and sets that actually work.** A native `Set` of points holds
+duplicates, and a native `Map` misses a key you rebuilt, because both key by
+reference. valsem's key by content:
 
 ```ts
-import { produce } from 'valsem';
+import { HashSet, HashMap } from 'valsem';
 
-type Todo = { id: number; text: string; done: boolean };
-declare const state: { todos: Todo[]; filter: string };
+new Set([{ x: 1, y: 2 }, { x: 1, y: 2 }]).size;      // 2
+new Map([[{ x: 1 }, 'a']]).get({ x: 1 });            // undefined
 
-const next = produce(state, (d) => { d.todos[0].done = true; });
-next.todos.push({ id: 2, text: 'write docs', done: false }); // TypeError: Cannot add property 1, object is not extensible
+new HashSet([{ x: 1, y: 2 }, { x: 1, y: 2 }]).size;  // 1
+new HashMap([[{ x: 1 }, 'a']]).get({ x: 1 });        // 'a'
 ```
 
-**Ergonomic.** An immer-shaped recipe API: mutate a draft, get a new value,
-with structural sharing. `produceWithPatches`, `applyPatches`, `current`,
-`original`, and the curried form are all there; what differs — collections,
-patches, draft lifetimes — is tabled under [Coming from immer](#coming-from-immer).
+`HashMap` and `HashSet` are the mutable drop-ins. `ValueMap`, `ValueSet`
+and `ValueList`, with the insertion-ordered `OrderedMap` and `OrderedSet`,
+are the immutable collections, with structural sharing, and they go one step
+further: equal content is the same object, however it was built.
 
 ```ts
-import { produce } from 'valsem';
+import { ValueMap, ValueSet, OrderedMap } from 'valsem';
 
-declare const state: { todos: { id: number; text: string; done: boolean }[]; filter: string };
-
-const next = produce(state, (d) => {
-  d.todos.push({ id: 2, text: 'write docs', done: false });
-  d.filter = 'active';
-});
+ValueSet.from([1, 2, 3]) === ValueSet.from([3, 2, 1]);                                               // true — order is not part of a set
+ValueMap.from([['a', 1], ['b', 2]]) === ValueMap.empty<string, number>().with('b', 2).with('a', 1); // true — different history, same value
+OrderedMap.from([['a', 1], ['b', 2]]) === OrderedMap.from([['b', 2], ['a', 1]]);                     // false — here order is part of the value
 ```
 
-**Compared by value.** Two values with the same content are equal, and since
-every value valsem hands back is canonical, equal means `===`. That is the
-property a React app is built around, and it stops paying for what did not
-change:
+**Equal means `===`.** The same holds for every value valsem hands back:
+`intern` collapses equal content to one frozen, canonical instance, and
+`produce` and the collections return that instance. Comparing two values is
+therefore a pointer check, at any size, and the bugs that come from
+comparing by reference cannot happen:
 
-- **No rerender for unchanged data.** Refetch, re-derive, or reload the same
-  content and you get the same object, so `React.memo`, `useMemo`, and effect
-  dependencies see nothing new.
-- **No recomputing selectors.** A memoized selector — valsem's `memoize` or
-  reselect's — hits on equal inputs, not just identical references.
-- **No refetch for an equal query.** A cache keyed by content (`HashMap` on
-  the request parameters) hits when the parameters are equal, however the
-  object was built.
-- **"Unsaved changes?" is one compare.** `fastEqual(current, saved)`, at any
-  size.
+- **An effect that fires on every render.** Refetch, re-derive, or reload
+  the same content and you get the same object, so `useEffect`, `useMemo`
+  and `React.memo` dependencies see nothing new.
+- **A memo that never hits.** A memoized selector — valsem's `memoize` or
+  reselect's — hits on equal arguments, not just identical references.
+- **A cache that misses its own entry.** A `HashMap` keyed on request
+  parameters hits however the key was built and whatever its key order.
+- **A dirty check that serialises the state.** `fastEqual(current, saved)`
+  is one compare, at any size.
 
 ```ts
-import { intern, memoize, HashMap } from 'valsem';
+import { intern, memoize, HashMap, fastEqual } from 'valsem';
 
 type Todo = { id: number; text: string; done: boolean };
 declare const state: { todos: Todo[] };
+declare const saved: { todos: Todo[] };
 declare const previousUsers: unknown;
 
 const users = intern(await (await fetch('/api/users')).json());
@@ -67,85 +71,76 @@ visible(state.todos, { done: false });         // a fresh filter literal still h
 
 const cache = new HashMap<{ page: number; path: string }, Response>();
 cache.get({ page: 2, path: '/users' });        // hits the entry stored under { path: '/users', page: 2 }
+
+fastEqual(state, saved);                       // a pointer compare, at any size
 ```
 
-The collections agree with all of this: `ValueMap`, `ValueSet`, `ValueList`
-(and the insertion-ordered `OrderedMap`, `OrderedSet`) are immutable
-collections with structural sharing whose equal instances are the same
-object; `HashMap` and `HashSet` are mutable and keyed by content.
+**Immutable, with immer's recipes.** Everything that comes out of `produce`,
+`intern` or a collection is frozen, all the way down, so a stray mutation
+throws instead of corrupting shared state. Editing is a recipe: mutate a
+draft, get a new value, with structural sharing. `produceWithPatches`,
+`applyPatches`, `current`, `original` and the curried form are all there,
+and the collections draft as mutable twins with the native API; what
+differs — collections, patches, draft lifetimes — is tabled under
+[Coming from immer](#coming-from-immer).
+
+```ts
+import { produce } from 'valsem';
+
+type Todo = { id: number; text: string; done: boolean };
+declare const state: { todos: Todo[]; filter: string };
+
+const next = produce(state, (d) => {
+  d.todos[0].done = true;
+  d.filter = 'active';
+});
+next.todos.push({ id: 2, text: 'write docs', done: false }); // TypeError: Cannot add property 1, object is not extensible
+produce(next, (d) => { d.filter = 'active'; }) === next;     // true — an edit that changes nothing is the same value
+```
+
+**Loud at the boundary.** Things that can change after construction are not
+values, and valsem says so rather than guessing: a `Date`, a native `Map` or
+`Set`, a `RegExp`, a `TypedArray` or a class it does not know is rejected
+with an error that names the replacement, never silently compared by
+reference. The same goes for the mistakes immer and Immutable.js let
+through:
+
+- an **async recipe** is a type error, and an error at runtime, not a
+  silently wrong result;
+- a **`NaN` index** throws instead of meaning `0`, and on valsem's own
+  collections an index must name a place that exists;
+- a **draft used after its `produce` call** throws, and so does a draft put
+  into another recipe's state;
+- the **mutator verbs** (`push`, `set`, `add`, `delete`) compile only on a
+  draft or a `HashMap`. A value's edits are named for their result
+  (`pushed`, `with`, `added`, `deleted`), so a dropped result reads as wrong
+  as it is, where Immutable.js's `list.push(x);` is a silent no-op.
+
+```ts
+import { intern } from 'valsem';
+
+intern({ tags: new Set(['a']) });
+// TypeError: intern: Set cannot be interned — valsem gives value semantics to
+// immutable values only, and a Set can be written to after construction. Use
+// ValueSet.from(...), which has value semantics and canonical instances.
+```
 
 **Extensible.** Your own classes become values with two members — `[equals]`
 and a companion `[hashCode]` — or one registration, `deepEqual.register`,
 and then compare, hash, intern, and key a map like anything else. Third-party
 types work the same way; Temporal ships ready-made behind `valsem/temporal`.
-Anything valsem cannot treat as a value — a `Date`, a native `Map`, a class it
-does not know — is rejected with an error that names the fix, never silently
-compared by reference. See [Extending](#extending).
+See [Extending](#extending).
 
-**Fast.** Here is exactly what is fast, and what is not. Comparing two
-canonical values is a pointer check — tens of nanoseconds for a three-key
-record and for a three-million-key state alike — and everything built on
-comparison inherits that: `fastEqual`, `HashMap` and `HashSet` lookups on
-canonical keys, `memoize` hits, and hashing, which is a cached property read.
-
-```ts
-import { fastEqual, HashMap } from 'valsem';
-
-type State = { todos: unknown[] };
-type Derived = { visible: unknown[] };
-declare const current: State, saved: State;
-
-fastEqual(current, saved);            // a pointer compare, at any size
-const derived = new HashMap<State, Derived>();
-derived.get(current);                  // a native Map lookup plus one probe — the key is canonical, so === is value equality
-```
-
-What is *not* fast is building: every value is hashed and canonicalised when
-it is created, so constructing and updating cost more than a plain copy. An
-edit to a large plain array costs two to seven times what immer charges with
-its auto-freeze off on V8 (and far less than immer's default, which re-freezes the
-array; Safari's engine is [its own section](#freezing-and-safari)), admitting a large API response costs three to five times parsing it, and a lookup with a raw
-(uncanonicalised) key walks it. That is the trade: a win for state that is
-compared, memoized, keyed, or kept in history more often than it is built,
-and a loss for state built once and thrown away.
+**The cost.** Comparing is what is fast; building is what costs. Every value
+is hashed and canonicalised when it is created, so constructing and updating
+cost more than a plain copy: an edit to a large plain array costs two to
+seven times what immer charges with its auto-freeze off, and admitting a
+large API response three to five times parsing it. That is the trade: a win
+for state that is compared, memoized, keyed or kept in history more often
+than it is built, and a loss for state built once and thrown away.
+[Performance](#performance) below has what is fast and what is not, memory
+at scale, and the one engine where freezing is worth a thought;
 [BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first.
-
-At scale, what matters is how many *distinct* plain records and arrays are
-alive and how fast *novel* ones are made. Equal values are one instance: a
-million rows with 10,000 distinct contents take 13 MB interned against
-290 MB as plain objects. Making novel records under a very large live set
-costs an occasional pause (tens of milliseconds at 100,000 distinct live
-records on V8, most of a second at a million); values that recur do not pay
-it, and neither do `ValueList`, `ValueMap` and the other collections, nor
-your own value types with a pool of their own. The
-[performance guide](https://andershessellund.github.io/valsem/guide/performance#large-states-memory-and-pauses)
-has the measurements.
-
-### Freezing, and Safari
-
-Freezing is on by default and stays on: it is what turns a stray mutation of
-shared state into an exception. What it costs depends on the engine.
-
-- On **SpiderMonkey** (Firefox) it costs nothing: the freeze is cheap and a
-  frozen array reads as fast as an unfrozen one.
-- On **V8** (Chrome, Node, Deno) the freeze itself is nearly free. The cost is
-  in *your* code that reads canonical **plain arrays**: V8 has no fast path
-  for frozen elements in several builtins, so `for…of`, `filter` and
-  `JSON.stringify` over a frozen array run 2–3.5× slower.
-- On **JavaScriptCore** (Safari, Bun) freezing an array is an O(n) walk, and
-  `produce` freezes the new array of every edit: one edit in a
-  10,000-element plain array takes about 3 ms with freezing on and about
-  20 µs without, and reads run 4–10× slower frozen.
-
-If large plain arrays sit on a hot path and you ship to Safari, do what immer
-users do: keep freezing in development and test, and call `skipFreezing()`
-once at startup in production. Or hold large sequences in a `ValueList`,
-which pays neither cost on any engine (its leaves are small arrays inside
-a frozen wrapper). Records, and arrays of ordinary size, are not worth the
-thought. The `skipFreezing()` suite in [BENCHMARKS.md](BENCHMARKS.md) has
-the three engines side by side; the
-[performance guide](https://andershessellund.github.io/valsem/guide/performance)
-says what the switch gives up.
 
 ## Coming from immer
 
@@ -293,7 +288,76 @@ insertion-ordered `OrderedMap`/`OrderedSet`, the mutable `HashMap`/`HashSet`,
 `memoize`, and the two tools for the ends of the scale, `InternedString` and
 `RawArray`.
 
-## Benchmarks
+## Performance
+
+Here is exactly what is fast, and what is not. Comparing two canonical
+values is a pointer check — tens of nanoseconds for a three-key record and
+for a three-million-key state alike — and everything built on comparison
+inherits that: `fastEqual`, `HashMap` and `HashSet` lookups on canonical
+keys, `memoize` hits, and hashing, which is a cached property read.
+
+```ts
+import { fastEqual, HashMap } from 'valsem';
+
+type State = { todos: unknown[] };
+type Derived = { visible: unknown[] };
+declare const current: State, saved: State;
+
+fastEqual(current, saved);            // a pointer compare, at any size
+const derived = new HashMap<State, Derived>();
+derived.get(current);                  // a native Map lookup plus one probe — the key is canonical, so === is value equality
+```
+
+What is *not* fast is building: every value is hashed and canonicalised when
+it is created, so constructing and updating cost more than a plain copy. An
+edit to a large plain array costs two to seven times what immer charges with
+its auto-freeze off on V8 (and far less than immer's default, which re-freezes the
+array; Safari's engine is [its own section](#freezing-and-safari)), admitting a large API response costs three to five times parsing it, and a lookup with a raw
+(uncanonicalised) key walks it. That is the trade: a win for state that is
+compared, memoized, keyed, or kept in history more often than it is built,
+and a loss for state built once and thrown away.
+[BENCHMARKS.md](BENCHMARKS.md) shows both sides, losses first.
+
+### At scale
+
+At scale, what matters is how many *distinct* plain records and arrays are
+alive and how fast *novel* ones are made. Equal values are one instance: a
+million rows with 10,000 distinct contents take 13 MB interned against
+290 MB as plain objects. Making novel records under a very large live set
+costs an occasional pause (tens of milliseconds at 100,000 distinct live
+records on V8, most of a second at a million); values that recur do not pay
+it, and neither do `ValueList`, `ValueMap` and the other collections, nor
+your own value types with a pool of their own. The
+[performance guide](https://andershessellund.github.io/valsem/guide/performance#large-states-memory-and-pauses)
+has the measurements.
+
+### Freezing, and Safari
+
+Freezing is on by default and stays on: it is what turns a stray mutation of
+shared state into an exception. What it costs depends on the engine.
+
+- On **SpiderMonkey** (Firefox) it costs nothing: the freeze is cheap and a
+  frozen array reads as fast as an unfrozen one.
+- On **V8** (Chrome, Node, Deno) the freeze itself is nearly free. The cost is
+  in *your* code that reads canonical **plain arrays**: V8 has no fast path
+  for frozen elements in several builtins, so `for…of`, `filter` and
+  `JSON.stringify` over a frozen array run 2–3.5× slower.
+- On **JavaScriptCore** (Safari, Bun) freezing an array is an O(n) walk, and
+  `produce` freezes the new array of every edit: one edit in a
+  10,000-element plain array takes about 3 ms with freezing on and about
+  20 µs without, and reads run 4–10× slower frozen.
+
+If large plain arrays sit on a hot path and you ship to Safari, do what immer
+users do: keep freezing in development and test, and call `skipFreezing()`
+once at startup in production. Or hold large sequences in a `ValueList`,
+which pays neither cost on any engine (its leaves are small arrays inside
+a frozen wrapper). Records, and arrays of ordinary size, are not worth the
+thought. The `skipFreezing()` suite in [BENCHMARKS.md](BENCHMARKS.md) has
+the three engines side by side; the
+[performance guide](https://andershessellund.github.io/valsem/guide/performance)
+says what the switch gives up.
+
+### Benchmarks
 
 `pnpm bench` runs every suite on Node and on Bun, the engine-level ones in
 the SpiderMonkey shell as well, and renders
