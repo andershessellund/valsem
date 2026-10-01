@@ -1411,6 +1411,11 @@ function notARecipe(fn: string, recipe: unknown): TypeError {
  * Non-draftables (primitives, opaque value leaves) return themselves, as
  * `Draft<T>` types them. A draft of this scope returns itself.
  *
+ * The value is interned first, as a base is (D61), so the draft never
+ * reaches a raw object — and a live draft embedded in a raw literal
+ * (`draftOf({ wrap: d.x })`) becomes its snapshot there. To keep it live,
+ * assign it into the detached draft afterwards (`det.wrap = d.x`).
+ *
  * @throws outside a recipe, or given a draft from another `produce()` call.
  */
 export function draftOf<T>(value: T): Draft<T> {

@@ -75,6 +75,16 @@ describe('produce never modifies its input', () => {
     });
     expect(mine).toEqual({ k: 1 });
     expect(next).toBe(intern({ a: [{ k: 2 }] }));
+    // A live draft embedded in the literal becomes its snapshot; assigned afterwards, it stays live.
+    const out = produce(intern({ x: { k: 1 }, snap: null as Row | null, live: null as Row | null }), (d) => {
+      const det = draftOf({ wrap: d.x });
+      const liveDet = draftOf({ wrap: null as Row | null });
+      liveDet.wrap = d.x;
+      d.x.k = 2;
+      d.snap = det.wrap;
+      d.live = liveDet.wrap;
+    });
+    expect(out).toBe(intern({ x: { k: 2 }, snap: { k: 1 }, live: { k: 2 } }));
   });
 
   it('a draft given as the base stands for its current value, and the outer recipe is not edited through the inner one (D47)', () => {
