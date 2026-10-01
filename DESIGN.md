@@ -343,9 +343,11 @@ it `[interned]`, freezes it, and registers it.
 - `isCanonical(v)`: a primitive (not a function), or an object in the hash
   cache, or a class instance marked `[interned]`. The probe behind every
   canonical short-circuit.
-- `fastEqual(a, b)`: `a === b`, after verifying both sides canonical while
-  checks are on (a raw argument throws rather than yielding a silent
-  `false`).
+- `fastEqual(a, b)`: `deepEqual` at the cost of `===` — identity, which is
+  value equality once both sides are canonical, with the one exception
+  `===` makes and `deepEqual` does not, NaN (SameValueZero, as the pools
+  compare) — after verifying both sides canonical while checks are on (a
+  raw argument throws rather than yielding a silent `false`).
 - `internHash(v)`: the cached hash in O(1) for canonical objects, `deepHash`
   otherwise. Pure.
 

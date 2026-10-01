@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { deepEqual } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
-import { intern, isCanonical } from './intern.js';
+import { intern, isCanonical, fastEqual } from './intern.js';
 import { HashMap } from './hash-map.js';
 import { HashSet } from './hash-set.js';
 import { memoize } from './memoize.js';
@@ -29,6 +29,10 @@ describe('every NaN is one value', () => {
     expect(Number.isNaN(negNaN)).toBe(true);
     expect(deepEqual(NaN, negNaN)).toBe(true);
     expect(isCanonical(negNaN)).toBe(true);
+    // fastEqual is deepEqual made fast by canonicality: the one place `===` disagrees with deepEqual is covered.
+    expect(fastEqual(NaN, NaN)).toBe(true);
+    expect(fastEqual(NaN, negNaN)).toBe(true);
+    expect(fastEqual(intern([NaN]), intern([negNaN]))).toBe(true);
   });
 
   it('deepHash: equal ⟹ same hash, for every spelling, bare and nested', () => {

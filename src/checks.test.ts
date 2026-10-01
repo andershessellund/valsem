@@ -37,7 +37,7 @@ describe('fastEqual (checks on)', () => {
     expect(fastEqual(a, intern({ x: [1, 2] }))).toBe(true);
     expect(fastEqual(a, intern({ x: [1, 3] }))).toBe(false);
     expect(fastEqual(1, 1)).toBe(true);
-    expect(fastEqual(NaN, NaN)).toBe(false); // ===, by design — deepEqual says true
+    expect(fastEqual(NaN, NaN)).toBe(true); // deepEqual says true, and fastEqual is deepEqual made fast
     expect(fastEqual(ValueList.of(1), ValueList.of(1))).toBe(true);
     expect(fastEqual(undefined, null)).toBe(false);
   });

@@ -8,7 +8,7 @@
 | `deepHash` | function | Companion structural hash (`equal ⟹ same hash`). Throws for anything that is not a value, naming the fix. |
 | `intern` | function | Return the canonical, deduplicated copy of a value (frozen, for values valsem builds, unless `skipFreezing()` was called). A class with an equality and a hash is pooled by that equality, unfrozen; anything less throws — nothing passes through. |
 | `isCanonical(value)` | function | Whether `value` is a primitive or an object valsem canonicalised — the form in which `===` is value equality. The probe behind every canonical short-circuit. |
-| `fastEqual(a, b)` | function | `a === b` for canonical values, never a walk. While checks are on, a raw argument throws instead of yielding a silent `false`. |
+| `fastEqual(a, b)` | function | `deepEqual` for canonical values at the cost of `===`: identity, NaN excepted (SameValueZero, as `deepEqual` says), never a walk. While checks are on, a raw argument throws instead of yielding a silent `false`. |
 | `internHash` | function | Hashing that exploits the intern cache (O(1) for canonical values). |
 | `HashMap` | class | Mutable map keyed by value (with `Map`'s `getOrInsert` / `getOrInsertComputed`): a native `Map` of canonical keys, every key interned on the way in (~20 ns over the native lookup for a canonical key, a pool lookup for a raw one). Values are stored as-is. |
 | `HashSet` | class | Mutable set of values — `HashMap`'s twin; members interned on entry. Both constructors take what `new Map` / `new Set` take. |

@@ -89,19 +89,21 @@ function describeNonCanonical(value: unknown): string {
 }
 
 /**
- * Equality by identity, for canonical values — `a === b`, which is value
- * equality once both sides are canonical. Unlike `deepEqual`, it never
- * walks: the promise that both arguments are canonical (or primitive) is
- * yours, and while checks are on it is verified, throwing on a raw object
- * (whose `===` would be a silent `false`). `skipChecks()` turns the check
- * off; the comparison is then a bare `===`.
+ * `deepEqual` for canonical values, at the cost of `===`: once both sides
+ * are canonical, identity IS value equality — except for NaN, the one value
+ * `===` denies to itself, which `deepEqual` (and every pool and collection)
+ * says is equal, so it is equal here too (SameValueZero). Unlike
+ * `deepEqual`, it never walks: the promise that both arguments are canonical
+ * (or primitive) is yours, and while checks are on it is verified, throwing
+ * on a raw object (whose `===` would be a silent `false`). `skipChecks()`
+ * turns the check off; the comparison is then the bare one.
  */
 export function fastEqual(a: unknown, b: unknown): boolean {
   if (_checking()) {
     if (!isCanonical(a)) throw nonCanonical('first', a);
     if (!isCanonical(b)) throw nonCanonical('second', b);
   }
-  return a === b;
+  return a === b || (a !== a && b !== b);
 }
 
 function nonCanonical(which: string, value: unknown): TypeError {

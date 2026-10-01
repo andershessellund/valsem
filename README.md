@@ -376,7 +376,7 @@ it costs.
 | --- | --- |
 | `produce`, `produceWithPatches`, `applyPatches`, `nothing`, `isDraft`, `draftOf`, `castDraft`, `current`, `original` | the immer-shaped API; results and snapshots are canonical; `draftOf()` detaches a second root for material brought in from elsewhere |
 | `deepEqual`, `intern` | structural equality; the canonical instance of a value |
-| `fastEqual`, `isCanonical` | `===` for canonical values, checked; the canonicality probe |
+| `fastEqual`, `isCanonical` | `deepEqual` at the cost of `===` for canonical values, checked; the canonicality probe |
 | `HashMap`, `HashSet` | mutable map and set keyed by value; native `Map`/`Set` behind `intern` |
 | `memoize` | a pure function of values, remembered by content — same arguments, same instance back |
 | `ValueMap`, `ValueSet`, `ValueList` | canonical immutable collections (`DraftMap`/`DraftSet`/`DraftList` inside recipes) |
