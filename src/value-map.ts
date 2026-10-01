@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect } from './shared.js';
+import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createMapDraft, type MapState } from './draft-map.js';
@@ -38,6 +38,9 @@ import {
   _trieStats,
   type HNode,
 } from './hamt.js';
+
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.value-map');
 
 const CFG = createTrieConfig(2);
 
@@ -66,7 +69,8 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   readonly #root: HNode;
   readonly #hash: number;
 
-  private constructor(root: HNode) {
+  private constructor(token: symbol, root: HNode) {
+    if (token !== INTERNAL) throw new TypeError('valsem: ValueMap instances are created by ValueMap.from(), fromObject() and empty()');
     this.#root = root;
     this.#hash = root.h;
     Object.freeze(this);
@@ -84,7 +88,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   static #for<K, V>(root: HNode): ValueMap<K, V> {
     const hit = root.w;
     if (hit !== undefined) return hit as ValueMap<K, V>;
-    const fresh = new ValueMap<unknown, unknown>(root);
+    const fresh = new ValueMap<unknown, unknown>(INTERNAL, root);
     root.w = fresh; // the root holds its wrapper: the WeakMap's ephemeron lifetime, without the WeakMap
     return fresh as ValueMap<K, V>;
   }
@@ -207,7 +211,8 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   static from<K, V>(entries: Iterable<readonly [K, V]>): ValueMap<K, V> {
     const keys: unknown[] = [];
     const vals: unknown[] = [];
-    for (const [rawK, rawV] of entries) {
+    for (const entry of entries) {
+      const [rawK, rawV] = entryOf(entry); // as `new Map(entries)` reads an entry
       keys.push(intern(rawK));
       vals.push(intern(rawV));
     }

@@ -11,7 +11,8 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { inspect } from 'node:util';
-import { produce, draftOf } from './produce.js';
+import { produce, produceWithPatches, applyPatches, draftOf, isDraft } from './produce.js';
+import { expectPatchRoundTrip } from './patches.test-helpers.js';
 import { current } from './current.js';
 import { intern } from './intern.js';
 import { ValueMap } from './value-map.js';
@@ -278,5 +279,115 @@ describe('fill checks its value where it is passed', () => {
     expect(produce(base, (d) => void d.arr.fill(7)).arr).toEqual([7, 7]);
     // sort and copyWithin take no value: a comparator is a function, and is not data.
     expect(produce(intern({ arr: [2, 1] }), (d) => void d.arr.sort((a, b) => a - b)).arr).toEqual([1, 2]);
+  });
+});
+
+describe('what a removal verb hands back', () => {
+  type Todo = { id: number; done: boolean };
+  const todos = () => intern({ todos: [{ id: 1, done: false }, { id: 2, done: false }] as Todo[], done: [] as Todo[] });
+
+  it('pop, shift and splice hand out the removed element drafted, as a read would — whether or not it was read first', () => {
+    produce(todos(), (d) => {
+      expect(isDraft(d.todos.pop())).toBe(true);
+    });
+    produce(todos(), (d) => {
+      void d.todos[1]!.id; // read first: the slot holds a child draft already
+      expect(isDraft(d.todos.pop())).toBe(true);
+    });
+    produce(todos(), (d) => {
+      expect(isDraft(d.todos.shift())).toBe(true);
+      expect(d.todos.splice(0, 1).map(isDraft)).toEqual([true]);
+    });
+  });
+
+  it('the immer idiom: remove, edit, place elsewhere', () => {
+    const next = produce(todos(), (d) => { const t = d.todos.shift()!; t.done = true; d.done.push(t); });
+    expect(next).toBe(intern({ todos: [{ id: 2, done: false }], done: [{ id: 1, done: true }] }));
+    const [r, patches, inverse] = produceWithPatches(todos(), (d) => { const [t] = d.todos.splice(1, 1); t!.done = true; d.done.push(t!); });
+    expect(r).toBe(intern({ todos: [{ id: 1, done: false }], done: [{ id: 2, done: true }] }));
+    expectPatchRoundTrip(todos(), r, patches, inverse);
+  });
+
+  it('a removed element the recipe edits and drops is simply gone', () => {
+    expect(produce(todos(), (d) => { const t = d.todos.pop()!; t.done = true; })).toBe(intern({ todos: [{ id: 1, done: false }], done: [] }));
+  });
+
+  it("the recipe's own raw insert comes back raw, as a read of it does", () => {
+    produce(todos(), (d) => {
+      const fresh = { id: 3, done: false };
+      d.todos.push(fresh);
+      expect(d.todos.pop()).toBe(fresh);
+      d.todos.unshift(fresh);
+      expect(d.todos.shift()).toBe(fresh);
+    });
+  });
+
+  it('a pushed canonical, popped, is drafted: a value is never handed out for editing', () => {
+    const c = intern({ id: 9, done: false });
+    const next = produce(todos(), (d) => {
+      d.todos.push(c);
+      const t = d.todos.pop()!;
+      expect(isDraft(t)).toBe(true);
+      t.done = true;
+      d.done.push(t);
+    });
+    expect(c.done).toBe(false);
+    expect(next.done[0]).toBe(intern({ id: 9, done: true }));
+  });
+
+  it('sort, reverse, fill and copyWithin return the draft, as Array returns `this`', () => {
+    const next = produce(todos(), (d) => {
+      expect(d.todos.sort((a, b) => b.id - a.id)).toBe(d.todos);
+      expect(d.todos.reverse()).toBe(d.todos);
+      d.todos.sort((a, b) => b.id - a.id)[0]!.done = true;
+    });
+    expect(next.todos).toEqual([{ id: 2, done: true }, { id: 1, done: false }]);
+    produce(intern({ arr: [1, 2, 3] }), (d) => {
+      expect(d.arr.fill(0)).toBe(d.arr);
+      expect(d.arr.copyWithin(0, 1)).toBe(d.arr);
+    });
+  });
+});
+
+describe('an array draft at scale and past its end', () => {
+  it('150,000 pushes, then a shift: the tail is folded in without a spread', () => {
+    const next = produce(intern({ arr: [0] }), (d) => { for (let i = 1; i <= 150_000; i++) d.arr.push(i); d.arr.shift(); });
+    expect(next.arr.length).toBe(150_000);
+    expect(next.arr[0]).toBe(1);
+  });
+
+  it('the undo of `length = 0` on 150,000 elements applies: a patch inserts its elements as the array they are', () => {
+    const big = intern({ arr: Array.from({ length: 150_000 }, (_, i) => i) });
+    const [r, patches, inverse] = produceWithPatches(big, (d) => { d.arr.length = 0; });
+    expect(r.arr.length).toBe(0);
+    expect(applyPatches(r, inverse)).toBe(big);
+    expect(applyPatches(big, patches)).toBe(r);
+  });
+
+  it('`delete d.arr[i]` past the end deletes nothing and grows nothing', () => {
+    const base = intern({ arr: [1, 2, 3] as (number | undefined)[] });
+    expect(produce(base, (d) => { delete d.arr[5]; })).toBe(base);
+    expect(produce(base, (d) => { delete d.arr[1]; })).toBe(intern({ arr: [1, undefined, 3] }));
+  });
+
+  it('a method read off a draft and called after the recipe says the draft escaped', () => {
+    let push!: (...items: number[]) => number;
+    const next = produce(intern({ arr: [1, 2] }), (d) => { push = d.arr.push; d.arr.pop(); });
+    expect(() => push(99)).toThrow(/escaped its produce\(\) call/);
+    expect(next).toBe(intern({ arr: [1] }));
+  });
+
+  it('a non-enumerable own property of a raw base is not part of the record: absent from the draft, the result and the patches', () => {
+    const base = Object.defineProperty({ x: 1 }, 'hidden', { value: { k: 1 }, enumerable: false }) as { x: number; hidden: { k: number } };
+    const next = produce(base, (d) => {
+      expect(d.hidden).toBeUndefined(); // the base is interned before it is drafted (D61), and intern drops it
+      expect(() => { d.hidden.k = 2; }).toThrow(TypeError);
+      d.x = 2;
+    });
+    expect(base.hidden.k).toBe(1);
+    expect(next).toBe(intern({ x: 2 }));
+    expect('hidden' in next).toBe(false);
+    const [, patches] = produceWithPatches(base, (d) => { void d.hidden; d.x = 2; });
+    expect(patches).toEqual([{ kind: 'record.set', path: [], key: 'x', value: 2 }]);
   });
 });

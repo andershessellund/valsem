@@ -227,3 +227,19 @@ describe('array hashes cannot be collided without the seed', () => {
     }
   });
 });
+
+describe('produce never writes into a raw base', () => {
+  it("an element removed from a raw base and edited is a draft; the caller's object stays as it was", () => {
+    type Todo = { id: number; done: boolean };
+    const input = { todos: [{ id: 1, done: false }, { id: 2, done: false }] as Todo[], done: [] as Todo[] };
+    const next = produce(input, (d) => { const [t] = d.todos.splice(0, 1); t!.done = true; d.done.push(t!); });
+    expect(input.todos[0]).toEqual({ id: 1, done: false });
+    expect(next).toBe(intern({ todos: [{ id: 2, done: false }], done: [{ id: 1, done: true }] }));
+    const popped = produce(input, (d) => { const t = d.todos.pop()!; t.done = true; d.done.push(t); });
+    expect(input.todos[1]).toEqual({ id: 2, done: false });
+    expect(popped.done[0]).toEqual({ id: 2, done: true });
+    const [, patches, inverse] = produceWithPatches(input, (d) => { const t = d.todos.shift()!; t.done = true; d.done.push(t); });
+    expect(input.todos[0]).toEqual({ id: 1, done: false });
+    expect(applyPatches(applyPatches(input, patches), inverse)).toBe(intern(input));
+  });
+});

@@ -19,7 +19,7 @@
 import { same, inspectAs, DRAFT_STATE, _setDraftValue, _recipes, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
-import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord } from './deep-equal.js';
+import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord, _isPlainData } from './deep-equal.js';
 
 /**
  * Symbol under which a draftable type exposes its draft factory.
@@ -409,7 +409,7 @@ function snapshotForeign(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (
     _hashCacheHas(value) ||
-    ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainData(value))
   ) {
     return value; // canonical: cannot contain a draft
   }
@@ -460,7 +460,7 @@ export function adopt(value: unknown): unknown {
   // plain data and pooled value-type instances.
   if (
     _hashCacheHas(value) ||
-    ((value as Record<symbol, unknown>)[internedMarker] === true && !isPlainObject(value))
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainData(value))
   ) {
     return value;
   }
@@ -573,7 +573,9 @@ export function finalizeState(
     // the base, so whatever this container and its children wrote since the
     // mark describes no change. (Inverses are unshifted, so the entries added
     // since the mark are exactly the first ones.) A kind's own bookkeeping
-    // can miss cases — a map cleared and refilled to equal content did.
+    // can miss cases — a map cleared and refilled to equal content did. (The
+    // base is canonical: produce interns its input before drafting it, D61,
+    // so a result equal to the base IS the base.)
     if (emitting && result === state.base) retractSeqPatches(recorder, patchMark, recorder.inverse.length - inverseMark);
     return result;
   } finally {

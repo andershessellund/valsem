@@ -33,9 +33,12 @@ import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym }
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, spliceArgs } from './shared.js';
+import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, spliceArgs, _undraft } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
+
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.value-list');
 
 /** A consed node: `kids` are elements (height 1) or nodes (height > 1). */
 export interface CNode {
@@ -329,6 +332,20 @@ function leafClosed(items: readonly unknown[]): boolean {
 }
 
 /**
+ * `x` as the `ValueList` it must be: a draft of one stands for its value
+ * (D57); anything else — a raw array, the argument an empty receiver used to
+ * hand back as it came — is a `TypeError`.
+ */
+function listArg<T>(x: unknown, operation: string): ValueList<T> {
+  if (x instanceof ValueList) return x;
+  const v = x !== null && typeof x === 'object' ? _undraft(x) : x;
+  if (v instanceof ValueList) return v as ValueList<T>;
+  throw new TypeError(
+    `${operation}: expected a ValueList, got ${Array.isArray(x) ? 'a raw array' : x === null ? 'null' : typeof x}`,
+  );
+}
+
+/**
  * Persistent (immutable) list whose instances are canonical: equal content
  * is the same object, however built. Elements are interned on entry.
  * Every edit is a copying one, and is named for its result (D59): `with`,
@@ -353,7 +370,8 @@ export class ValueList<T> implements Iterable<T> {
   /** The leaf of the last read, with its index range — sequential reads stay in one leaf. */
   readonly #last: { start: number; end: number; leaf: CNode | null };
 
-  private constructor(root: CNode | null, tail: readonly unknown[], hash: number) {
+  private constructor(token: symbol, root: CNode | null, tail: readonly unknown[], hash: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: ValueList instances are created by ValueList.of(), from() and empty()');
     this.#root = root;
     this.#tail = tail;
     this.#hash = hash;
@@ -384,7 +402,7 @@ export class ValueList<T> implements Iterable<T> {
     const h = ValueList.#hashOf(root, tail);
     const found = lpool.lookup(h, (c) => c.#root === root && sameSlots(c.#tail, tail));
     if (found !== undefined) return found as ValueList<T>;
-    return lpool.register(new ValueList<unknown>(root, tail, h), h) as ValueList<T>;
+    return lpool.register(new ValueList<unknown>(INTERNAL, root, tail, h), h) as ValueList<T>;
   }
 
   /** The canonical list for a whole tree: detach its last leaf into the tail if that run is open. */
@@ -703,13 +721,14 @@ export class ValueList<T> implements Iterable<T> {
     if (start >= end) return ValueList.empty<T>();
     return this.toSpliced(end, n - end).toSpliced(0, start);
   }
-  /** This list followed by `other`; O(log n) expected — the two trees meet at one re-chunked seam. */
+  /** This list followed by `other`, a `ValueList` (a draft stands for its value); O(log n) expected — the two trees meet at one re-chunked seam. */
   concat(other: ValueList<T>): ValueList<T> {
-    if (this.length === 0) return other;
-    if (other.length === 0) return this;
+    const o = listArg<T>(other, 'ValueList.concat'); // checked whatever the receiver: an empty one returned the argument as it came
+    if (this.length === 0) return o;
+    if (o.length === 0) return this;
     const root = this.#full()!;
     const p = pathTo(root, root.n);
-    return ValueList.#fromFull<T>(merge(p.frames, p.leaf.kids.slice(), cursorFromStart(other.#full())));
+    return ValueList.#fromFull<T>(merge(p.frames, p.leaf.kids.slice(), cursorFromStart(o.#full())));
   }
 
   /** Visit every element in index order. */
@@ -847,6 +866,8 @@ export class ValueList<T> implements Iterable<T> {
    * the elements by common prefix/suffix.
    */
   static diff<T>(a: ValueList<T>, b: ValueList<T>): Hunk[] {
+    a = listArg<T>(a, 'ValueList.diff');
+    b = listArg<T>(b, 'ValueList.diff');
     const out: Hunk[] = [];
     if (a === b) return out;
     const ra = a.#full();

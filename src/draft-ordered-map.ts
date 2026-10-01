@@ -34,7 +34,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, newEntryIndex } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, atIndex, newEntryIndex } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
@@ -54,14 +54,20 @@ export type OrderedMapOp =
   /** The working map and overlay as they stood — walked only when patches are emitted. */
   | { t: 'clear'; before: OrderedMap<unknown, unknown>; edits: Map<unknown, Entry> };
 
+/**
+ * The state behind a {@link DraftOrderedMap}. Its bookkeeping is not API: the
+ * fields below the two the protocol needs (`kind`, `draft`) are tagged
+ * internal, out of the published declarations, free to change in any release.
+ */
 export interface OrderedMapState<K = unknown, V = unknown> extends DraftState<OrderedMap<K, V>> {
   kind: 'omap';
-  /** The canonical empty map (for `clear()`). */
+  /** @internal The canonical empty map (for `clear()`). */
   empty: () => OrderedMap<unknown, unknown>;
-  /** The base with every structural op applied persistently — the order and membership; a new key holds `undefined` until finalize. */
+  /** @internal The base with every structural op applied persistently — the order and membership; a new key holds `undefined` until finalize. */
   work: OrderedMap<unknown, unknown>;
-  /** Canonical key → what the recipe sees there. Absent = the base value, untouched. */
+  /** @internal Canonical key → what the recipe sees there. Absent = the base value, untouched. */
   edits: Map<unknown, Entry>;
+  /** @internal */
   ops: OrderedMapOp[];
   draft: DraftOrderedMap<K, V>;
 }
@@ -150,7 +156,9 @@ export class DraftOrderedMap<K, V> {
    * `OrderedMap<string, number>` was not an `OrderedMap<string, unknown>`.
    */
   at(index: number): [K, Draft<V> | (V & undefined)] | undefined {
-    const e = this.#state.work.at(index); // reads the index as Array.prototype.at does
+    const s = this.#state;
+    const i = atIndex(index, s.work.size, 'DraftOrderedMap.at'); // as Array.prototype.at reads it, checked in this draft's name
+    const e = i === -1 ? undefined : s.work.at(i);
     return e === undefined ? undefined : [e[0] as K, this.get(e[0] as K) as Draft<V> | (V & undefined)];
   }
 
@@ -246,11 +254,46 @@ export class DraftOrderedMap<K, V> {
    * reads is cheaper over `current(d.m)`, which drafts nothing.
    */
   *entries(): IterableIterator<[K, Draft<V> | (V & undefined)]> {
-    for (const k of this.#state.work.keys()) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
+    for (const k of this.keys()) yield [k, this.get(k) as Draft<V> | (V & undefined)];
   }
 
-  keys(): IterableIterator<K> {
-    return this.#state.work.keys() as IterableIterator<K>;
+  /**
+   * The keys in order, as a native `Map`'s walk visits them: an entry
+   * deleted before the walk reaches it is not visited, one appended during
+   * the walk is, and one deleted and set again is visited again, at its new
+   * place. While nothing changes, the walk is the working map's own
+   * iterator; once an op lands, it becomes a position in the current map,
+   * moved by the ops since (a delete or an insert before it shifts it, a
+   * clear resets it), reading one key per step. An iterator outlives
+   * nothing: once the recipe has ended, its next step throws.
+   */
+  *keys(): IterableIterator<K> {
+    const s = this.#state;
+    const it = s.work.keys();
+    let cursor = s.ops.length;
+    let pos = 0;
+    let positional = false;
+    for (;;) {
+      assertUnrevoked(s);
+      if (!positional) {
+        if (cursor === s.ops.length) {
+          const r = it.next();
+          if (r.done) return;
+          pos++;
+          yield r.value as K;
+          continue;
+        }
+        positional = true;
+      }
+      for (; cursor < s.ops.length; cursor++) {
+        const op = s.ops[cursor]!;
+        if (op.t === 'delete') { if (op.index < pos) pos--; }
+        else if (op.t === 'insert') { if (op.index < pos) pos++; }
+        else if (op.t === 'clear') pos = 0;
+      }
+      if (pos >= s.work.size) return;
+      yield s.work.at(pos++)![0] as K;
+    }
   }
 
   *values(): IterableIterator<Draft<V> | (V & undefined)> {

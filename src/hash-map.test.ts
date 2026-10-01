@@ -366,3 +366,19 @@ describe('HashMap.from', () => {
     expect(isCanonical([...m.keys()][0])).toBe(true);
   });
 });
+
+describe('HashMap — as Map reads entries and calls forEach', () => {
+  it('an entry is read by its 0 and 1: an array-like is an entry, a string is not', () => {
+    expect(new HashMap([{ 0: 'k', 1: 'v' } as unknown as [string, string]]).get('k')).toBe('v');
+    expect(() => new HashMap(['ab'] as unknown as [string, string][])).toThrow(/Iterator value ab is not an entry object/);
+    expect(() => new HashMap([5] as unknown as [string, string][])).toThrow(TypeError);
+    expect(() => HashMap.from([null] as unknown as [string, string][])).toThrow(TypeError);
+  });
+
+  it('forEach passes thisArg', () => {
+    const ctx = {};
+    let seen: unknown;
+    new HashMap([[1, 2]]).forEach(function (this: unknown) { seen = this; }, ctx);
+    expect(seen).toBe(ctx);
+  });
+});

@@ -18,13 +18,16 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
+import { INSPECT, inspectAs, atIndex, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, NOT_FOUND, type HNode } from './hamt.js';
 import { keyedAnchor, keyedIndexOf, keyedInsert, keyedRemove, keyedBuild, PairIterator, type Keyed } from './ordered-core.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createOrderedSetDraft, type OrderedSetState } from './draft-ordered-set.js';
+
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.ordered-set');
 
 const CFG = createTrieConfig(2); // member, anchor
 const pool = createInternPool<OrderedSet<unknown>>();
@@ -59,7 +62,8 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   readonly #root: HNode;
   readonly #hash: number;
 
-  private constructor(list: ValueList<T>, root: HNode, hash: number) {
+  private constructor(token: symbol, list: ValueList<T>, root: HNode, hash: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: OrderedSet instances are created by OrderedSet.of(), from() and empty()');
     this.#list = list;
     this.#root = root;
     this.#hash = hash;
@@ -82,7 +86,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     const h = mix(SEED, list[hashCodeSym]);
     const hit = pool.lookup(h, (c) => c.#list === list);
     if (hit !== undefined) return hit as OrderedSet<T>;
-    return pool.register(new OrderedSet<unknown>(list, keyed.root, h), h) as OrderedSet<T>;
+    return pool.register(new OrderedSet<unknown>(INTERNAL, list, keyed.root, h), h) as OrderedSet<T>;
   }
 
   /** The member list and its trie, as the keyed index of ordered-core works on them. */
@@ -119,7 +123,8 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
 
   /** The member at `index`, as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. */
   at(index: number): T | undefined {
-    return this.#list.at(index);
+    const i = atIndex(index, this.size, 'OrderedSet.at'); // checked in this set's name
+    return i === -1 ? undefined : this.#list.get(i);
   }
   /** The first member, or `undefined` when empty. */
   first(): T | undefined {
@@ -193,9 +198,11 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     return kept.length === this.size ? this : OrderedSet.from(kept);
   }
 
-  /** A fold over the members, from `initial`. */
-  reduce<U>(fn: (acc: U, value: T, value2: T, set: OrderedSet<T>) => U, initial: U): U {
-    return reduceIn(this, this, false, 'OrderedSet.reduce', [fn, initial]) as U;
+  /** A fold over the members, in order. With no initial value the first member starts it, and an empty set is a `TypeError`, as on `Array`. */
+  reduce(fn: (acc: T, value: T, value2: T, set: OrderedSet<T>) => T): T;
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: OrderedSet<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    return reduceIn(this, this, false, 'OrderedSet.reduce', args);
   }
 
   /** Whether `fn` accepts any member. */

@@ -167,3 +167,10 @@ describe('ValueMap — size comes from the root', () => {
     expect(ValueMap.fromObject({ a: 1, b: undefined, c: 3 }).size).toBe(2);
   });
 });
+
+describe('ValueMap.from reads entries as new Map does', () => {
+  it('by their 0 and 1: an array-like is an entry, a string is not', () => {
+    expect(ValueMap.from([{ 0: 'k', 1: 'v' } as unknown as [string, string]]).get('k')).toBe('v');
+    expect(() => ValueMap.from(['ab'] as unknown as [string, string][])).toThrow(/is not an entry object/);
+  });
+});

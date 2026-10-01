@@ -99,4 +99,19 @@ describe('after skipFreezing()', () => {
     }).not.toThrow();
     expect(c.mutable).toEqual([1, 2]); // and every holder now sees it — the documented trade
   });
+  it('a removed element is a draft, so the pooled canonical behind it is never written', () => {
+    type Todo = { id: number; done: boolean };
+    const history = [intern({ todos: [{ id: 1, done: false }, { id: 2, done: false }] as Todo[], done: [] as Todo[] })];
+    const first = history[0]!.todos[0]!;
+    history.push(produce(history[0]!, (d) => { const t = d.todos.shift()!; t.done = true; d.done.push(t); }));
+    expect(first.done).toBe(false);
+    expect(intern({ id: 1, done: false })).toBe(first);
+    expect(history[1]!.done[0]).toBe(intern({ id: 1, done: true }));
+    const base = intern({ todos: [{ id: 1, rank: 0 }, { id: 2, rank: 0 }] });
+    const pooled = base.todos[0]!;
+    const ranked = produce(base, (d) => { d.todos.sort((a, b) => b.id - a.id).forEach((t, i) => { t.rank = i + 1; }); });
+    expect(pooled.rank).toBe(0);
+    expect(intern({ id: 1, rank: 0 })).toBe(pooled);
+    expect(ranked.todos).toEqual([{ id: 2, rank: 1 }, { id: 1, rank: 2 }]);
+  });
 });

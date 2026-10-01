@@ -9,6 +9,7 @@ import {
   draftOf,
   type Patch,
 } from './produce.js';
+import { current } from './current.js';
 import { DraftMap } from './draft-map.js';
 import { DraftSet } from './draft-set.js';
 import { DraftList } from './draft-list.js';
@@ -475,5 +476,39 @@ describe('produceWithPatches — semantic patches, both directions', () => {
     expect(result).toBe(intern({ a: 1 }));
     expect(patches).toEqual([]);
     expect(inverse).toEqual([]);
+  });
+});
+
+describe('produceWithPatches — the zero-patch law on a raw base', () => {
+  it('edits that net out emit no patches on a raw base, as on a canonical one', () => {
+    const [r, patches, inverse] = produceWithPatches([1, 2], (d) => { d.push(3); d.pop(); });
+    expect(r).toBe(intern([1, 2]));
+    expect(patches).toEqual([]);
+    expect(inverse).toEqual([]);
+    const [r2, p2] = produceWithPatches({ a: { b: [1] } }, (d) => { d.a.b.push(2); d.a.b.pop(); });
+    expect(r2).toBe(intern({ a: { b: [1] } }));
+    expect(p2).toEqual([]);
+  });
+
+  it('…and on a draft given as the base, which stands for its current value (D47)', () => {
+    produce(intern({ arr: [1, 2] }), (d) => {
+      d.arr.push(9);
+      const [, onDraft] = produceWithPatches(d.arr, (a) => { a.push(3); a.pop(); });
+      const [, onCurrent] = produceWithPatches(current(d.arr), (a) => { a.push(3); a.pop(); });
+      expect(onDraft).toEqual([]);
+      expect(onCurrent).toEqual([]);
+    });
+  });
+});
+
+describe('produce — the recipe must be a function', () => {
+  it('produce(base, undefined) is a missing recipe, not the curried form', () => {
+    const loose = produce as unknown as (b: unknown, r?: unknown) => unknown;
+    expect(() => loose({ a: 1 }, undefined)).toThrow(/produce expects a recipe function as its second argument, got undefined/);
+    expect(() => loose({ a: 1 }, 'x')).toThrow(TypeError);
+    expect(() => loose({ a: 1 })).toThrow(TypeError);
+    expect(() => (produceWithPatches as unknown as (b: unknown, r?: unknown) => unknown)({ a: 1 }, undefined)).toThrow(TypeError);
+    const inc = produce((d: { n: number }) => void d.n++); // the curried form, as before
+    expect(inc(intern({ n: 1 }))).toBe(intern({ n: 2 }));
   });
 });

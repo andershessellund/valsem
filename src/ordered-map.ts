@@ -14,13 +14,16 @@
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { mix } from './hasher.js';
-import { same, atIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex } from './shared.js';
+import { same, atIndex, entryOf, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, NOT_FOUND, type HNode } from './hamt.js';
 import { keyedAnchor, keyedIndexOf, keyedInsert, keyedRemove, keyedBuild, ZipIterator, type Keyed } from './ordered-core.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createOrderedMapDraft, type OrderedMapState } from './draft-ordered-map.js';
+
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.ordered-map');
 
 const CFG = createTrieConfig(3); // key, value, anchor
 const VALUE = 1; // the entry's slots after the key
@@ -54,7 +57,8 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   readonly #root: HNode;
   readonly #hash: number;
 
-  private constructor(keys: ValueList<K>, vals: ValueList<V>, root: HNode, hash: number) {
+  private constructor(token: symbol, keys: ValueList<K>, vals: ValueList<V>, root: HNode, hash: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: OrderedMap instances are created by OrderedMap.from() and empty()');
     this.#keys = keys;
     this.#vals = vals;
     this.#root = root;
@@ -78,7 +82,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const h = mix(mix(SEED, keys[hashCodeSym]), vals[hashCodeSym]);
     const hit = pool.lookup(h, (c) => c.#keys === keys && c.#vals === vals);
     if (hit !== undefined) return hit as OrderedMap<K, V>;
-    return pool.register(new OrderedMap<unknown, unknown>(keys, vals, keyed.root, h), h) as OrderedMap<K, V>;
+    return pool.register(new OrderedMap<unknown, unknown>(INTERNAL, keys, vals, keyed.root, h), h) as OrderedMap<K, V>;
   }
 
   /** The key list and its trie, as the keyed index of ordered-core works on them. */
@@ -252,7 +256,8 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const ks: unknown[] = [];
     const vs: unknown[] = [];
     const at = new Map<unknown, number>();
-    for (const [rawK, rawV] of entries) {
+    for (const entry of entries) {
+      const [rawK, rawV] = entryOf(entry); // as `new Map(entries)` reads an entry
       const k = intern(rawK);
       const i = at.get(k);
       if (i === undefined) {

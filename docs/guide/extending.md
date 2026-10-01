@@ -122,6 +122,13 @@ valsem leans on that: `intern` returns marked values without a lookup, and
 `deepEqual` concludes on any non-identical pair the moment either side is
 marked (same type would mean both marked; a mixed pair is cross-kind). A type
 that exposes non-interning construction must not carry the marker.
+
+A constructor that freezes its instances before `pool.intern` sees them keeps
+the marker out as well: an own property cannot be added to a frozen object.
+`pool.intern` pools such an instance all the same and recognises it on its
+next visit, but the rest of valsem meets it as an unmarked value type, pooled
+by its equality and hash on first sight — a lookup where the marker is a
+property read. Let `pool.intern` do the freezing.
 :::
 
 ## Temporal: `valsem/temporal`

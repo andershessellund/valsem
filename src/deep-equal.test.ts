@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+import { intern } from './intern.js';
 
 // The mutable-builtin comparisons below intentionally trigger the development
 // expectation warnings (tested in deep-equal-warnings.test.ts) — keep the
@@ -398,5 +399,31 @@ describe('mutable built-ins — tier-1 registration is contained', () => {
     const { intern } = await import('./intern.js');
     expect(() => intern(new Date(5))).toThrow(/Temporal\.Instant/);
     expect(() => intern({ at: new Date(5) })).toThrow(/Temporal\.Instant/);
+  });
+});
+
+describe('deepEqual — a record is its own enumerable keys, from both sides', () => {
+  it('a non-enumerable own property is not part of the record, whichever side it is on', () => {
+    const b = { x: 1, z: 3 };
+    Object.defineProperty(b, 'y', { value: 2, enumerable: false });
+    expect(deepEqual({ x: 1, y: 2 }, b)).toBe(false);
+    expect(deepEqual(b, { x: 1, y: 2 })).toBe(false);
+    expect(deepEqual(b, { x: 1, z: 3 })).toBe(true);
+    expect(deepEqual({ x: 1, z: 3 }, b)).toBe(true);
+    expect(intern(b)).toBe(intern({ x: 1, z: 3 })); // what intern sees, deepEqual sees
+  });
+
+  it('the [hashCode] pre-filter reads a hash as deepHash does: -1 and 0xffffffff are one hash', () => {
+    class Id {
+      constructor(readonly v: number, readonly signed: boolean) {}
+      [equals](o: unknown): boolean {
+        return o instanceof Id && o.v === this.v;
+      }
+      get [hashCode](): number {
+        return this.signed ? -1 : 0xffffffff;
+      }
+    }
+    expect(deepEqual(new Id(1, true), new Id(1, false))).toBe(true);
+    expect(intern(new Id(1, true))).toBe(intern(new Id(1, false)));
   });
 });

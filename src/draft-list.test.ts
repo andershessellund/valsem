@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { ValueList } from './value-list.js';
 import { DraftList } from './draft-list.js';
-import { produce, produceWithPatches, isDraft } from './produce.js';
+import { produce, produceWithPatches, applyPatches, isDraft } from './produce.js';
 import { current, original } from './current.js';
 import { intern } from './intern.js';
 import { expectPatchRoundTrip } from './patches.test-helpers.js';
@@ -108,5 +108,62 @@ describe('ValueList inside produce — the chunked draft', () => {
       }),
       { numRuns: 200 },
     );
+  });
+});
+
+describe('DraftList — what a removal verb hands back, and the list at scale', () => {
+  type Todo = { id: number; done: boolean };
+  const todos = () => intern({ todos: ValueList.of<Todo>({ id: 1, done: false }, { id: 2, done: false }), done: ValueList.empty<Todo>() });
+
+  it('pop, shift, splice and remove hand out the removed element drafted, as get would', () => {
+    const next = produce(todos(), (d) => {
+      const t = d.todos.shift()!;
+      expect(isDraft(t)).toBe(true);
+      t.done = true;
+      d.done.push(t);
+    });
+    expect(next).toBe(intern({ todos: ValueList.of({ id: 2, done: false }), done: ValueList.of({ id: 1, done: true }) }));
+    const [r, patches, inverse] = produceWithPatches(todos(), (d) => {
+      const t = d.todos.remove(1);
+      t.done = true;
+      d.done.push(t);
+      const u = d.todos.pop()!;
+      expect(isDraft(u)).toBe(true);
+      d.done.unshift(u);
+    });
+    expect(r).toBe(intern({ todos: ValueList.empty(), done: ValueList.of({ id: 1, done: false }, { id: 2, done: true }) }));
+    expectPatchRoundTrip(todos(), r, patches, inverse);
+    produce(todos(), (d) => {
+      const fresh = { id: 3, done: false };
+      d.todos.push(fresh);
+      expect(d.todos.pop()).toBe(fresh); // the recipe's own material comes back raw
+      expect(d.todos.splice(0).map(isDraft)).toEqual([true, true]);
+    });
+  });
+
+  it('an undo of splice(0) on 150,000 elements applies: a patch inserts its elements as the array they are', () => {
+    const big = intern({ l: ValueList.from(Array.from({ length: 150_000 }, (_, i) => i)) });
+    const [r, patches, inverse] = produceWithPatches(big, (d) => { d.l.splice(0); });
+    expect(r.l.length).toBe(0);
+    expect(applyPatches(r, inverse)).toBe(big);
+    expect(applyPatches(big, patches)).toBe(r);
+  });
+
+  it('replaying pushes as tail splices re-indexes no overlay: 20,000 of them in well under a second', () => {
+    const base = intern({ l: ValueList.empty<number>() });
+    const [next, patches] = produceWithPatches(base, (d) => { for (let i = 0; i < 20_000; i++) d.l.push(i); });
+    const t = performance.now();
+    expect(applyPatches(base, patches)).toBe(next);
+    expect(performance.now() - t).toBeLessThan(2000); // quadratic, this took ~20 s
+  });
+
+  it("an empty list's concat takes a ValueList, or a draft standing for its value, and nothing else", () => {
+    produce(intern({ a: ValueList.empty<number>(), b: ValueList.of(1) }), (d) => {
+      const r = d.a.concat(d.b as unknown as ValueList<number>);
+      expect(isDraft(r)).toBe(false);
+      expect(r).toBe(ValueList.of(1));
+      d.b.push(2);
+      expect(d.a.concat(d.b as unknown as ValueList<number>)).toBe(ValueList.of(1, 2)); // the value it is right now
+    });
   });
 });

@@ -713,3 +713,96 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
     expect(await collectUntil(() => _poolStats(pool).slots === 0, 60)).toBe(true); // …the next collections bring the rest
   });
 });
+
+describe('InternPool — intern and lookup, at the edges', () => {
+  it('intern accepts an instance its constructor froze: pooled, unmarked, and recognised', () => {
+    class Frozen {
+      declare readonly [hashCode]: number;
+      constructor(readonly x: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = x;
+        Object.freeze(this);
+      }
+      [equals](o: unknown): boolean {
+        return o instanceof Frozen && o.x === this.x;
+      }
+    }
+    const pool = createInternPool<Frozen>();
+    const a = pool.intern(new Frozen(1));
+    expect(pool.intern(a)).toBe(a); // recognised without the marker
+    expect(pool.intern(new Frozen(1))).toBe(a); // found by its equality
+    expect(pool.intern(new Frozen(2))).not.toBe(a);
+    expect((a as unknown as Record<symbol, unknown>)[interned]).toBeUndefined();
+    expect(intern(a)).toBe(a); // the rest of valsem pools it by its equality and hash
+    expect(intern(new Frozen(1))).toBe(a);
+  });
+
+  it('a predicate that registers enough to finish one table copy and begin the next: the lookup still finds what it registered', () => {
+    // The equal lands in the table that was CURRENT when the first pass
+    // scanned it; the registration then finishes the copy into it and starts
+    // the next one, so on the second pass that table is the retired one — and
+    // a table scanned as current must be scanned again however it is held.
+    const H = hashWithProduct(0x3ffffc0); // shard 0, home = the last slot of every table size
+    for (let pre = 24; pre <= 48; pre++) {
+      const pool = createInternPool<K>();
+      const keep: object[] = [];
+      let f = 0;
+      let armed = false;
+      let nested: K | undefined;
+      const fill = (n: number): void => {
+        for (let i = 0; i < n; i++) keep.push(pool.register({} as K, hashWithProduct(++f << 19))); // shard 0, low homes
+      };
+      class K {
+        declare readonly [hashCode]: number;
+        declare readonly [interned]: true;
+        constructor(readonly id: number) {
+          (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = H;
+        }
+        [equals](o: unknown): boolean {
+          if (armed) {
+            armed = false;
+            nested = pool.intern(new K(this.id)); // an [equals] that interns while comparing
+            fill(31);
+          }
+          return o instanceof K && o.id === this.id;
+        }
+      }
+      pool.intern(new K(1)); // same hash as K(7): the decoy, offered first
+      fill(pre);
+      armed = true;
+      const outer = pool.intern(new K(7));
+      expect(nested, `pre-fill ${pre}`).toBeDefined();
+      expect(outer, `pre-fill ${pre}: the outer intern must return what its predicate interned`).toBe(nested);
+      expect(pool.intern(new K(7)), `pre-fill ${pre}`).toBe(outer);
+      expect(keep.length).toBe(pre + 31);
+    }
+  });
+});
+
+describe('InternPool — a [hashCode] method', () => {
+  it('is called, as deepHash calls it: every instance lands at its own hash, and the pool stays O(1) a call', () => {
+    class M {
+      constructor(readonly n: number) {}
+      [hashCode](): number {
+        return Math.imul(this.n, 0x9e3779b1) >>> 0;
+      }
+      [equals](o: unknown): boolean {
+        return o instanceof M && o.n === this.n;
+      }
+    }
+    const pool = createInternPool<M>();
+    const t = performance.now();
+    const first = Array.from({ length: 4000 }, (_, i) => pool.intern(new M(i)));
+    expect(performance.now() - t).toBeLessThan(200); // one slot for all of them took 350 ms
+    for (let i = 0; i < 4000; i += 97) expect(pool.intern(new M(i))).toBe(first[i]);
+    expect(pool.intern(new M(1))).not.toBe(pool.intern(new M(2)));
+    class Bad {
+      get [hashCode](): unknown {
+        return 'seven';
+      }
+      [equals](): boolean {
+        return false;
+      }
+    }
+    expect(() => createInternPool<Bad>().intern(new Bad())).toThrow(/\[hashCode\] must be a number, or a method returning one, got string/);
+  });
+});

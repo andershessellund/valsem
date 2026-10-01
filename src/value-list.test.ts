@@ -465,3 +465,12 @@ describe('ValueList.from — anything iterable or array-like', () => {
     expect(ValueList.of(a, closing, b)._height).toBe(1);
   });
 });
+
+describe('ValueList.concat and diff take ValueLists', () => {
+  it('a raw array is refused whatever the receiver: an empty one used to return the argument as it came', () => {
+    expect(() => ValueList.empty<number>().concat([1, 2] as unknown as ValueList<number>)).toThrow(/ValueList\.concat: expected a ValueList, got a raw array/);
+    expect(() => ValueList.of(1).concat([1, 2] as unknown as ValueList<number>)).toThrow(TypeError);
+    expect(() => ValueList.diff([1] as unknown as ValueList<number>, ValueList.of(1))).toThrow(/ValueList\.diff: expected a ValueList/);
+    expect(ValueList.empty<number>().concat(ValueList.of(1))).toBe(ValueList.of(1));
+  });
+});

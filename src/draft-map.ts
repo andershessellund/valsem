@@ -61,16 +61,22 @@ export type MapDiff = (
   changed: (key: unknown, before: unknown, after: unknown) => void,
 ) => void;
 
+/**
+ * The state behind a {@link DraftMap}. Its bookkeeping is not API: the
+ * fields below the two the protocol needs (`kind`, `draft`) are tagged
+ * internal, out of the published declarations, free to change in any release.
+ */
 export interface MapState<K = unknown, V = unknown> extends DraftState<ValueMap<K, V>> {
   kind: 'map';
-  /** The canonical empty map of this kind (for `clear()`). */
+  /** @internal The canonical empty map of this kind (for `clear()`). */
   empty: () => ValueMap<unknown, unknown>;
+  /** @internal */
   diff: MapDiff;
-  /** The base with every delete applied persistently: which of the base's keys are still present. */
+  /** @internal The base with every delete applied persistently: which of the base's keys are still present. */
   work: ValueMap<unknown, unknown>;
-  /** Canonical key → what the recipe sees there: a present base key's value, or a key the recipe added. Absent = a base value, untouched. */
+  /** @internal Canonical key → what the recipe sees there: a present base key's value, or a key the recipe added. Absent = a base value, untouched. */
   edits: Map<unknown, Entry>;
-  /** Keys in `edits` that are not in `work`: what the recipe added, counted so that `size` is O(1). */
+  /** @internal Keys in `edits` that are not in `work`: what the recipe added, counted so that `size` is O(1). */
   added: number;
   draft: DraftMap<K, V>;
 }
@@ -176,7 +182,7 @@ export class DraftMap<K, V> {
     if (this.size === 0) return;
     markChanged(s);
     s.work = s.empty();
-    s.edits = new Map();
+    s.edits.clear(); // in place: a walk over the added keys holds this map's iterator, and must see the clear and what is set after it
     s.added = 0;
   }
 
@@ -201,16 +207,30 @@ export class DraftMap<K, V> {
    * only reads is cheaper over `current(d.m)`, which drafts nothing.
    */
   *entries(): IterableIterator<[K, Draft<V> | (V & undefined)]> {
-    const s = this.#state;
-    for (const k of s.work.keys()) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
-    // `get` adds child-drafted base entries to the overlay as the walk goes: the keys the working map lacks are the added ones.
-    for (const k of s.edits.keys()) if (!s.work.has(k)) yield [k as K, this.get(k as K) as Draft<V> | (V & undefined)];
+    for (const k of this.keys()) yield [k, this.get(k) as Draft<V> | (V & undefined)];
   }
 
+  /**
+   * The base's keys that are still present, in the base's order, then the keys
+   * the recipe added. Live, as a native `Map`'s walk is: an entry deleted
+   * before the walk reaches it is not visited (the working map is persistent,
+   * so the walk is over the one the walk began with, and asks the current one
+   * — only once something changed), and a key added during the walk is (the
+   * overlay is a native `Map`, and `get` adds child-drafted base entries to it
+   * as the walk goes: the keys the working map lacks are the added ones).
+   */
   *keys(): IterableIterator<K> {
     const s = this.#state;
-    for (const k of s.work.keys()) yield k as K;
-    for (const k of s.edits.keys()) if (!s.work.has(k)) yield k as K;
+    const begun = s.work;
+    for (const k of begun.keys()) {
+      assertUnrevoked(s); // an iterator outlives nothing: once the recipe has ended, its next step throws
+      if (s.work !== begun && !s.work.has(k)) continue; // deleted since
+      yield k as K;
+    }
+    for (const k of s.edits.keys()) {
+      assertUnrevoked(s);
+      if (!s.work.has(k)) yield k as K;
+    }
   }
 
   *values(): IterableIterator<Draft<V> | (V & undefined)> {

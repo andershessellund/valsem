@@ -1722,6 +1722,12 @@ nothing here closes the door. **Rejected:** `find` on the sets, until set
 members can be drafted at all (D53). **Cost.** Seven methods on the list, five on
 each set, and as many on the drafts, over four shared helpers; their size in
 a bundle is not measured here.
+
+*Amended 2026-10-01.* `reduce` without an initial value folds from the first
+element on a `ValueList`, and now on an `OrderedSet` too, whose first member
+is well defined; on a `ValueSet` the call without one is a `TypeError`
+naming the reason (it folded from `undefined` before, a silent wrong answer
+found by the 1.0.0 review). The overload exists where "first" does.
 ### D55. Four names settled before 1.0: `draftOf`, `ValueDate.from`, `fastEqual`, `getOrInsertComputed`
 
 The last pass over the public names, while renaming still costs nothing.
@@ -1939,6 +1945,136 @@ each other's collections as different types, which is what the runtime does
 with them (D4), and a test double for a
 collection is built with the factories, `ValueList.of(…)`, since a value
 needs no mocking.
+
+### D61. `produce` interns its input before it drafts it
+
+`produce(x, recipe)` is `produce(intern(x), recipe)`: the base is interned
+first, then drafted. A canonical base pays one cache probe; a draft given as
+the base is read by `intern` as its current value, which is D47 with no
+special case; a raw base pays the walk finalize would have made anyway, since
+finalize adopts every untouched raw child. `draftOf(value)` interns the same
+way. `original(draft)` of a raw input is therefore its canonical.
+
+**Why.** The law that `produce` never modifies its input (DESIGN.md §11, 14)
+was held by the trap layer alone, and drafting is lazy and per read: the
+working copy holds the base's children raw, and every read path that
+bypasses the get trap handed out the caller's object — the native `sort`
+running on the copy for speed (a comparator writing into its arguments), the
+property-descriptor trap (`value` read off the copy, as immer's and
+mutative's do), a non-enumerable own property, and `original()` inside a
+nested recipe. The 1.0.0 review found the first of these through `shift` and
+`splice` (closed in D62) and each fix left the next door; interning first
+closes them all at once, present and future, because every object a recipe
+can reach is frozen. It also deletes what the lazy design needed to tell a
+relocated base element from the recipe's own insert (`opaqued`, the member
+set). Measured: not slower, since the walk moved rather than grew; a deep
+edit on 20,000 raw rows went from 32.6 ms to 22.3 ms. **Rejected:** closing
+the doors one by one — each is a bypass of the traps, and the next change
+that reads the copy directly opens another. **Rejected:** drafting the whole
+input eagerly, O(n) per recipe for canonical input too. **Cost.** A non-value
+anywhere in a raw input (a `Date`) is rejected before the recipe runs, even
+where the recipe would have deleted it — what `intern` and the admission
+doctrine say, now said earlier. A recipe that returns a replacement interns
+a raw base it then discards. `original(draft)` of a raw input is no longer
+the caller's object; the docs said "the value the draft was made from", and
+that is what it is. DESIGN.md §7.1, §11.
+
+### D62. A removal verb hands back what it removed as a read would
+
+`pop`, `shift` and `splice` on an array draft, and `pop`, `shift`, `splice`
+and `remove` on a `DraftList`, hand back the removed element as `get` would
+have handed it out: a frozen or canonical value drafted, the recipe's own raw
+insert raw, a child already drafted as that draft. `pop`, `shift` and
+`remove` draft eagerly; `splice` returns a Proxy over the removed array that
+drafts an element on first read. `sort`, `reverse`, `fill` and `copyWithin`
+on an array draft return the draft, as `Array`'s return `this`.
+
+**Why.** They returned the raw element, so the immer idiom `const t =
+d.todos.shift(); t.done = true; d.done.push(t)` threw on a frozen base and,
+on a raw base, wrote into the caller's object; `d.todos.sort(cmp)[0].done =
+true` did the same through the working copy. Drafting eagerly in `splice`
+made `d.arr.splice(0, 50_000)` three times slower and the list's eight,
+for a return value nobody read: the proxy keeps the behaviour at one
+allocation per call. **Rejected:** returning values (canonical, frozen) —
+the one place in a recipe where an element comes back as something the
+recipe cannot edit, and the idiom every immer user writes. **Cost.** The
+`DraftList` return types are `Draft<T>` where they were `T`, a correction;
+one Proxy per `splice`. DESIGN.md §7.2.
+
+### D63. `fastEqual` is `deepEqual` made fast
+
+`fastEqual(a, b)` is `a === b || (a !== a && b !== b)`: identity, which is
+value equality once both sides are canonical, with the one exception `===`
+makes and `deepEqual` does not. SameValueZero, as the pools and the
+collections compare.
+
+**Why.** It was a bare `===` by design, and `fastEqual(NaN, NaN)` was
+`false` where `deepEqual` says `true`: the two were not aligned on the one
+value `===` denies to itself, and a comparison that is "deepEqual, fast
+because the arguments are canonical" has to give deepEqual's answers.
+**Cost.** One more comparison on the mismatch path.
+
+### D64. `memoize` takes any function and keeps its signature
+
+`memoize<F extends Function>(fn: F): Memoized<F>`, with `Memoized<F>` the
+alias `F & { clear(): void; readonly size: number }`. A class is refused at
+the `memoize` call, at runtime, with the reason.
+
+**Why.** The constraint was `(...args: never[]) => unknown` and the result an
+interface spelled with `Parameters<F>` and `ReturnType<F>`. An unannotated
+callback's parameters took their type from the constraint, `never`, so the
+body failed with "property does not exist on type 'never'" and the memoized
+function could not be called at all; overloads cannot help, since TypeScript
+never infers a callback's parameters from its body, and `unknown[]` rejects
+annotated functions under `strictFunctionTypes`. Against `Function` there is
+no contextual signature, so an unannotated callback is the implicit-any
+error, which says to annotate; and the alias keeps overloads and type
+parameters, which `Parameters`/`ReturnType` flattened to the last overload
+and `unknown`. **Rejected:** `(...args: any[]) => unknown`, which makes the
+unannotated spelling compile with every parameter `any`, unchecked both
+ways. **Cost.** `Function` admits a class at the type level; the runtime
+check turns the engine's "cannot be invoked without 'new'" on the first call
+into a teaching error at the `memoize` call. A type-only loosening, not
+breaking.
+
+### D65. A draft walk is a native one
+
+Iterating a collection draft (`for…of`, `forEach`, `keys()`, `values()`,
+`entries()`) visits what a native `Map` or `Set` would: an entry deleted
+before the walk reaches it is not visited; one added during the walk is; one
+deleted and added again is visited again, at its new place. `DraftList`'s
+iterator is live by index, as `Array`'s, and its `forEach` reads the length
+once, as `Array.prototype.forEach` does. An iterator that outlives its
+recipe throws on its next step.
+
+**Why.** The drafts walked a persistent snapshot: `DraftMap` and the ordered
+drafts re-set deleted entries as `NaN` (the entry was offered with an
+`undefined` value), a `DraftSet` missed what the loop added although the
+guide promised otherwise, and `DraftList.forEach` visited what the callback
+pushed without end. The implementation is per kind: the hash-ordered drafts
+walk the collection they began with, skipping what the current one lacks
+(asked only once something changed, by identity), then what the current one
+gained (`DraftMap`'s overlay, a native `Map`; `DraftSet`'s `difference`
+rounds); the ordered drafts turn the walk into a position in the current
+collection the moment an op lands, moved by the ops since — a delete or
+insert before it shifts it, a clear resets it — which is exact for insertion
+order and costs one `at()` per step only after a change. **Rejected:**
+documenting the snapshot, which the guide had already contradicted, and
+which hides a delete behind a visit. **Cost.** A walk that changes the
+collection pays O(log n) per step from the first change on; one that does
+not pays nothing. DESIGN.md §7.2.
+
+### D66. A patch holds values, so `produceWithPatches` refuses a transient non-value
+
+`produce` tolerates a non-value that passes through a sequence during the
+recipe (a `Date` pushed, then removed again), since it never looks at it;
+`produceWithPatches` throws, since the `list.splice` patch would have to
+record it.
+
+**Why.** A patch is a recorded edit with its values canonical; a `Date` is
+nothing a patch can hold, and falling back to the net diff for that one
+container would make the patch vocabulary depend on what passed through.
+Raised by the 1.0.0 review; throwing is fine. **Cost.** None new.
 
 ## Non-goals
 

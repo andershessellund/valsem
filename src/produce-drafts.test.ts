@@ -4,7 +4,7 @@
 // (The produce suites test outcomes; this one tests the instruments.)
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, } from './produce.js';
+import { produce, produceWithPatches, isDraft } from './produce.js';
 import { DraftMap } from './draft-map.js';
 import { DraftSet } from './draft-set.js';
 import { DraftList } from './draft-list.js';
@@ -391,5 +391,114 @@ describe('an array recipe that rewrites its end with what was there', () => {
       expect(patches).toEqual([]);
       expect(inverse).toEqual([]);
     }
+  });
+});
+
+describe('a draft walk, as a native one', () => {
+  it('DraftMap: an entry deleted before the walk reaches it is not visited; one added during it is', () => {
+    const base = ValueMap.from<string, number>([['a', 1], ['b', 2], ['c', 3]]);
+    const visited: string[] = [];
+    const next = produce(base, (d) => {
+      for (const [k, v] of d) {
+        visited.push(k);
+        if (visited.length === 1) {
+          for (const other of ['a', 'b', 'c']) if (other !== k) d.delete(other);
+          d.set('z', 26);
+        }
+        d.set(k, Math.round(v * 10)); // never `undefined`: a deleted entry is not offered
+      }
+    });
+    expect(visited.length).toBe(2);
+    expect(visited[1]).toBe('z');
+    expect(next.size).toBe(2);
+    expect([...next.values()].every((v) => Number.isFinite(v))).toBe(true);
+  });
+
+  it('DraftSet: a member added during the walk is visited, one deleted before its turn is not, and the walk ends', () => {
+    const edges: Record<string, string[]> = { a: ['b'], b: ['c'], c: ['d', 'a'], d: [] };
+    const native = new Set(['a']);
+    for (const n of native) for (const m of edges[n]!) native.add(m);
+    const visited: string[] = [];
+    const next = produce(ValueSet.of('a'), (d) => {
+      for (const n of d) {
+        visited.push(n);
+        for (const m of edges[n]!) d.add(m);
+      }
+    });
+    expect(next).toBe(ValueSet.from(native));
+    expect(visited.sort()).toEqual(['a', 'b', 'c', 'd']);
+    const seen: number[] = [];
+    produce(ValueSet.of(1, 2, 3), (d) => {
+      for (const v of d) {
+        seen.push(v);
+        if (seen.length === 1) for (const o of [1, 2, 3]) if (o !== v) d.delete(o);
+      }
+    });
+    expect(seen.length).toBe(1);
+  });
+
+  it("DraftList.forEach reads the length once, as Array.prototype.forEach does; the iterator is live, as Array's is", () => {
+    let visits = 0;
+    const next = produce(intern({ l: ValueList.of(1) }), (d) => { d.l.forEach(() => { visits++; if (visits < 50) d.l.push(0); }); });
+    expect(visits).toBe(1);
+    expect(next.l.length).toBe(2);
+    visits = 0;
+    produce(intern({ l: ValueList.of(1) }), (d) => { for (const v of d.l) { visits++; if (v === 1) d.l.push(2); } });
+    expect(visits).toBe(2);
+    visits = 0;
+    produce(intern({ l: ValueList.of(1, 2, 3) }), (d) => { d.l.forEach(() => { visits++; d.l.pop(); }); });
+    expect(visits).toBe(2); // stops where the list ends, as Array's does
+  });
+
+  it('an iterator that outlives its recipe throws on its next step, like every other use of the draft', () => {
+    let it!: Iterator<number>;
+    produce(intern({ s: ValueSet.of(1, 2) }), (d) => { d.s.add(3); it = d.s.values(); expect(it.next().done).toBe(false); });
+    expect(() => it.next()).toThrow(/escaped its produce\(\) call/);
+    let keys!: Iterator<string>;
+    produce(ValueMap.from([['a', 1]]), (d) => { keys = d.keys(); });
+    expect(() => keys.next()).toThrow(/escaped/);
+  });
+
+  it('a DraftSet reduce requires its initial value, as the value does (D54)', () => {
+    produce(ValueSet.of(1, 2, 3), (d) => {
+      expect(d.reduce((a, b) => a + b, 10)).toBe(16);
+      const loose = d.reduce as unknown as (fn: (a: number, b: number) => number) => number;
+      expect(() => loose.call(d, (a, b) => a + b)).toThrow(/DraftSet\.reduce: an initial value is required/);
+    });
+  });
+
+  it('DraftMap: clear() during a walk over the added keys is seen by the walk, and so is what is set after it', () => {
+    const visited: [string, number | undefined][] = [];
+    const next = produce(ValueMap.from<string, number>([['a', 1]]), (d) => {
+      d.set('b', 2);
+      d.set('c', 3);
+      for (const [k, v] of d) {
+        visited.push([k, v]);
+        if (k === 'b') { d.clear(); d.set('z', 26); }
+      }
+    });
+    expect(visited.some(([, v]) => v === undefined)).toBe(false); // no cleared key offered as undefined
+    expect(visited.map(([k]) => k)).toContain('z');
+    expect(next).toBe(ValueMap.from([['z', 26]]));
+  });
+
+  it("splice hands out its removed elements drafted on first read, through a proxy: nothing is drafted for an element nobody reads", () => {
+    type Row = { id: number };
+    const big = ValueList.from(Array.from({ length: 50_000 }, (_, i) => ({ id: i })));
+    const next = produce(intern({ l: big, arr: big.toArray() as Row[] }), (d) => {
+      const removed = d.l.splice(0, 25_000);
+      expect(Array.isArray(removed)).toBe(true);
+      expect(removed.length).toBe(25_000);
+      const t = removed[7]!; // read: drafted now
+      expect(isDraft(t)).toBe(true);
+      t.id = -7;
+      d.l.push(t);
+      const removedArr = d.arr.splice(0, 25_000);
+      expect(isDraft(removedArr[7])).toBe(true);
+      expect(removedArr.map((r) => r.id).slice(0, 3)).toEqual([0, 1, 2]); // the methods read through the proxy
+    });
+    expect(next.l.length).toBe(25_001);
+    expect(next.l.last()).toBe(intern({ id: -7 }));
+    expect(next.arr.length).toBe(25_000);
   });
 });

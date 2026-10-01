@@ -22,7 +22,7 @@ import {
   snapshotOf,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn, newEntryIndex } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, atIndex, findIndexIn, reduceIn, newEntryIndex } from './shared.js';
 import type { OrderedSet } from './ordered-set.js';
 import type { ValueList } from './value-list.js';
 
@@ -35,12 +35,18 @@ export type OrderedSetOp =
   /** The set as it stood — walked only when patches are emitted. */
   | { t: 'clear'; before: OrderedSet<unknown> };
 
+/**
+ * The state behind a {@link DraftOrderedSet}. Its bookkeeping is not API: the
+ * fields below the two the protocol needs (`kind`, `draft`) are tagged
+ * internal, out of the published declarations, free to change in any release.
+ */
 export interface OrderedSetState<T = unknown> extends DraftState<OrderedSet<T>> {
   kind: 'oset';
-  /** The canonical empty set (for `clear()`). */
+  /** @internal The canonical empty set (for `clear()`). */
   empty: () => OrderedSet<unknown>;
-  /** The set as it stands — every op applied persistently. */
+  /** @internal The set as it stands — every op applied persistently. */
   work: OrderedSet<unknown>;
+  /** @internal */
   ops: OrderedSetOp[];
   draft: DraftOrderedSet<T>;
 }
@@ -87,7 +93,9 @@ export class DraftOrderedSet<T> implements Iterable<T> {
 
   /** The member at `index` as `Array.prototype.at` reads it: a negative index counts from the end, and one that names nothing gives `undefined`. */
   at(index: number): T | undefined {
-    return this.#state.work.at(index) as T | undefined;
+    const s = this.#state;
+    const i = atIndex(index, s.work.size, 'DraftOrderedSet.at'); // checked in this draft's name
+    return i === -1 ? undefined : (s.work.at(i) as T);
   }
 
   first(): T | undefined {
@@ -162,16 +170,51 @@ export class DraftOrderedSet<T> implements Iterable<T> {
     return (snapshotOf(this) as OrderedSet<T>).insertedAt(index, v as T);
   }
 
-  values(): IterableIterator<T> {
-    return this.#state.work.values() as IterableIterator<T>;
+  /**
+   * The members in order, as a native `Set`'s walk visits them: a member
+   * deleted before the walk reaches it is not visited, one added during the
+   * walk is, and one deleted and added again is visited again, at its new
+   * place. While nothing changes, the walk is the working set's own
+   * iterator; once an op lands, it becomes a position in the current set,
+   * moved by the ops since (a delete or an insert before it shifts it, a
+   * clear resets it), reading one member per step. An iterator outlives
+   * nothing: once the recipe has ended, its next step throws.
+   */
+  *values(): IterableIterator<T> {
+    const s = this.#state;
+    const it = s.work.values();
+    let cursor = s.ops.length;
+    let pos = 0;
+    let positional = false;
+    for (;;) {
+      assertUnrevoked(s);
+      if (!positional) {
+        if (cursor === s.ops.length) {
+          const r = it.next();
+          if (r.done) return;
+          pos++;
+          yield r.value as T;
+          continue;
+        }
+        positional = true;
+      }
+      for (; cursor < s.ops.length; cursor++) {
+        const op = s.ops[cursor]!;
+        if (op.t === 'delete') { if (op.index < pos) pos--; }
+        else if (op.t === 'insert') { if (op.index < pos) pos++; }
+        else if (op.t === 'clear') pos = 0;
+      }
+      if (pos >= s.work.size) return;
+      yield s.work.at(pos++) as T;
+    }
   }
 
   keys(): IterableIterator<T> {
     return this.values();
   }
 
-  entries(): IterableIterator<[T, T]> {
-    return this.#state.work.entries() as IterableIterator<[T, T]>;
+  *entries(): IterableIterator<[T, T]> {
+    for (const v of this.values()) yield [v, v];
   }
 
   [Symbol.iterator](): IterableIterator<T> {
@@ -198,9 +241,11 @@ export class DraftOrderedSet<T> implements Iterable<T> {
     return (snapshotOf(this) as OrderedSet<T>).filter((v) => fn.call(thisArg, v, v, this));
   }
 
-  /** A fold over the members, from `initial`. */
-  reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftOrderedSet<T>) => U, initial: U): U {
-    return reduceIn(this.values(), this, false, 'DraftOrderedSet.reduce', [fn, initial]) as U;
+  /** A fold over the members, in order. With no initial value the first member starts it, and an empty set is a `TypeError`, as on `Array`. */
+  reduce(fn: (acc: T, value: T, value2: T, set: DraftOrderedSet<T>) => T): T;
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftOrderedSet<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    return reduceIn(this.values(), this, false, 'DraftOrderedSet.reduce', args);
   }
 
   /** Whether `fn` accepts any member. */

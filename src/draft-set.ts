@@ -18,21 +18,29 @@ import {
   snapshotOf,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn, noInitial } from './shared.js';
 import type { ValueSet } from './value-set.js';
 
 const INTERNAL = Symbol('valsem.draftInternal');
 
+/**
+ * The state behind a {@link DraftSet}. Its bookkeeping is not API: the
+ * fields below the two the protocol needs (`kind`, `draft`) are tagged
+ * internal, out of the published declarations, free to change in any release.
+ */
 export interface SetState<T = unknown> extends DraftState<ValueSet<T>> {
   kind: 'set';
-  /** The canonical empty set of this kind (for `clear()`). */
+  /** @internal The canonical empty set of this kind (for `clear()`). */
   empty: () => ValueSet<unknown>;
-  /** The set as it stands — every edit applied persistently. */
+  /** @internal The set as it stands — every edit applied persistently. */
   work: ValueSet<unknown>;
-  /** The members only in `a` and only in `b`, to visitors: what finalize's patches are made of (the set class's diff, passed in so that this module needs no value import of it). */
-  diff: (a: ValueSet<unknown>, b: ValueSet<unknown>, onlyA: (m: unknown) => void, onlyB: (m: unknown) => void) => void;
+  /** @internal The members only in `a` and only in `b`, to visitors: what finalize's patches are made of (the set class's diff, passed in so that this module needs no value import of it). */
+  diff: SetDiff;
   draft: DraftSet<T>;
 }
+
+/** The members only in `a` and only in `b`, to visitors: what finalize's patches are made of (the set class's diff, passed in so that this module needs no value import of it). */
+export type SetDiff = (a: ValueSet<unknown>, b: ValueSet<unknown>, onlyA: (m: unknown) => void, onlyB: (m: unknown) => void) => void;
 
 /**
  * Mutable draft twin of {@link ValueSet}, handed out inside produce(). The
@@ -90,8 +98,34 @@ export class DraftSet<T> {
     s.work = s.empty();
   }
 
-  values(): IterableIterator<T> {
-    return this.#state.work.values() as IterableIterator<T>;
+  /**
+   * The members, as a native `Set`'s walk visits them: one deleted before the
+   * walk reaches it is not visited, and one added during the walk is visited
+   * too, after the rest (the working set is persistent, so the walk is over
+   * the set it began with, and asks the current one — only once something
+   * changed — then walks what the current set gained, until it gains
+   * nothing). So a loop that deletes what it visits and adds a changed member
+   * does not end, as on a native `Set`: walk a copy. An iterator outlives
+   * nothing: once the recipe has ended, its next step throws, as every other
+   * use of the draft does.
+   */
+  *values(): IterableIterator<T> {
+    const s = this.#state;
+    let seen = s.work;
+    for (const v of seen) {
+      assertUnrevoked(s);
+      if (s.work !== seen && !s.work.has(v)) continue; // deleted since
+      yield v as T;
+    }
+    while (s.work !== seen) {
+      const now = s.work;
+      for (const v of now.difference(seen)) {
+        assertUnrevoked(s);
+        if (s.work !== now && !s.work.has(v)) continue;
+        yield v as T;
+      }
+      seen = now;
+    }
   }
 
   keys(): IterableIterator<T> {
@@ -169,9 +203,11 @@ export class DraftSet<T> {
     return (snapshotOf(this) as ValueSet<T>).filter((v) => fn.call(thisArg, v, v, this));
   }
 
-  /** A fold over the members, from `initial`. */
-  reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftSet<T>) => U, initial: U): U {
-    return reduceIn(this.values(), this, false, 'DraftSet.reduce', [fn, initial]) as U;
+  /** A fold over the members, from `initial`, which is required: the members of an unordered set have no first (D54), so a call without one is a `TypeError`. */
+  reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftSet<T>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitial('DraftSet.reduce');
+    return reduceIn(this.values(), this, false, 'DraftSet.reduce', args);
   }
 
   /** Whether `fn` accepts any member. */
@@ -211,7 +247,7 @@ export function createSetDraft<T>(
   base: ValueSet<T>,
   parent: DraftState | undefined,
   empty: () => ValueSet<unknown>,
-  diff: SetState['diff'],
+  diff: SetDiff,
 ): SetState<T> {
   const state = createDraftState<SetState>({
     kind: 'set',

@@ -33,14 +33,17 @@ export interface MemoizeOptions {
   maxSize?: number;
 }
 
-/** A memoized function: the original's signature plus cache control. */
-export interface Memoized<F extends (...args: never[]) => unknown> {
-  (...args: Parameters<F>): ReturnType<F>;
+/**
+ * A memoized function: the original, signature and all — overloads and type
+ * parameters included, which `Parameters<F>`/`ReturnType<F>` would flatten
+ * — plus cache control.
+ */
+export type Memoized<F> = F & {
   /** Drop every cached result. */
   clear(): void;
   /** Entries currently held. */
   readonly size: number;
-}
+};
 
 interface Entry extends TableEntry {
   readonly hash: number;
@@ -65,14 +68,26 @@ interface Entry extends TableEntry {
  * Arguments must be values; results must be values (they are interned).
  * `this` is passed through but is not part of the key — memoize functions
  * of their arguments only.
+ *
+ * `F extends Function`, not a function type: a function type would give an
+ * unannotated callback's parameters its own (`never`, or `any`), where
+ * `Function` gives them none, so `memoize((todos, filter) => …)` is the
+ * implicit-any error that says to annotate — and the memoized function is
+ * `F` itself, every overload and type parameter kept.
  */
-export function memoize<F extends (...args: never[]) => unknown>(
+export function memoize<F extends Function>(
   fn: F,
   options: MemoizeOptions = {},
 ): Memoized<F> {
   const maxSize = options.maxSize ?? 1;
   if (!(maxSize >= 1) || (maxSize !== Infinity && !Number.isInteger(maxSize))) {
     throw new RangeError(`valsem: memoize maxSize must be a positive integer or Infinity, got ${String(maxSize)}`);
+  }
+  // `F extends Function` admits a class, which `apply` cannot call: refused
+  // here, at the memoize call, with the reason, instead of the engine's
+  // "cannot be invoked without 'new'" on the first call.
+  if (/^class[\s{]/.test(Function.prototype.toString.call(fn))) {
+    throw new TypeError(`valsem: memoize — ${fn.name || 'the class'} is a class, not a function of values. Pass a function.`);
   }
   const name = fn.name || 'the function';
 
@@ -122,6 +137,17 @@ export function memoize<F extends (...args: never[]) => unknown>(
       return hit.result;
     }
 
+    // A miss: the arguments are kept canonical, so intern them first — an
+    // argument that is not a value is refused here, before `fn` runs on it.
+    let canonical: unknown[];
+    try {
+      canonical = args.map(intern);
+    } catch (e) {
+      throw new TypeError(
+        `valsem: memoize — an argument of ${name} is not a value (${(e as Error).message}). ` +
+          'Memoization is by value: pass data, not functions or mutable objects.',
+      );
+    }
     const raw = fn.apply(this, args as never[]);
     let result: unknown;
     try {
@@ -146,7 +172,7 @@ export function memoize<F extends (...args: never[]) => unknown>(
       }
       throw e;
     }
-    const e: Entry = { hash: h, args: args.map(intern), result, newer: null, older: null };
+    const e: Entry = { hash: h, args: canonical, result, newer: null, older: null };
     table.add(e);
     pushNewest(e);
     size++;

@@ -543,6 +543,8 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   #looking = 0;
   /** Registrations so far: a lookup compares it before and after its scan. */
   #registered = 0;
+  /** Instances `intern` pooled but could not mark (frozen before they arrived). */
+  #unmarked: WeakSet<object> | null = null;
 
   lookup(hash: number, predicate: (candidate: T) => boolean): T | undefined {
     const m = Math.imul(hash, 0x9e3779b1);
@@ -557,22 +559,28 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   }
 
   #lookupIn(s: Shard, tag: number, predicate: (candidate: T) => boolean): T | undefined {
-    let scanned: Int32Array[] | null = null; // the tables scanned, once the predicate has registered
+    let scanned: Int32Array[] | null = null; // the RETIRED tables scanned, once the predicate has registered
     for (;;) {
       const registered = this.#registered;
-      const words = s.words;
-      let found = this.#scan(words, s.refs, s.bits, tag, predicate);
+      let found = this.#scan(s.words, s.refs, s.bits, tag, predicate);
       if (found !== undefined) return found;
       // Below the copy's cursor the living have been moved (and were found above): what a probe meets there is dead.
-      if (s.oldWords !== null && !scanned?.includes(s.oldWords)) {
-        found = this.#scan(s.oldWords, s.oldRefs, s.oldBits, tag, predicate);
+      const old = s.oldWords;
+      if (old !== null && !scanned?.includes(old)) {
+        found = this.#scan(old, s.oldRefs, s.oldBits, tag, predicate);
         if (found !== undefined) return found;
+        // Scanned AS retired: a retired table gains nothing, so this one is done.
+        // The current table is never remembered — it was scanned as current,
+        // and what the predicate registered may have landed in it, whether
+        // it is still current on the next pass or has been retired since (a
+        // registration that finished one copy and began the next).
+        (scanned ??= []).push(old);
       }
       if (this.#registered === registered) return undefined;
-      // The predicate registered: scan again — the current table (it may be the same one, or a new one
-      // the registration began; a candidate offered before may be offered again), and a retired table
-      // only if it has not been scanned (a retired table gains nothing).
-      (scanned ??= []).push(words);
+      // The predicate registered: scan again — the current table (it may be
+      // the same one, or a new one the registration began; a candidate
+      // offered before may be offered again), and a retired table only if it
+      // was not scanned as retired already.
     }
   }
 
@@ -614,15 +622,28 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
   }
 
   intern(object: T): T {
-    if ((object as Record<symbol, unknown>)[internedSym] === true) return object;
-    const hash = (object as Record<symbol, unknown>)[hashCodeSym] as number;
+    if ((object as Record<symbol, unknown>)[internedSym] === true || this.#unmarked?.has(object)) return object;
+    // The protocol admits a `[hashCode]` property, getter or method (deepHash
+    // reads all three). Read as a number only, a method multiplied to NaN:
+    // every instance landed in one slot, and the pool went quadratic.
+    const hc = (object as Record<symbol, unknown>)[hashCodeSym];
+    const hash = typeof hc === 'function' ? (hc as (this: unknown) => unknown).call(object) : hc;
+    if (typeof hash !== 'number') {
+      throw new TypeError(`valsem: pool.intern — [hashCode] must be a number, or a method returning one, got ${typeof hash}`);
+    }
     const eq = (object as Record<symbol, unknown>)[equalsSym];
     const found = this.lookup(
       hash,
       (c) => typeof eq === 'function' && !!(eq as (other: unknown) => boolean).call(object, c),
     );
     if (found !== undefined) return found;
-    (object as Record<symbol, unknown>)[internedSym] = true;
+    // The marker is an own property, which an instance its constructor froze
+    // (or sealed) cannot take: such an instance is pooled all the same, and
+    // remembered here so that this pool recognises it in O(1) as the marker
+    // would. (The rest of valsem then meets it as a value-type instance
+    // without the marker — pooled by its equality and hash on first sight.)
+    if (Object.isExtensible(object)) (object as Record<symbol, unknown>)[internedSym] = true;
+    else (this.#unmarked ??= new WeakSet()).add(object);
     Object.freeze(object);
     return this.register(object, hash);
   }

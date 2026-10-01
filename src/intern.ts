@@ -30,7 +30,7 @@ import {
   _missingValueSemantics,
   _protocolEquals,
   _mutableBuiltinReason,
-  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainRecord, _isForeignObjectPrototype } from './deep-equal.js';
+  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainData, _isForeignObjectPrototype } from './deep-equal.js';
 import { createInternPool, _poolStats } from './intern-pool.js';
 import { same, _undraft } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
@@ -69,7 +69,7 @@ export function isCanonical(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return typeof value !== 'function';
   return (
     _metaOf(value) !== undefined ||
-    ((value as Record<symbol, unknown>)[internedSym] === true && !_isPlainRecord(value))
+    ((value as Record<symbol, unknown>)[internedSym] === true && !_isPlainData(value))
   );
 }
 
@@ -89,19 +89,21 @@ function describeNonCanonical(value: unknown): string {
 }
 
 /**
- * Equality by identity, for canonical values — `a === b`, which is value
- * equality once both sides are canonical. Unlike `deepEqual`, it never
- * walks: the promise that both arguments are canonical (or primitive) is
- * yours, and while checks are on it is verified, throwing on a raw object
- * (whose `===` would be a silent `false`). `skipChecks()` turns the check
- * off; the comparison is then a bare `===`.
+ * `deepEqual` for canonical values, at the cost of `===`: once both sides
+ * are canonical, identity IS value equality — except for NaN, the one value
+ * `===` denies to itself, which `deepEqual` (and every pool and collection)
+ * says is equal, so it is equal here too (SameValueZero). Unlike
+ * `deepEqual`, it never walks: the promise that both arguments are canonical
+ * (or primitive) is yours, and while checks are on it is verified, throwing
+ * on a raw object (whose `===` would be a silent `false`). `skipChecks()`
+ * turns the check off; the comparison is then the bare one.
  */
 export function fastEqual(a: unknown, b: unknown): boolean {
   if (_checking()) {
     if (!isCanonical(a)) throw nonCanonical('first', a);
     if (!isCanonical(b)) throw nonCanonical('second', b);
   }
-  return a === b;
+  return a === b || (a !== a && b !== b);
 }
 
 function nonCanonical(which: string, value: unknown): TypeError {
@@ -183,7 +185,7 @@ export function intern<T>(value: T): T {
 
   // Persistent collections / opt-in classes mark themselves canonical —
   // class instances only; on a plain record the symbol is an ordinary key.
-  if ((obj as any)[internedSym] === true && !_isPlainRecord(obj)) return value;
+  if ((obj as any)[internedSym] === true && !_isPlainData(obj)) return value;
 
   // Already interned via the legacy WeakMap path — fast path.
   if (_metaOf(obj) !== undefined) return value;

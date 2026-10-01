@@ -16,6 +16,9 @@ import { OrderedMap } from './ordered-map.js';
 import { OrderedSet } from './ordered-set.js';
 import { HashMap } from './hash-map.js';
 import { memoize } from './memoize.js';
+import { ValueDate } from './value-date.js';
+import { InternedString } from './interned-string.js';
+import { RawArray } from './raw-array.js';
 import { withPolluted } from './pollution.test-helpers.js';
 
 const clean = (): void => {
@@ -329,5 +332,45 @@ describe('a patch applies to its own kind of value and to no other', () => {
     const refusal = new RegExp(`cannot apply a '${kind.replace('.', '\\.')}' patch to |arrays take integer indices`);
     expect(() => applyPatches(base, [patch])).toThrow(refusal);
     expect(() => applyPatches(nested, [below])).toThrow(refusal);
+  });
+});
+
+describe('forged canonicality, beyond records', () => {
+  it('an own [interned] on an array is no more the protocol than on a record', () => {
+    const arr = [1, 2] as number[] & Record<symbol, unknown>;
+    arr[interned] = true;
+    expect(isCanonical(arr)).toBe(false);
+    const c = intern(arr);
+    expect(c).not.toBe(arr);
+    expect(Object.isFrozen(c)).toBe(true);
+    expect(c).toBe(intern([1, 2])); // an array's content is its elements: the symbol key is dropped
+    expect(deepEqual(arr, [1, 2])).toBe(true);
+    expect(() => fastEqual(arr, c)).toThrow(/raw array/);
+    expect(produce(intern({ a: [0] }), (d) => void (d.a = arr)).a).toBe(c); // adopted, not passed through
+  });
+
+  it("a value type's private constructor holds at runtime: nothing claims canonicality around the pool", () => {
+    const Date_ = ValueDate as unknown as new (...args: unknown[]) => unknown;
+    expect(() => new Date_(1000)).toThrow(/ValueDate\.from/);
+    expect(() => Reflect.construct(Date_, [new Date(0)])).toThrow(TypeError);
+    const Str = InternedString as unknown as new (...args: unknown[]) => unknown;
+    expect(() => new Str('x', 1)).toThrow(/InternedString\.for/);
+    // The collections too: `new ValueList()` is the natural spelling, by analogy with `new Map()`, and gave an instance that reported canonical and threw on first use.
+    for (const [Type, name] of [[ValueList, 'ValueList'], [ValueMap, 'ValueMap'], [ValueSet, 'ValueSet'], [OrderedMap, 'OrderedMap'], [OrderedSet, 'OrderedSet'], [RawArray, 'RawArray']] as const) {
+      const Ctor = Type as unknown as new (...args: unknown[]) => unknown;
+      expect(() => new Ctor(), name).toThrow(new RegExp(`${name} instances are created by`));
+      expect(() => new Ctor([]), name).toThrow(TypeError);
+    }
+  });
+});
+
+describe('applyPatches reads its patches once', () => {
+  it('a one-shot iterable — an iterator, a generator — is applied, not consumed by the check', () => {
+    const base = intern({ n: 1 });
+    const [r, p] = produceWithPatches(base, (d) => { d.n = 2; });
+    expect(applyPatches(base, p.values() as unknown as Patch[])).toBe(r);
+    function* gen(): Generator<Patch> { yield* p; }
+    expect(applyPatches(base, gen() as unknown as Patch[])).toBe(r);
+    expect(applyPatches(base, new Set(p) as unknown as Patch[])).toBe(r);
   });
 });

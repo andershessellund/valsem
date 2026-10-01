@@ -26,6 +26,9 @@ import { intern } from './intern.js';
 import { hashNumber } from './hasher.js';
 import { indexArg, atIndex, elementIndex } from './shared.js';
 
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.raw-array');
+
 let nextId = 0;
 const NOT_YET = Symbol('valsem.raw-array.not-yet');
 
@@ -46,7 +49,8 @@ export class RawArray<T> {
   readonly #canon: unknown[];
   readonly #hash: number;
 
-  private constructor(raw: unknown[]) {
+  private constructor(token: symbol, raw: unknown[]) {
+    if (token !== INTERNAL) throw new TypeError('valsem: RawArray instances are created by RawArray.from()');
     this.#raw = raw;
     this.#canon = new Array<unknown>(raw.length).fill(NOT_YET);
     this.#hash = hashNumber(++nextId) >>> 0;
@@ -56,7 +60,7 @@ export class RawArray<T> {
   /** A view over `items` — copied once (a native slice, holes preserved), so later mutation of the caller's array does not reach it. */
   static from<T>(items: Iterable<T> | ArrayLike<T>): RawArray<T> {
     const arr = Array.isArray(items) ? (items as unknown[]).slice() : Array.from(items as Iterable<T>);
-    return new RawArray<T>(arr);
+    return new RawArray<T>(INTERNAL, arr);
   }
 
   get length(): number {
