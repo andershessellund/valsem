@@ -258,18 +258,41 @@ export class DraftOrderedMap<K, V> {
   }
 
   /**
-   * The keys in order, as the map stood when the walk began — the working map
-   * is persistent — except that an entry deleted before the walk reaches it is
-   * not visited, as on a native `Map` (asked of the current map only once
-   * something changed).
+   * The keys in order, as a native `Map`'s walk visits them: an entry
+   * deleted before the walk reaches it is not visited, one appended during
+   * the walk is, and one deleted and set again is visited again, at its new
+   * place. While nothing changes, the walk is the working map's own
+   * iterator; once an op lands, it becomes a position in the current map,
+   * moved by the ops since (a delete or an insert before it shifts it, a
+   * clear resets it), reading one key per step. An iterator outlives
+   * nothing: once the recipe has ended, its next step throws.
    */
   *keys(): IterableIterator<K> {
     const s = this.#state;
-    const begun = s.work;
-    for (const k of begun.keys()) {
+    const it = s.work.keys();
+    let cursor = s.ops.length;
+    let pos = 0;
+    let positional = false;
+    for (;;) {
       assertUnrevoked(s);
-      if (s.work !== begun && !s.work.has(k)) continue; // deleted since
-      yield k as K;
+      if (!positional) {
+        if (cursor === s.ops.length) {
+          const r = it.next();
+          if (r.done) return;
+          pos++;
+          yield r.value as K;
+          continue;
+        }
+        positional = true;
+      }
+      for (; cursor < s.ops.length; cursor++) {
+        const op = s.ops[cursor]!;
+        if (op.t === 'delete') { if (op.index < pos) pos--; }
+        else if (op.t === 'insert') { if (op.index < pos) pos++; }
+        else if (op.t === 'clear') pos = 0;
+      }
+      if (pos >= s.work.size) return;
+      yield s.work.at(pos++)![0] as K;
     }
   }
 

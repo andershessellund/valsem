@@ -623,7 +623,14 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
   intern(object: T): T {
     if ((object as Record<symbol, unknown>)[internedSym] === true || this.#unmarked?.has(object)) return object;
-    const hash = (object as Record<symbol, unknown>)[hashCodeSym] as number;
+    // The protocol admits a `[hashCode]` property, getter or method (deepHash
+    // reads all three). Read as a number only, a method multiplied to NaN:
+    // every instance landed in one slot, and the pool went quadratic.
+    const hc = (object as Record<symbol, unknown>)[hashCodeSym];
+    const hash = typeof hc === 'function' ? (hc as (this: unknown) => unknown).call(object) : hc;
+    if (typeof hash !== 'number') {
+      throw new TypeError(`valsem: pool.intern — [hashCode] must be a number, or a method returning one, got ${typeof hash}`);
+    }
     const eq = (object as Record<symbol, unknown>)[equalsSym];
     const found = this.lookup(
       hash,

@@ -4,7 +4,7 @@
 // (The produce suites test outcomes; this one tests the instruments.)
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { produce, produceWithPatches, } from './produce.js';
+import { produce, produceWithPatches, isDraft } from './produce.js';
 import { DraftMap } from './draft-map.js';
 import { DraftSet } from './draft-set.js';
 import { DraftList } from './draft-list.js';
@@ -459,12 +459,46 @@ describe('a draft walk, as a native one', () => {
     expect(() => keys.next()).toThrow(/escaped/);
   });
 
-  it('a set reduce without an initial value folds from the first member, and an empty set is a TypeError, as Array', () => {
+  it('a DraftSet reduce requires its initial value, as the value does (D54)', () => {
     produce(ValueSet.of(1, 2, 3), (d) => {
-      expect(d.reduce((a, b) => a + b)).toBe(6);
       expect(d.reduce((a, b) => a + b, 10)).toBe(16);
-      d.clear();
-      expect(() => d.reduce((a, b) => a + b)).toThrow(TypeError);
+      const loose = d.reduce as unknown as (fn: (a: number, b: number) => number) => number;
+      expect(() => loose.call(d, (a, b) => a + b)).toThrow(/DraftSet\.reduce: an initial value is required/);
     });
+  });
+
+  it('DraftMap: clear() during a walk over the added keys is seen by the walk, and so is what is set after it', () => {
+    const visited: [string, number | undefined][] = [];
+    const next = produce(ValueMap.from<string, number>([['a', 1]]), (d) => {
+      d.set('b', 2);
+      d.set('c', 3);
+      for (const [k, v] of d) {
+        visited.push([k, v]);
+        if (k === 'b') { d.clear(); d.set('z', 26); }
+      }
+    });
+    expect(visited.some(([, v]) => v === undefined)).toBe(false); // no cleared key offered as undefined
+    expect(visited.map(([k]) => k)).toContain('z');
+    expect(next).toBe(ValueMap.from([['z', 26]]));
+  });
+
+  it("splice hands out its removed elements drafted on first read, through a proxy: nothing is drafted for an element nobody reads", () => {
+    type Row = { id: number };
+    const big = ValueList.from(Array.from({ length: 50_000 }, (_, i) => ({ id: i })));
+    const next = produce(intern({ l: big, arr: big.toArray() as Row[] }), (d) => {
+      const removed = d.l.splice(0, 25_000);
+      expect(Array.isArray(removed)).toBe(true);
+      expect(removed.length).toBe(25_000);
+      const t = removed[7]!; // read: drafted now
+      expect(isDraft(t)).toBe(true);
+      t.id = -7;
+      d.l.push(t);
+      const removedArr = d.arr.splice(0, 25_000);
+      expect(isDraft(removedArr[7])).toBe(true);
+      expect(removedArr.map((r) => r.id).slice(0, 3)).toEqual([0, 1, 2]); // the methods read through the proxy
+    });
+    expect(next.l.length).toBe(25_001);
+    expect(next.l.last()).toBe(intern({ id: -7 }));
+    expect(next.arr.length).toBe(25_000);
   });
 });

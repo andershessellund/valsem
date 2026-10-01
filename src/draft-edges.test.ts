@@ -377,13 +377,14 @@ describe('an array draft at scale and past its end', () => {
     expect(next).toBe(intern({ arr: [1] }));
   });
 
-  it('a non-enumerable own property of a raw base is readable, never drafted, and not in the result', () => {
+  it('a non-enumerable own property of a raw base is not part of the record: absent from the draft, the result and the patches', () => {
     const base = Object.defineProperty({ x: 1 }, 'hidden', { value: { k: 1 }, enumerable: false }) as { x: number; hidden: { k: number } };
     const next = produce(base, (d) => {
-      expect(d.hidden).toBe(base.hidden);
-      expect(isDraft(d.hidden)).toBe(false);
+      expect(d.hidden).toBeUndefined(); // the base is interned before it is drafted (D61), and intern drops it
+      expect(() => { d.hidden.k = 2; }).toThrow(TypeError);
       d.x = 2;
     });
+    expect(base.hidden.k).toBe(1);
     expect(next).toBe(intern({ x: 2 }));
     expect('hidden' in next).toBe(false);
     const [, patches] = produceWithPatches(base, (d) => { void d.hidden; d.x = 2; });

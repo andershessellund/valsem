@@ -274,6 +274,13 @@ export function filterIn(items: Iterable<unknown>, self: unknown, indexed: boole
  * initial value that was passed is one, `undefined` included, and with none
  * the first item starts the fold and an empty collection is a `TypeError`.
  */
+/** The error for a `reduce` on an unordered set given no initial value: its members have no first (D54). */
+export function noInitial(operation: string): TypeError {
+  return new TypeError(
+    `${operation}: an initial value is required — the members of an unordered set have no first, so a fold from "the first member" would depend on the hash seed`,
+  );
+}
+
 export function reduceIn(
   items: Iterable<unknown>,
   self: unknown,

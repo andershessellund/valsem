@@ -37,6 +37,9 @@ import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, 
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
 
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.value-list');
+
 /** A consed node: `kids` are elements (height 1) or nodes (height > 1). */
 export interface CNode {
   readonly h: number;
@@ -367,7 +370,8 @@ export class ValueList<T> implements Iterable<T> {
   /** The leaf of the last read, with its index range — sequential reads stay in one leaf. */
   readonly #last: { start: number; end: number; leaf: CNode | null };
 
-  private constructor(root: CNode | null, tail: readonly unknown[], hash: number) {
+  private constructor(token: symbol, root: CNode | null, tail: readonly unknown[], hash: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: ValueList instances are created by ValueList.of(), from() and empty()');
     this.#root = root;
     this.#tail = tail;
     this.#hash = hash;
@@ -398,7 +402,7 @@ export class ValueList<T> implements Iterable<T> {
     const h = ValueList.#hashOf(root, tail);
     const found = lpool.lookup(h, (c) => c.#root === root && sameSlots(c.#tail, tail));
     if (found !== undefined) return found as ValueList<T>;
-    return lpool.register(new ValueList<unknown>(root, tail, h), h) as ValueList<T>;
+    return lpool.register(new ValueList<unknown>(INTERNAL, root, tail, h), h) as ValueList<T>;
   }
 
   /** The canonical list for a whole tree: detach its last leaf into the tail if that run is open. */

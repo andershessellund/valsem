@@ -83,6 +83,12 @@ export function memoize<F extends Function>(
   if (!(maxSize >= 1) || (maxSize !== Infinity && !Number.isInteger(maxSize))) {
     throw new RangeError(`valsem: memoize maxSize must be a positive integer or Infinity, got ${String(maxSize)}`);
   }
+  // `F extends Function` admits a class, which `apply` cannot call: refused
+  // here, at the memoize call, with the reason, instead of the engine's
+  // "cannot be invoked without 'new'" on the first call.
+  if (/^class[\s{]/.test(Function.prototype.toString.call(fn))) {
+    throw new TypeError(`valsem: memoize — ${fn.name || 'the class'} is a class, not a function of values. Pass a function.`);
+  }
   const name = fn.name || 'the function';
 
   const table = new HashTable<Entry>(); // recency lives in the list below, not in the table

@@ -93,15 +93,36 @@ function flushTail(s: ListState): void {
 
 /**
  * What a removal verb hands back: the removed element as `get` would have
- * handed it out — its child draft if it has one; drafted if it can be (an
- * element of the base, or a frozen value the recipe assigned); the recipe's
- * own raw material raw — so `const t = d.todos.shift(); t.done = true;
- * d.done.push(t)` edits, as on a plain array.
+ * handed it out — its child draft if it has one; drafted if it is a value
+ * (an element of the list, canonical by construction, or a frozen value the
+ * recipe assigned); the recipe's own raw material raw — so `const t =
+ * d.todos.shift(); t.done = true; d.done.push(t)` edits, as on a plain array.
  */
-function handOut(s: ListState, e: Entry | undefined, value: unknown): unknown {
+function handOut(s: ListState, value: unknown): unknown {
   if (s.finalized || !isDraftable(value) || stateOf(value) !== undefined) return value;
-  if (e === undefined || isImmutable(value)) return createChildDraft(value, s);
-  return value;
+  return isImmutable(value) ? createChildDraft(value, s) : value;
+}
+
+/**
+ * `removed`, each element handed out as {@link handOut} would — on first
+ * read, through a Proxy, so `const [t] = d.todos.splice(i, 1)` edits and
+ * `d.l.splice(0, 50_000)` drafts nothing. A draft made replaces the raw
+ * slot; the op log keeps its own copy of the raw elements.
+ */
+function lazyHandOut(s: ListState, removed: unknown[]): unknown[] {
+  if (removed.length === 0) return removed;
+  return new Proxy(removed, {
+    get(target, prop, receiver) {
+      const i = typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop) ? Number(prop) : -1;
+      if (i !== -1 && i < target.length) {
+        const v = target[i];
+        const h = handOut(s, v);
+        if (h !== v) target[i] = h;
+        return h;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
 
 /**
@@ -110,15 +131,13 @@ function handOut(s: ListState, e: Entry | undefined, value: unknown): unknown {
  * is there, the values as an array (a patch may insert 150,000 of them: no
  * spread). Returns the removed elements, raw.
  */
-function spliceList(s: ListState, at: number, rc: number, values: readonly unknown[]): { removed: unknown[]; entries: (Entry | undefined)[] } {
+function spliceList(s: ListState, at: number, rc: number, values: readonly unknown[]): unknown[] {
   for (const v of values) assertAssignable(v, s);
   flushTail(s);
   markChanged(s);
   const removed: unknown[] = [];
-  const entries: (Entry | undefined)[] = [];
   for (let i = at; i < at + rc; i++) {
     const e = s.overlay.get(i);
-    entries.push(e);
     removed.push(e !== undefined ? e.v : s.work.get(i));
   }
   s.ops.push({ t: 'splice', i: at, rc, inserted: values.slice(), removed: removed.slice() });
@@ -140,7 +159,7 @@ function spliceList(s: ListState, at: number, rc: number, values: readonly unkno
     s.overlayHi = hi;
   }
   for (let j = 0; j < values.length; j++) overlaySet(s, at + j, { v: values[j], assigned: true });
-  return { removed, entries };
+  return removed;
 }
 
 /**
@@ -208,7 +227,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     elementIndex(index, s.work.length + s.tail.length, 'DraftList.get');
     const e = entryAt(s, index);
     const value = e !== undefined ? e.v : s.work.get(index);
-    const child = handOut(s, e, value);
+    const child = handOut(s, value);
     if (child !== value) {
       const entry: Entry = { v: child, assigned: e !== undefined && e.assigned };
       if (index < s.work.length) overlaySet(s, index, entry);
@@ -247,15 +266,14 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     const len = s.work.length + s.tail.length;
     if (len === 0) return undefined;
     markChanged(s);
-    const e = entryAt(s, len - 1);
-    const removed = e !== undefined ? e.v : s.work.get(len - 1);
+    const removed = readAt(s, len - 1);
     s.ops.push({ t: 'splice', i: len - 1, rc: 1, inserted: [], removed: [removed] });
     if (s.tail.length !== 0) s.tail.pop();
     else {
       s.work = s.work.popped();
       s.overlay.delete(len - 1);
     }
-    return handOut(s, e, removed) as Draft<T>;
+    return handOut(s, removed) as Draft<T>;
   }
 
   /** Replace `deleteCount` elements at `start` with `values` and return the removed ones (each drafted, as `get` hands it out), as `Array.prototype.splice`, with the arguments as `ValueList.toSpliced` takes them: a start that is a place in the list, a count that means "up to" or is left out, never `undefined` (D45). */
@@ -266,14 +284,8 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     // As ValueList.toSpliced: the start is a place in the list, the count means
     // "up to". Checked before anything moves.
     const [at, rc, values] = spliceArgs<T>(start, rest, s.work.length + s.tail.length, 'DraftList.splice');
-    return this.#spliced(spliceList(s, at, rc, values));
-  }
-
-  /** The removed elements of a splice, handed out as `get` would. (The return types are spelled as `get`'s is, so the class stays covariant to the variance check.) */
-  #spliced({ removed, entries }: { removed: unknown[]; entries: (Entry | undefined)[] }): (Draft<T> | (T & undefined))[] {
-    const s = this[DRAFT_STATE];
-    for (let i = 0; i < removed.length; i++) removed[i] = handOut(s, entries[i], removed[i]);
-    return removed as (Draft<T> | (T & undefined))[];
+    // (The return types are spelled as `get`'s is, so the class stays covariant to the variance check.)
+    return lazyHandOut(s, spliceList(s, at, rc, values)) as (Draft<T> | (T & undefined))[];
   }
 
   /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.inserted` places it. */
@@ -286,13 +298,13 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`). Returns it, drafted as `get` hands it out. */
   remove(index: number): Draft<T> | (T & undefined) {
     const s = this.#state;
-    return this.#spliced(spliceList(s, elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1, []))[0] as Draft<T> | (T & undefined);
+    return handOut(s, spliceList(s, elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1, [])[0]) as Draft<T> | (T & undefined);
   }
 
   /** Remove and return the first element (drafted, as `get` hands it out), `undefined` when empty, as `Array.prototype.shift`. */
   shift(): Draft<T> | undefined {
     const s = this.#state;
-    return s.work.length + s.tail.length === 0 ? undefined : this.#spliced(spliceList(s, 0, 1, []))[0];
+    return s.work.length + s.tail.length === 0 ? undefined : (handOut(s, spliceList(s, 0, 1, [])[0]) as Draft<T>);
   }
 
   /** Insert `values` at the front; the new length, as `Array.prototype.unshift`. */

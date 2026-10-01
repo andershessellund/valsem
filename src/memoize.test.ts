@@ -205,3 +205,14 @@ describe('memoize — the memoized function is the original, signature and all',
     expect(un.size).toBe(0);
   });
 });
+
+describe('memoize — a class is not a function of values', () => {
+  it('is refused at the memoize call, with the reason, not on the first call with the engine\'s error', () => {
+    class Point {
+      constructor(readonly x: number) {}
+    }
+    expect(() => memoize(Point)).toThrow(/memoize — Point is a class, not a function of values/);
+    expect(() => memoize(class {})).toThrow(/is a class/);
+    expect(memoize(function named(x: number) { return x; })(1)).toBe(1); // a function declaration is fine
+  });
+});

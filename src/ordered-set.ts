@@ -26,6 +26,9 @@ import { keyedAnchor, keyedIndexOf, keyedInsert, keyedRemove, keyedBuild, PairIt
 import { toDraft, type DraftState } from './draft-core.js';
 import { createOrderedSetDraft, type OrderedSetState } from './draft-ordered-set.js';
 
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.ordered-set');
+
 const CFG = createTrieConfig(2); // member, anchor
 const pool = createInternPool<OrderedSet<unknown>>();
 const SEED = 0x05e7;
@@ -59,7 +62,8 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
   readonly #root: HNode;
   readonly #hash: number;
 
-  private constructor(list: ValueList<T>, root: HNode, hash: number) {
+  private constructor(token: symbol, list: ValueList<T>, root: HNode, hash: number) {
+    if (token !== INTERNAL) throw new TypeError('valsem: OrderedSet instances are created by OrderedSet.of(), from() and empty()');
     this.#list = list;
     this.#root = root;
     this.#hash = hash;
@@ -82,7 +86,7 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
     const h = mix(SEED, list[hashCodeSym]);
     const hit = pool.lookup(h, (c) => c.#list === list);
     if (hit !== undefined) return hit as OrderedSet<T>;
-    return pool.register(new OrderedSet<unknown>(list, keyed.root, h), h) as OrderedSet<T>;
+    return pool.register(new OrderedSet<unknown>(INTERNAL, list, keyed.root, h), h) as OrderedSet<T>;
   }
 
   /** The member list and its trie, as the keyed index of ordered-core works on them. */

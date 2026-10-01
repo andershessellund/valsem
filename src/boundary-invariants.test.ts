@@ -168,7 +168,7 @@ describe('a function is not a value at any admission door', () => {
   it('a recipe cannot return one, and a function is not a base', () => {
     expect(() => produce({ x: 1 } as unknown, () => fn)).toThrow(NOT_A_VALUE);
     expect(() => produce(fn as unknown, () => {})).toThrow(NOT_A_VALUE);
-    expect(() => produce(fn as unknown, () => 1)).not.toThrow(); // replaced before it is admitted
+    expect(() => produce(fn as unknown, () => 1)).toThrow(NOT_A_VALUE); // the base is interned before the recipe runs (D61): a replacement comes too late
     expect(() => produceWithPatches({ x: 1 } as unknown, () => fn)).toThrow(NOT_A_VALUE);
   });
 

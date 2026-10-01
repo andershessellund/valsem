@@ -573,14 +573,10 @@ export function finalizeState(
     // the base, so whatever this container and its children wrote since the
     // mark describes no change. (Inverses are unshifted, so the entries added
     // since the mark are exactly the first ones.) A kind's own bookkeeping
-    // can miss cases — a map cleared and refilled to equal content did. A
-    // raw base (the caller's own object, or the snapshot a draft given as
-    // the base stands for, D47) is never `===` its canonical result: the
-    // comparison is then against its canonical, one intern of material the
-    // walk resolves anyway.
-    if (emitting && (result === state.base || (!isCanonical(state.base) && result === intern(state.base)))) {
-      retractSeqPatches(recorder, patchMark, recorder.inverse.length - inverseMark);
-    }
+    // can miss cases — a map cleared and refilled to equal content did. (The
+    // base is canonical: produce interns its input before drafting it, D61,
+    // so a result equal to the base IS the base.)
+    if (emitting && result === state.base) retractSeqPatches(recorder, patchMark, recorder.inverse.length - inverseMark);
     return result;
   } finally {
     inProgress.delete(state);

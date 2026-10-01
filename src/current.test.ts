@@ -20,6 +20,15 @@ const base = intern({
 });
 
 describe('original()', () => {
+  it('of a raw input is its canonical: produce interns its input before it drafts it (D61)', () => {
+    const raw = { meta: { views: 1 }, tags: ['a'] };
+    produce(raw, (d) => {
+      expect(original(d)).toBe(intern(raw));
+      expect(original(d.meta)).toBe(intern(raw.meta));
+      expect(Object.isFrozen(original(d.tags))).toBe(true);
+    });
+  });
+
   it('is the base the draft was made from, at any depth and for every draft kind', () => {
     produce(base, (d) => {
       expect(original(d)).toBe(base);

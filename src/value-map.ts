@@ -39,6 +39,9 @@ import {
   type HNode,
 } from './hamt.js';
 
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.value-map');
+
 const CFG = createTrieConfig(2);
 
 /**
@@ -66,7 +69,8 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   readonly #root: HNode;
   readonly #hash: number;
 
-  private constructor(root: HNode) {
+  private constructor(token: symbol, root: HNode) {
+    if (token !== INTERNAL) throw new TypeError('valsem: ValueMap instances are created by ValueMap.from(), fromObject() and empty()');
     this.#root = root;
     this.#hash = root.h;
     Object.freeze(this);
@@ -84,7 +88,7 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   static #for<K, V>(root: HNode): ValueMap<K, V> {
     const hit = root.w;
     if (hit !== undefined) return hit as ValueMap<K, V>;
-    const fresh = new ValueMap<unknown, unknown>(root);
+    const fresh = new ValueMap<unknown, unknown>(INTERNAL, root);
     root.w = fresh; // the root holds its wrapper: the WeakMap's ephemeron lifetime, without the WeakMap
     return fresh as ValueMap<K, V>;
   }

@@ -218,10 +218,10 @@ describe('ValueSet — [equals]', () => {
 });
 
 describe('ValueSet.reduce', () => {
-  it('without an initial value folds from the first member; an empty set is a TypeError, as Array', () => {
-    expect(ValueSet.of(1, 2, 3).reduce((a, b) => a + b)).toBe(6);
+  it('requires its initial value: the members of an unordered set have no first (D54), so the call without one throws instead of folding from undefined', () => {
     expect(ValueSet.of(1, 2, 3).reduce((a, b) => a + b, 10)).toBe(16);
-    expect(() => ValueSet.empty<number>().reduce((a, b) => a + b)).toThrow(/reduce of an empty collection with no initial value/);
     expect(ValueSet.empty<number>().reduce((a, b) => a + b, 0)).toBe(0);
+    const loose = ValueSet.of(1, 2, 3).reduce as unknown as (fn: (a: number, b: number) => number) => number;
+    expect(() => loose.call(ValueSet.of(1, 2, 3), (a, b) => a + b)).toThrow(/ValueSet\.reduce: an initial value is required/);
   });
 });

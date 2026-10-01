@@ -171,19 +171,41 @@ export class DraftOrderedSet<T> implements Iterable<T> {
   }
 
   /**
-   * The members in order, as the set stood when the walk began — the working
-   * set is persistent — except that a member deleted before the walk reaches
-   * it is not visited, as on a native `Set` (asked of the current set only
-   * once something changed). An iterator outlives nothing: once the recipe
-   * has ended, its next step throws, as every other use of the draft does.
+   * The members in order, as a native `Set`'s walk visits them: a member
+   * deleted before the walk reaches it is not visited, one added during the
+   * walk is, and one deleted and added again is visited again, at its new
+   * place. While nothing changes, the walk is the working set's own
+   * iterator; once an op lands, it becomes a position in the current set,
+   * moved by the ops since (a delete or an insert before it shifts it, a
+   * clear resets it), reading one member per step. An iterator outlives
+   * nothing: once the recipe has ended, its next step throws.
    */
   *values(): IterableIterator<T> {
     const s = this.#state;
-    const begun = s.work;
-    for (const v of begun) {
+    const it = s.work.values();
+    let cursor = s.ops.length;
+    let pos = 0;
+    let positional = false;
+    for (;;) {
       assertUnrevoked(s);
-      if (s.work !== begun && !s.work.has(v)) continue; // deleted since
-      yield v as T;
+      if (!positional) {
+        if (cursor === s.ops.length) {
+          const r = it.next();
+          if (r.done) return;
+          pos++;
+          yield r.value as T;
+          continue;
+        }
+        positional = true;
+      }
+      for (; cursor < s.ops.length; cursor++) {
+        const op = s.ops[cursor]!;
+        if (op.t === 'delete') { if (op.index < pos) pos--; }
+        else if (op.t === 'insert') { if (op.index < pos) pos++; }
+        else if (op.t === 'clear') pos = 0;
+      }
+      if (pos >= s.work.size) return;
+      yield s.work.at(pos++) as T;
     }
   }
 

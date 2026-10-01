@@ -777,3 +777,32 @@ describe('InternPool — intern and lookup, at the edges', () => {
     }
   });
 });
+
+describe('InternPool — a [hashCode] method', () => {
+  it('is called, as deepHash calls it: every instance lands at its own hash, and the pool stays O(1) a call', () => {
+    class M {
+      constructor(readonly n: number) {}
+      [hashCode](): number {
+        return Math.imul(this.n, 0x9e3779b1) >>> 0;
+      }
+      [equals](o: unknown): boolean {
+        return o instanceof M && o.n === this.n;
+      }
+    }
+    const pool = createInternPool<M>();
+    const t = performance.now();
+    const first = Array.from({ length: 4000 }, (_, i) => pool.intern(new M(i)));
+    expect(performance.now() - t).toBeLessThan(200); // one slot for all of them took 350 ms
+    for (let i = 0; i < 4000; i += 97) expect(pool.intern(new M(i))).toBe(first[i]);
+    expect(pool.intern(new M(1))).not.toBe(pool.intern(new M(2)));
+    class Bad {
+      get [hashCode](): unknown {
+        return 'seven';
+      }
+      [equals](): boolean {
+        return false;
+      }
+    }
+    expect(() => createInternPool<Bad>().intern(new Bad())).toThrow(/\[hashCode\] must be a number, or a method returning one, got string/);
+  });
+});

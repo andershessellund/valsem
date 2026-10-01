@@ -155,8 +155,9 @@ mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 `at(0)` and `at(-1)`; `ValueSet` and `OrderedSet` have `map`, `filter`,
 `reduce`, `some` and `every`, whose callbacks get what their `forEach`
 passes, `(value, value, set)`; a `reduce` given no initial value folds from
-the first element, and of an empty collection is a `TypeError`, as `Array`'s.
-What they build is canonical like any other
+the first element on a `ValueList` or an `OrderedSet`, as `Array`'s, and
+is a `TypeError` on a `ValueSet`, whose members have no first. What they
+build is canonical like any other
 collection (`list.filter(() => true) === list`), and a set's `map` merges
 equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s too (a
 stable sort, `undefined` last, by string with no comparator), and a list

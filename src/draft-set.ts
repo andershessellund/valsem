@@ -18,7 +18,7 @@ import {
   snapshotOf,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, findIndexIn, reduceIn, noInitial } from './shared.js';
 import type { ValueSet } from './value-set.js';
 
 const INTERNAL = Symbol('valsem.draftInternal');
@@ -203,10 +203,10 @@ export class DraftSet<T> {
     return (snapshotOf(this) as ValueSet<T>).filter((v) => fn.call(thisArg, v, v, this));
   }
 
-  /** A fold over the members. With no initial value the first member starts it, and an empty set is a `TypeError`, as on `Array`. */
-  reduce(fn: (acc: T, value: T, value2: T, set: DraftSet<T>) => T): T;
+  /** A fold over the members, from `initial`, which is required: the members of an unordered set have no first (D54), so a call without one is a `TypeError`. */
   reduce<U>(fn: (acc: U, value: T, value2: T, set: DraftSet<T>) => U, initial: U): U;
   reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitial('DraftSet.reduce');
     return reduceIn(this.values(), this, false, 'DraftSet.reduce', args);
   }
 

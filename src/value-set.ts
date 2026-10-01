@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn } from './shared.js';
+import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, noInitial } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createSetDraft, type SetState } from './draft-set.js';
@@ -31,6 +31,9 @@ import {
   NOT_FOUND,
   type HNode,
 } from './hamt.js';
+
+/** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
+const INTERNAL = Symbol('valsem.value-set');
 
 const CFG = createTrieConfig(1);
 
@@ -83,7 +86,8 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   readonly #root: HNode;
   readonly #hash: number;
 
-  private constructor(root: HNode) {
+  private constructor(token: symbol, root: HNode) {
+    if (token !== INTERNAL) throw new TypeError('valsem: ValueSet instances are created by ValueSet.of(), from() and empty()');
     this.#root = root;
     this.#hash = root.h;
     Object.freeze(this);
@@ -101,7 +105,7 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   static #for<T>(root: HNode): ValueSet<T> {
     const hit = root.w;
     if (hit !== undefined) return hit as ValueSet<T>;
-    const fresh = new ValueSet<unknown>(root);
+    const fresh = new ValueSet<unknown>(INTERNAL, root);
     root.w = fresh; // the root holds its wrapper: the WeakMap's ephemeron lifetime, without the WeakMap
     return fresh as ValueSet<T>;
   }
@@ -157,10 +161,10 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
     return kept.length === this.size ? this : ValueSet.from(kept);
   }
 
-  /** A fold over the members. With no initial value the first member starts it, and an empty set is a `TypeError`, as on `Array`. */
-  reduce(fn: (acc: T, value: T, value2: T, set: ValueSet<T>) => T): T;
+  /** A fold over the members, from `initial`, which is required: the members of an unordered set have no first (D54), so a call without one is a `TypeError`. */
   reduce<U>(fn: (acc: U, value: T, value2: T, set: ValueSet<T>) => U, initial: U): U;
   reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitial('ValueSet.reduce');
     return reduceIn(this, this, false, 'ValueSet.reduce', args);
   }
 

@@ -681,6 +681,17 @@ draft is taken the same way, by its snapshot: a function built on `produce`
 called from inside another recipe gets the value the draft is right now, and
 returns a value, editing nothing (D47).
 
+The base is **interned before it is drafted** (D61): `produce(x, r)` is
+`produce(intern(x), r)`, one cache probe for a canonical `x`, and for a raw
+`x` the walk finalize would have made anyway, adopting every untouched
+child. So every object a draft can reach is frozen and pooled, and the law
+that produce never modifies its input (§11) holds by construction rather
+than by the traps alone: a `sort` comparator, a property descriptor, a
+non-enumerable key, `original()` — every path that bypasses the traps meets
+a frozen object. `original(draft)` of a raw input is its canonical; a
+non-value anywhere in a raw input is rejected up front, before the recipe
+runs; `draftOf(value)` interns its value the same way.
+
 A scope is a set of states, not a tree: the recipe's draft is one root, and
 `draftOf(value)` adds a **detached** root over any draftable — no parent, no
 location. `markChanged` has nothing to bubble to, which is harmless:
@@ -738,18 +749,21 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   materialise a working copy. Mutating methods are intercepted and recorded
   as `SeqOp`s
   (`set` and `splice`) while intent is capturable; `ops` becomes null once
-  it is not. `opaqued` marks that base elements may sit at foreign indices,
-  after which any draftable read is drafted. The intercepted mutators check
-  their index arguments before the draft is marked or copied (`splice`,
-  `fill`, `copyWithin`: an integer or ±Infinity, else a `RangeError`, D45);
-  the reads are `Array.prototype`'s own. What a removal verb (`pop`, `shift`,
-  `splice`) hands back is what the read trap would have handed out: a base
-  element (identified by membership, since it has no index any more) or a
-  frozen value is drafted, the recipe's own raw insert comes back raw, a
-  child already drafted comes back as that draft — so the immer idiom
-  "remove, edit, place elsewhere" edits, and a raw base is never written
-  into. `sort`, `reverse`, `fill` and `copyWithin` return the draft, as
-  `Array`'s return `this`.
+  it is not. A read drafts the value at its base position, and any frozen
+  or canonical value wherever it sits — every element of the base is one,
+  the base being interned first (D61), so an element a relocating method
+  moved is drafted at its new index too; the recipe's own unfrozen inserts
+  stay raw, so their plain-JS aliasing survives. The intercepted mutators
+  check their index arguments before the draft is marked or copied
+  (`splice`, `fill`, `copyWithin`: an integer or ±Infinity, else a
+  `RangeError`, D45); the reads are `Array.prototype`'s own. What a removal
+  verb hands back is what the read trap would have handed out: a frozen or
+  canonical value drafted, the recipe's own raw insert raw, a child already
+  drafted as that draft — `pop` and `shift` eagerly, `splice` through a
+  Proxy over the removed array that drafts an element on first read, so
+  `d.arr.splice(0, 50_000)` drafts nothing (D62). So the immer idiom
+  "remove, edit, place elsewhere" edits. `sort`, `reverse`, `fill` and
+  `copyWithin` return the draft, as `Array`'s return `this`.
 - **`DraftMap`**: a persistent working `ValueMap` — the base with every
   delete applied as it happens — for which base keys are still present, and
   an overlay from key to what the recipe sees there (its assignment, or a
@@ -760,7 +774,7 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   and result, a child-drafted entry's change told deeper instead. A walk is
   over the working map it began with (persistent), skipping what the
   current one no longer has, then over the overlay's added keys, which a
-  native `Map` iterates live.
+  native `Map` iterates live (D65).
   **`DraftSet`**: a persistent working `ValueSet` with
   every edit applied as it happens (`add`/`delete`/`clear` only: members
   have no location); finalize's patches are the trie diff of base and
@@ -779,7 +793,14 @@ toolkit is exported as `valsem/draft`: `createDraftState`, `markChanged`,
   list. Its removal verbs hand back drafts as the array's do.
 - **`DraftOrderedMap` / `DraftOrderedSet`**: a persistent working
   collection with every structural op applied as it happens, a value
-  overlay (map only), and an op log in operation order for patches.
+  overlay (map only), and an op log in operation order for patches. The op
+  log also makes a walk a native one (D65): while nothing changes it is the
+  working collection's own iterator; once an op lands it becomes a position
+  in the current collection, moved by the ops since (a delete or insert
+  before it shifts it, a clear resets it), reading one entry per step — so
+  what is appended during the walk is visited, what is deleted before its
+  turn is not, and what is deleted and re-added is visited again at its new
+  place, as on a native `Map` or `Set`.
 
 Each draft class stores its state under a non-enumerable `DRAFT_STATE`
 property; `isDraft`/`stateOf` read it. Why: D36, D39.
@@ -887,7 +908,8 @@ canonical and never writes into the caller's object.
 
 ### 7.6 `current` and `original`
 
-`original(draft)` is the state's base. `current(draft)` is `intern` of
+`original(draft)` is the state's base — the input's canonical, since a raw
+base is interned before it is drafted (D61). `current(draft)` is `intern` of
 `snapshotOf(draft)`: an unmodified draft snapshots to its base; a modified
 one calls its kind's `snapshot` (the core object/array snapshots are
 registered from `current.ts`, so a `produce`-only bundle carries neither);
@@ -1064,3 +1086,8 @@ by canonical states. TSDoc on the exports is the per-symbol reference.
 13. **Nothing that affects an answer reads the environment.** The two
     switches are the user's; the one thing gated on `NODE_ENV` is the
     development warning in `deepEqual`, which changes no verdict.
+14. **`produce` never modifies its input, through any path.** Held by
+    construction: the base is interned before it is drafted, so every
+    object a recipe can reach from the draft is frozen (D61); the one place
+    the recipe asks for the input itself, `original()`, hands back that
+    canonical.

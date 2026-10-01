@@ -182,7 +182,7 @@ export class DraftMap<K, V> {
     if (this.size === 0) return;
     markChanged(s);
     s.work = s.empty();
-    s.edits = new Map();
+    s.edits.clear(); // in place: a walk over the added keys holds this map's iterator, and must see the clear and what is set after it
     s.added = 0;
   }
 
@@ -223,10 +223,14 @@ export class DraftMap<K, V> {
     const s = this.#state;
     const begun = s.work;
     for (const k of begun.keys()) {
+      assertUnrevoked(s); // an iterator outlives nothing: once the recipe has ended, its next step throws
       if (s.work !== begun && !s.work.has(k)) continue; // deleted since
       yield k as K;
     }
-    for (const k of s.edits.keys()) if (!s.work.has(k)) yield k as K;
+    for (const k of s.edits.keys()) {
+      assertUnrevoked(s);
+      if (!s.work.has(k)) yield k as K;
+    }
   }
 
   *values(): IterableIterator<Draft<V> | (V & undefined)> {

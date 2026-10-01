@@ -123,18 +123,6 @@ interface ArrayState extends DraftState<unknown[]> {
   copy: unknown[] | null;
   /** Recorded ops (intent); null once an uncapturable mutation occurred. */
   ops: SeqOp[] | null;
-  /**
-   * True once a relocating mutation ran — sort/reverse/fill/copyWithin, or
-   * any captured splice that shifts surviving positions (shift, unshift,
-   * mid-array splice with unequal remove/insert counts): base elements may
-   * sit at foreign indices, so the base-position check cannot identify them
-   * and ANY draftable read must be drafted (immer's relocated-base-refs
-   * problem; over-drafting assigned values is safe — `resolve` routes a raw
-   * insert to its child draft via `stateOf`).
-   */
-  opaqued: boolean;
-  /** Lazily built set of the base's object elements (opaqued reads only). */
-  baseMembers: Set<unknown> | null;
   /** Indices whose base value was child-drafted on read. */
   drafted: Set<number> | null;
   draft: unknown[];
@@ -194,19 +182,16 @@ const objectTraps: ProxyHandler<object> = {
     }
     const value = source[prop];
     if (state.finalized || !isDraftable(value)) return value;
-    // Draft slots still holding the base value. Assigned values come back
-    // raw (the caller's own material, the immer rule) — EXCEPT frozen ones:
-    // an assigned canonical (e.g. `d.c = base.b`) is immutable, so mutating
+    // Draft slots still holding the base value (canonical: the base is
+    // interned before it is drafted, D61). Assigned values come back raw (the
+    // recipe's own material, the immer rule) — EXCEPT frozen ones: an
+    // assigned canonical (e.g. `d.c = base.b`) is immutable, so mutating
     // through the read must copy-on-write, not throw on the frozen object
     // (mutative's #18 family).
     if (
       value === state.base[prop] ||
       (stateOf(value) === undefined && isImmutable(value))
     ) {
-      // A non-enumerable own property is not part of the record (`intern`
-      // drops it, `_recordKeys` never lists it): read raw, never drafted —
-      // drafting would write it into the copy, enumerable, and into the result.
-      if (!Object.prototype.propertyIsEnumerable.call(source, prop)) return value;
       prepareObjCopy(state);
       (state.drafted ??= new Set()).add(prop);
       return (state.copy![prop] = createChildDraft(value, state));
@@ -410,17 +395,6 @@ function arrRead(state: ArrayState, i: number): unknown {
   return state.vTail[i - state.base.length];
 }
 
-/** Is `value` one of the base array's object elements? (Lazily built.) */
-function isBaseMember(state: ArrayState, value: unknown): boolean {
-  let members = state.baseMembers;
-  if (members === null) {
-    members = state.baseMembers = new Set();
-    for (const el of state.base) {
-      if (el !== null && typeof el === 'object') members.add(el);
-    }
-  }
-  return members.has(value);
-}
 
 /** Fold the virtual edits/tail into a materialized working copy. */
 function materializeArr(state: ArrayState): unknown[] {
@@ -438,18 +412,37 @@ function materializeArr(state: ArrayState): unknown[] {
 /**
  * What a removal verb hands back: the removed element as the read trap would
  * have handed it out had the recipe read it first. A child already drafted
- * comes back as that draft; a draftable base element, or a frozen or
- * canonical value, is drafted (the recipe may edit it and place it
- * elsewhere, the immer idiom `const t = d.todos.shift(); t.done = true;
- * d.done.push(t)`; it has no index any more, so membership identifies a base
- * element where the position rule cannot); the recipe's own raw inserts come
- * back raw, as reads of them do. Without this, `shift` on a raw base handed
- * the caller's own object to the recipe — and `produce` wrote into it.
+ * comes back as that draft; a frozen or canonical value — every base element
+ * is one, the base being interned before it is drafted (D61) — is drafted,
+ * so the recipe may edit it and place it elsewhere (the immer idiom `const t
+ * = d.todos.shift(); t.done = true; d.done.push(t)`); the recipe's own raw
+ * inserts come back raw, as reads of them do.
  */
 function handOut(state: ArrayState, value: unknown): unknown {
   if (state.finalized || !isDraftable(value) || stateOf(value) !== undefined) return value;
-  if (isImmutable(value) || isBaseMember(state, value)) return createChildDraft(value, state);
-  return value;
+  return isImmutable(value) ? createChildDraft(value, state) : value;
+}
+
+/**
+ * `removed`, each element handed out as {@link handOut} would — on first
+ * read, through a Proxy, so `const [t] = d.todos.splice(i, 1)` edits and
+ * `d.arr.splice(0, 50_000)` drafts nothing. A draft made replaces the raw
+ * slot; the op log keeps its own copy of the raw elements.
+ */
+function lazyHandOut(state: ArrayState, removed: unknown[]): unknown[] {
+  if (removed.length === 0) return removed;
+  return new Proxy(removed, {
+    get(target, prop, receiver) {
+      const i = arrayIndex(prop);
+      if (i !== -1 && i < target.length) {
+        const v = target[i];
+        const h = handOut(state, v);
+        if (h !== v) target[i] = h;
+        return h;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
 
 /**
@@ -464,7 +457,6 @@ function spliceArr(state: ArrayState, start: number, rc: number | undefined, ite
   const len = copy.length;
   start = start < 0 ? Math.max(len + start, 0) : Math.min(start, len);
   const count = rc === undefined ? len - start : Math.min(Math.max(rc, 0), len - start);
-  if (items.length !== count && start + count < len) state.opaqued = true; // survivors relocated
   const removed = spliceAll(copy, start, count, items);
   state.ops?.push({
     t: 'splice',
@@ -509,13 +501,11 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
       const copy = materializeArr(state);
       if (copy.length === 0) return undefined;
       const removed = copy.shift();
-      if (copy.length > 0) state.opaqued = true; // survivors relocated
       state.ops?.push({ t: 'splice', i: 0, rc: 1, inserted: [], removed: [removed] });
       return handOut(state, removed);
     },
     unshift(state, args) {
       const copy = materializeArr(state);
-      if (args.length > 0 && copy.length > 0) state.opaqued = true; // survivors relocated
       copy.unshift(...args);
       state.ops?.push({ t: 'splice', i: 0, rc: 0, inserted: args.slice(), removed: [] });
       return copy.length;
@@ -525,9 +515,7 @@ const CAPTURED: Record<string, (state: ArrayState, args: unknown[]) => unknown> 
       // left of Array.prototype.splice's argument rules is the clamping,
       // which spliceArr does: a negative start counts from the end, and a
       // start alone removes through the end.
-      const removed = spliceArr(state, args[0] as number, args.length < 2 ? undefined : (args[1] as number), args.slice(2));
-      for (let i = 0; i < removed.length; i++) removed[i] = handOut(state, removed[i]);
-      return removed;
+      return lazyHandOut(state, spliceArr(state, args[0] as number, args.length < 2 ? undefined : (args[1] as number), args.slice(2)));
     },
   } satisfies Record<string, (state: ArrayState, args: unknown[]) => unknown>,
 );
@@ -615,7 +603,6 @@ const arrayTraps: ProxyHandler<object> = {
           const copy = materializeArr(state);
           markChanged(state);
           state.ops = null; // intent lost — net diff at finalize
-          state.opaqued = true; // base refs may be relocated — see ArrayState
           fn.apply(copy, args);
           // All four return `this`: the draft, not the working copy behind it,
           // so `d.todos.sort(cmp)[0].done = true` reads through the trap and
@@ -634,16 +621,15 @@ const arrayTraps: ProxyHandler<object> = {
     }
     const value = arrRead(state, index);
     if (state.finalized || !isDraftable(value)) return value;
-    // Draft base-positioned values. Frozen values (canonicals — assigned or
-    // relocated) always copy-on-write rather than throw (mutative's #18
-    // family). After a relocating method, unfrozen base members may also sit
-    // at foreign indices — the membership set identifies them; unfrozen
+    // Draft base-positioned values, and frozen values anywhere (canonicals —
+    // assigned, or base elements a relocating method moved: the base is
+    // interned before it is drafted, D61, so every element of it is one):
+    // copy-on-write rather than throw (mutative's #18 family). Unfrozen
     // FRESH inserts stay raw so their plain-JS aliasing survives (fill/
     // copyWithin write one object into several slots).
     if (
       value === state.base[index] ||
-      (stateOf(value) === undefined &&
-        (isImmutable(value) || (state.opaqued && isBaseMember(state, value))))
+      (stateOf(value) === undefined && isImmutable(value))
     ) {
       (state.drafted ??= new Set()).add(index);
       const child = createChildDraft(value, state);
@@ -765,8 +751,6 @@ function createArrayDraft(base: unknown[], parent?: DraftState): ArrayState {
     vTail: [],
     copy: null,
     ops: [],
-    opaqued: false,
-    baseMembers: null,
     drafted: null,
     draft: null as unknown as unknown[],
     revoke: null as unknown as () => void,
@@ -1283,22 +1267,26 @@ export type RecipeReturn<T> =
   | (undefined extends T ? typeof nothing : never);
 
 /**
- * A draft given as a BASE stands for the value it would be right now, its
- * snapshot: `produce(draft, recipe)` is `produce(current(draft), recipe)`.
- * So a function built on produce behaves inside someone else's recipe as it
- * does anywhere: it takes a value, returns a value, and edits nothing, and
- * the caller uses its result (`d.sub = castDraft(step(d.sub))`). The caller
- * need not know that `step` uses produce, which rejecting a draft would have
- * required; and running the recipe on the caller's draft in place would make
- * produce mutate its argument and return a live draft typed as a value.
+ * The value a base stands for: its canonical. The base is interned BEFORE
+ * anything is drafted (D61), so every object the draft can reach is frozen
+ * and pooled, and a recipe cannot write into produce's input through any
+ * path — the traps', a comparator's, a descriptor's; `original(draft)` of a
+ * raw input is its canonical. For a canonical base this is one cache probe,
+ * and for a raw one the walk finalize would have made anyway, adopting every
+ * untouched child.
  *
- * Before this, a plain draft happened to work (the inner draft read through
- * the outer proxy) and a collection draft, or a plain one holding one, failed
- * with "DraftList has no [hashCode]".
+ * A draft given as the base stands for the value it would be right now, its
+ * snapshot — `intern` reads a draft so — and `produce(draft, recipe)` is
+ * `produce(current(draft), recipe)` (D47). So a function built on produce
+ * behaves inside someone else's recipe as it does anywhere: it takes a
+ * value, returns a value, and edits nothing, and the caller uses its result
+ * (`d.sub = castDraft(step(d.sub))`). The caller need not know that `step`
+ * uses produce, which rejecting a draft would have required; and running the
+ * recipe on the caller's draft in place would make produce mutate its
+ * argument and return a live draft typed as a value.
  */
 function valueOfBase<T>(base: T): T {
-  if (stateOf(base) === undefined) return base;
-  return snapshotOf(base) as T;
+  return intern(base);
 }
 
 function runProduce<T>(
@@ -1438,7 +1426,7 @@ export function draftOf<T>(value: T): Draft<T> {
     return value as Draft<T>;
   }
   if (!isDraftable(value)) return value as Draft<T>;
-  return draftStateFor(value).draft as Draft<T>;
+  return draftStateFor(intern(value)).draft as Draft<T>; // interned first, as a base is (D61): a detached draft reaches no raw object either
 }
 
 /**

@@ -18,6 +18,7 @@ import { HashMap } from './hash-map.js';
 import { memoize } from './memoize.js';
 import { ValueDate } from './value-date.js';
 import { InternedString } from './interned-string.js';
+import { RawArray } from './raw-array.js';
 import { withPolluted } from './pollution.test-helpers.js';
 
 const clean = (): void => {
@@ -354,6 +355,12 @@ describe('forged canonicality, beyond records', () => {
     expect(() => Reflect.construct(Date_, [new Date(0)])).toThrow(TypeError);
     const Str = InternedString as unknown as new (...args: unknown[]) => unknown;
     expect(() => new Str('x', 1)).toThrow(/InternedString\.for/);
+    // The collections too: `new ValueList()` is the natural spelling, by analogy with `new Map()`, and gave an instance that reported canonical and threw on first use.
+    for (const [Type, name] of [[ValueList, 'ValueList'], [ValueMap, 'ValueMap'], [ValueSet, 'ValueSet'], [OrderedMap, 'OrderedMap'], [OrderedSet, 'OrderedSet'], [RawArray, 'RawArray']] as const) {
+      const Ctor = Type as unknown as new (...args: unknown[]) => unknown;
+      expect(() => new Ctor(), name).toThrow(new RegExp(`${name} instances are created by`));
+      expect(() => new Ctor([]), name).toThrow(TypeError);
+    }
   });
 });
 

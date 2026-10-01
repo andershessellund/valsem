@@ -45,11 +45,14 @@ handed it out, so the immer idiom `const t = d.todos.shift(); t.done = true;
 d.done.push(t)` edits, on a plain array and a `DraftList` alike (the recipe's
 own raw material comes back raw, as a read of it does); and `sort`,
 `reverse`, `fill` and `copyWithin` on a plain array return the draft, as
-`Array`'s return `this`, so `d.todos.sort(byId)[0].done = true` edits too. A
+`Array`'s return `this`, so `d.todos.sort(byId)[0].done = true` edits too
+(`splice` hands its removed elements out through a proxy that drafts each
+on first read, so clearing a list with `splice(0)` drafts nothing). A
 walk is a native one: an entry deleted before the walk reaches it is not
-visited, a `DraftMap` visits the keys added during the walk after the base's,
-and a `DraftList`'s `for…of` is live by index where its `forEach` reads the
-length once, as `Array`'s do. A set holds its members by content, so there is no editing
+visited, one added during the walk is (a `DraftMap` visits the added keys
+after the base's; the ordered drafts and a `DraftSet` visit them where a
+native `Map` or `Set` would), and a `DraftList`'s `for…of` is live by index
+where its `forEach` reads the length once, as `Array`'s do. A set holds its members by content, so there is no editing
 one in place: changing a member is removing it and adding another, which may
 already be there. Say so: for every member,
 `d.tags = castDraft(d.tags.map((t) => ({ ...t, n: 0 })))`, where two members
@@ -96,7 +99,11 @@ applyPatches(next2, inverse) === state;   // true
 ```
 
 A recipe whose edits net out to the base emits **no patches at all** — patch
-streams are as canonical as results. `applyPatches` validates what it is
+streams are as canonical as results. A patch holds what was inserted, as a
+value, so a non-value that passes through a sequence during the recipe (a
+`Date` pushed, then removed again) is tolerated by `produce`, which never
+looks at it, and refused by `produceWithPatches`, which would have to record
+it. `applyPatches` validates what it is
 given: a path is followed only through own keys and in-range indices (a
 segment like `__proto__` throws), keys and indices are type-checked, and
 patch values are interned on application — so patches can come off a wire,
@@ -226,7 +233,8 @@ result.
 ## Looking at a draft: `current()` and `original()`
 
 immer's two inspectors, with valsem's guarantee attached. `original(draft)`
-is the value the draft was made from; `current(draft)` is the **canonical**
+is the value the draft was made from (a raw input's canonical: `produce`
+interns its input before drafting it); `current(draft)` is the **canonical**
 value of what the draft holds right now — exactly what `produce` would
 return if the recipe ended here — and the draft stays live afterwards.
 Both work on any draft: plain objects and arrays, the collection drafts
@@ -303,5 +311,12 @@ plain-JS aliasing exactly as far as identity actually exists:
   positions), so "reference aliasing" of canonicals is not representable —
   identity exists only where mutability does.
 
-This is also why results are safe: a recipe can never mutate a canonical base,
-relocated or not — sort, reverse, shift, splice included.
+This is also why inputs are safe. `produce` **never modifies its input**,
+through any path: the base is interned before it is drafted, so every object
+a recipe can reach from the draft is frozen, and a write that bypasses the
+drafts — a `sort` comparator writing into its arguments, a property
+descriptor's `value`, `original(d)` — throws instead of landing in the
+caller's object. A raw input costs the intern walk, which finalize would have
+made anyway; a canonical input costs one cache probe. The one consequence to
+know: a non-value anywhere in a raw input (a `Date`) is rejected before the
+recipe runs, even where the recipe would have deleted it.
