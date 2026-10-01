@@ -12,54 +12,7 @@
 // `skipLibCheck` OFF, so the declarations themselves are checked too.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import ts from 'typescript';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-const SRC = dirname(fileURLToPath(import.meta.url));
-
-/** Emit `src/` as declarations, in memory: path of the `.d.ts` → its text. */
-function emitDeclarations(): Map<string, string> {
-  const config = ts.readConfigFile(join(SRC, '../tsconfig.json'), ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, join(SRC, '..'));
-  const out = new Map<string, string>();
-  const program = ts.createProgram(parsed.fileNames, {
-    ...parsed.options,
-    declaration: true,
-    emitDeclarationOnly: true,
-    declarationMap: false,
-    outDir: '/published',
-  });
-  program.emit(undefined, (fileName, text) => out.set(fileName, text));
-  return out;
-}
-
-/** Compile `source` as `/consumer/main.ts` against the emitted declarations; the diagnostics, as text. */
-function compileConsumer(declarations: Map<string, string>, source: string): string[] {
-  const files = new Map(declarations);
-  files.set('/consumer/main.ts', source);
-  const options: ts.CompilerOptions = {
-    strict: true,
-    noEmit: true,
-    target: ts.ScriptTarget.ES2020,
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    lib: ['lib.es2015.d.ts'],
-    skipLibCheck: false,
-    types: [],
-  };
-  const host = ts.createCompilerHost(options);
-  const { fileExists, readFile, getSourceFile, directoryExists } = host;
-  host.directoryExists = (d) => d === '/published' || d === '/consumer' || (directoryExists?.call(host, d) ?? false);
-  host.fileExists = (f) => files.has(f) || fileExists.call(host, f);
-  host.readFile = (f) => files.get(f) ?? readFile.call(host, f);
-  host.getSourceFile = (f, languageVersion, ...rest) =>
-    files.has(f) ? ts.createSourceFile(f, files.get(f)!, languageVersion, true) : getSourceFile.call(host, f, languageVersion, ...rest);
-  const program = ts.createProgram(['/consumer/main.ts'], options, host);
-  return ts
-    .getPreEmitDiagnostics(program)
-    .map((d) => `${d.file?.fileName ?? ''}: ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`);
-}
+import { emitDeclarations, compileConsumer } from './declarations.test-helpers.js';
 
 describe('the published declarations, as a consumer compiles them', () => {
   const declarations = emitDeclarations();

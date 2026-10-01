@@ -13,8 +13,11 @@ corrupting state.
 ```ts
 import { produce } from 'valsem';
 
+type Todo = { id: number; text: string; done: boolean };
+declare const state: { todos: Todo[]; filter: string };
+
 const next = produce(state, (d) => { d.todos[0].done = true; });
-next.todos.push(todo); // TypeError: Cannot add property 1, object is not extensible
+next.todos.push({ id: 2, text: 'write docs', done: false }); // TypeError: Cannot add property 1, object is not extensible
 ```
 
 **Ergonomic.** An immer-shaped recipe API: mutate a draft, get a new value,
@@ -23,6 +26,10 @@ with structural sharing. `produceWithPatches`, `applyPatches`, `current`,
 patches, draft lifetimes — is tabled under [Coming from immer](#coming-from-immer).
 
 ```ts
+import { produce } from 'valsem';
+
+declare const state: { todos: { id: number; text: string; done: boolean }[]; filter: string };
+
 const next = produce(state, (d) => {
   d.todos.push({ id: 2, text: 'write docs', done: false });
   d.filter = 'active';
@@ -48,13 +55,17 @@ change:
 ```ts
 import { intern, memoize, HashMap } from 'valsem';
 
+type Todo = { id: number; text: string; done: boolean };
+declare const state: { todos: Todo[] };
+declare const previousUsers: unknown;
+
 const users = intern(await (await fetch('/api/users')).json());
 users === previousUsers;                       // true whenever the content is unchanged → React.memo hits
 
-const visible = memoize((todos, filter) => todos.filter(matches(filter)));
+const visible = memoize((todos: Todo[], filter: { done: boolean }) => todos.filter((t) => t.done === filter.done));
 visible(state.todos, { done: false });         // a fresh filter literal still hits: same value, same result
 
-const cache = new HashMap<Query, Response>();
+const cache = new HashMap<{ page: number; path: string }, Response>();
 cache.get({ page: 2, path: '/users' });        // hits the entry stored under { path: '/users', page: 2 }
 ```
 
@@ -80,9 +91,13 @@ canonical keys, `memoize` hits, and hashing, which is a cached property read.
 ```ts
 import { fastEqual, HashMap } from 'valsem';
 
+type State = { todos: unknown[] };
+type Derived = { visible: unknown[] };
+declare const current: State, saved: State;
+
 fastEqual(current, saved);            // a pointer compare, at any size
 const derived = new HashMap<State, Derived>();
-derived.get(state);                    // a native Map lookup plus one probe — the key is canonical, so === is value equality
+derived.get(current);                  // a native Map lookup plus one probe — the key is canonical, so === is value equality
 ```
 
 What is *not* fast is building: every value is hashed and canonicalised when
@@ -153,6 +168,10 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Async recipes | silently wrong | rejected with an error |
 
 ```ts
+import { produce } from 'valsem';
+
+declare const state: { todos: { id: number; text: string; done: boolean }[]; filter: string };
+
 const next = produce(state, (d) => {
   d.todos.push({ id: 2, text: 'write docs', done: false });
   d.filter = 'active';
@@ -200,6 +219,7 @@ intern({ a: 1, b: [2, 3] }) === intern({ b: [2, 3], a: 1 }); // true
 Object.isFrozen(intern({ a: 1 }));                            // true
 
 // …so deepEqual on canonical values is a pointer compare, at any size:
+declare const bigTree: object, otherBigTree: object;
 deepEqual(intern(bigTree), intern(otherBigTree)); // O(1) if either is canonical
 ```
 
@@ -208,7 +228,7 @@ canonical too — edits that net out converge back to the very same base
 object:
 
 ```ts
-import { produce, ValueList } from 'valsem';
+import { intern, produce, ValueList } from 'valsem';
 
 const state = intern({ count: 1, todos: ValueList.of('a') });
 const next = produce(state, (draft) => {
@@ -224,6 +244,8 @@ Things that can change after construction are not values, and valsem says so
 rather than guessing:
 
 ```ts
+import { deepEqual, intern } from 'valsem';
+
 intern({ at: new Date() });
 // TypeError: intern: Date cannot be interned — valsem gives value semantics to
 // immutable values only, and a Date can be re-timed with setTime(). Use
@@ -251,6 +273,8 @@ ValueSet.from([1, 2, 3]) === ValueSet.from([3, 2, 1]);       // true — order i
 OrderedMap.from([['a', 1], ['b', 2]]) === OrderedMap.from([['b', 2], ['a', 1]]); // false — here it is
 ValueList.of(1, 2, 3) === ValueList.empty<number>().pushed(1).pushed(2).pushed(3); // true
 
+type Row = { name: string };
+declare const row: Row;
 const cache = new HashMap<{ table: string; id: number }, Row>();
 cache.set({ table: 'users', id: 1 }, row);
 cache.get({ id: 1, table: 'users' });                        // row — mutable map, keyed by value
