@@ -2076,6 +2076,29 @@ nothing a patch can hold, and falling back to the net diff for that one
 container would make the patch vocabulary depend on what passed through.
 Raised by the 1.0.0 review; throwing is fine. **Cost.** None new.
 
+### D67. The `[interned]` marker check reads "plain" as this realm's
+
+The marker counts on class instances only, so an own `[interned]: true` on
+a record or an array cannot forge canonicality. The check that rules out
+plain data reads one prototype and compares it with this realm's
+`Object.prototype` and with `null`; another realm's `Object.prototype` is
+recognised everywhere else (`deepEqual`, `deepHash`, the slow path of
+`intern`, drafts), but not here.
+
+**Why.** The marker check runs first on every `intern`, every collection
+lookup and every walk that meets a canonical collection. Recognising a
+foreign `Object.prototype` there costs every class instance a second
+prototype read and a call, because a class prototype fails the identity
+checks too: about 10 ns, which made a `HashMap` lookup on a `ValueList` key
+45% slower in 0.1.0 than in 0.0.4 (reported from stifinder). Plain data
+never reached it, since its marker read finds nothing. What the check lets
+through is another realm's record carrying `Symbol.for('valsem.interned.v1')`
+as an own key: no JSON or structured clone writes a symbol key, so only
+code can, and code can mark a class just as well (the same in-process
+forgery as `Object.create(ValueList.prototype)`). **Cost.** That record is
+taken at its word: `intern` returns it unfrozen and `isCanonical` says
+`true`. Pinned by a test in `cross-realm.test.ts`.
+
 ## Non-goals
 
 Permanently out of scope: mutable built-ins as values; cycle support; wire

@@ -349,6 +349,16 @@ describe('forged canonicality, beyond records', () => {
     expect(produce(intern({ a: [0] }), (d) => void (d.a = arr)).a).toBe(c); // adopted, not passed through
   });
 
+  it('an own [interned] on a null-prototype record is a key too', () => {
+    const o = Object.assign(Object.create(null) as Record<string | symbol, unknown>, { x: 1, [interned]: true });
+    expect(isCanonical(o)).toBe(false);
+    const c = intern(o);
+    expect(c).not.toBe(o);
+    expect(Object.isFrozen(c)).toBe(true);
+    expect(c).toBe(intern({ x: 1, [interned]: true }));
+    expect(deepEqual(o, { x: 1 })).toBe(false); // the symbol key is part of the content
+  });
+
   it("a value type's private constructor holds at runtime: nothing claims canonicality around the pool", () => {
     const Date_ = ValueDate as unknown as new (...args: unknown[]) => unknown;
     expect(() => new Date_(1000)).toThrow(/ValueDate\.from/);
