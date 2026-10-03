@@ -19,7 +19,7 @@
 import { same, inspectAs, DRAFT_STATE, _setDraftValue, _recipes, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
-import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord, _isPlainData } from './deep-equal.js';
+import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord, _isPlainDataHere } from './deep-equal.js';
 
 /**
  * Symbol under which a draftable type exposes its draft factory.
@@ -409,7 +409,7 @@ function snapshotForeign(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (
     _hashCacheHas(value) ||
-    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainData(value))
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainDataHere(value))
   ) {
     return value; // canonical: cannot contain a draft
   }
@@ -460,7 +460,7 @@ export function adopt(value: unknown): unknown {
   // plain data and pooled value-type instances.
   if (
     _hashCacheHas(value) ||
-    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainData(value))
+    ((value as Record<symbol, unknown>)[internedMarker] === true && !_isPlainDataHere(value))
   ) {
     return value;
   }
