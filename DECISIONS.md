@@ -678,18 +678,34 @@ taken before 1.0: a class implements `[hash]`, and one that carried a
 `[hashCode]` only on a class with `[hash]`, read off the prototype the
 class path already holds (a second `getPrototypeOf` there cost 10 ns on
 every hash of a canonical collection, and was found by the benchmark), and
-`deepEqual`'s pre-filter trusts it on the same condition. Measured
-(2026-10-15, M-series laptop, Node 26): `deepHash` of a canonical
-collection 75–80 → 66–72 ns, since the class path now makes one prototype
-read where it made two; `intern` of a value-class instance on par (323 vs
-320–328 ns), the hash having moved from the constructor into `[hash]`;
-`pool.intern` +10 ns (97 → 109), its own prototype read and call; every
-`HashMap` get, `deepEqual` pre-filter, record and primitive hash unchanged;
-the collections' build, push and edit rows within the harness's own
-run-to-run spread, which exceeds any difference between the builds. The
-bundle grows: +753 B gzipped on the `intern` entry (6.8 → 7.5 KB, +11%)
-and +1.2 KB on everything (32.2 → 33.4 KB, +3.6%), the walk under a hasher
-and the protocol's messages. **Rejected:** a separate export for the walk,
+`deepEqual`'s pre-filter trusts it on the same condition. The walk is
+one function of the hasher, recursing through `deepHash` itself: which
+leaf function is called, where a remembered hash is looked for, whether
+`[hashCode]` is read and whether the result is remembered are each one
+comparison a level. Measured (2026-10-15, M-series laptop, Node 26), the
+one walk against `main`: `deepHash` of a primitive 6 → 9 ns and of a string
+23 → 30, the function's own shape (every call removed from the active path
+— the hasher lookup, the memory probe, the leaf indirection, a wrapper —
+left the 2.5 ns where it was); `deepHash` of a canonical collection 75–80 →
+66–70 ns and of a pool-stamped instance 85–88 → 69, since the class path
+now makes one prototype read where it made two; `intern` of a value-class
+instance on par (323–328 vs 323–328), the hash having moved from the
+constructor into `[hash]`; `pool.intern` +10 ns (94–102 → 103–115), its
+own prototype read and call; every `HashMap` and `ValueMap` get, the
+`deepEqual` pre-filter and the hash of a raw record unchanged; the
+collections' build, push and edit rows within the harness's own run-to-run
+spread, which exceeds any difference between the builds. The bundle grows:
++615 B gzipped on the `intern` entry (6.8 → 7.4 KB, +9%) and +1.1 KB on
+everything (32.2 → 33.3 KB, +3.4%), the walk's hasher parameter, the
+collections' hashes under a hasher, and the protocol's messages; bundle
+size is a priority for the library, and this is the smallest the feature
+measured at. **Rejected:** a second copy of the walk for the active hasher,
+the first form of this entry's PR, taken so that the hot path could not
+regress before it could be benchmarked. Benchmarked, it saved the 2.5 ns on
+a primitive hash and nothing on any operation built from one, and cost a
+duplicated dispatch — every change to how a class, a draft or a symbol
+hashes owed twice — and 140 B gzipped on the `intern` entry. **Rejected:** a
+separate export for the walk,
 so that `deepHash` does not reach it and a consumer who never hashes under
 a hasher does not bundle it: it recovers 370 B gzipped, and only for a
 bundle with no collection in it, since every collection's `[hash]` is a

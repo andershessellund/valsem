@@ -195,28 +195,31 @@ export function createMarvin32Hasher(k0: number, k1: number): Hasher {
 // ---------------------------------------------------------------------------
 
 let configured = false;
-let hashed = false; // has any leaf been hashed yet? (configureHasher's ordering guard)
-let active: Hasher = createMarvin32Hasher(SEED[0]!, SEED[1]!);
+/** @internal Has any leaf been hashed yet? (configureHasher's ordering guard.) A live binding, read by the walk. */
+export let _hashed = false;
+/** @internal The active hasher, as an object. A live binding, read by the walk; `_activeHasher()` is the armed read. */
+export let _active: Hasher = createMarvin32Hasher(SEED[0]!, SEED[1]!);
 
 // The exported leaf functions start as one-shot trampolines: the first call
 // records that hashing has begun (so a later configureHasher is rejected),
 // rebinds both live bindings to the active hasher's functions, and delegates.
 // Every subsequent call goes straight to the hasher — the ordering guard
 // costs nothing on the hot path.
-function arm(): void {
-  hashed = true;
-  hashString = active.string;
-  hashNumber = active.number;
+/** @internal Hashing has begun: rebind the leaf trampolines and refuse `configureHasher` from here on. Called by the first leaf hash, and by `deepHash`'s entry. */
+export function _arm(): void {
+  _hashed = true;
+  hashString = _active.string;
+  hashNumber = _active.number;
 }
 
 /** @internal Active string-leaf hash. Rebound by {@link configureHasher}. */
 export let hashString: (s: string) => number = (s) => {
-  arm();
+  _arm();
   return hashString(s);
 };
 /** @internal Active number-leaf hash. Rebound by {@link configureHasher}. */
 export let hashNumber: (n: number) => number = (n) => {
-  arm();
+  _arm();
   return hashNumber(n);
 };
 
@@ -227,13 +230,13 @@ export let hashNumber: (n: number) => number = (n) => {
  * what the callee computes with it is baked into a value.
  */
 export function _activeHasher(): Hasher {
-  if (!hashed) arm();
-  return active;
+  if (!_hashed) _arm();
+  return _active;
 }
 
 /** @internal Is `hasher` the active one? Asked by `deepHash(value, hasher)` to take the baked-in path; asking does not arm. */
 export function _isActive(hasher: Hasher): boolean {
-  return hasher === active;
+  return hasher === _active;
 }
 
 /**
@@ -265,7 +268,7 @@ export function configureHasher(hasher: Hasher): void {
   if (configured) {
     throw new Error('valsem: configureHasher() may only be called once.');
   }
-  if (hashed) {
+  if (_hashed) {
     throw new Error(
       'valsem: configureHasher() must run before any value is hashed or interned — ' +
         'a hash has already been computed in this process. Call it at startup, ' +
@@ -273,5 +276,5 @@ export function configureHasher(hasher: Hasher): void {
     );
   }
   configured = true;
-  active = hasher;
+  _active = hasher;
 }
