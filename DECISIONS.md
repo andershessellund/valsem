@@ -675,12 +675,26 @@ would be the active hash, silently, exactly where a caller asked for
 something else. **Cost.** A breaking change to the extension protocol,
 taken before 1.0: a class implements `[hash]`, and one that carried a
 `[hashCode]` of its own is refused until it does. `deepHash` reads
-`[hashCode]` only on a class with `[hash]`, one prototype read more on the
-collections' path, and `deepEqual`'s pre-filter trusts it on the same
-condition. The active-hasher path is otherwise unchanged — the walk under
-another hasher is a separate function reached by one comparison — but was
-not benchmarked for this entry's PR (the maintainer's machine was
-unavailable); the benchmark is owed before 1.0. The built-in collections are slower under a non-active
+`[hashCode]` only on a class with `[hash]`, read off the prototype the
+class path already holds (a second `getPrototypeOf` there cost 10 ns on
+every hash of a canonical collection, and was found by the benchmark), and
+`deepEqual`'s pre-filter trusts it on the same condition. Measured
+(2026-10-15, M-series laptop, Node 26): `deepHash` of a canonical
+collection 75–80 → 66–72 ns, since the class path now makes one prototype
+read where it made two; `intern` of a value-class instance on par (323 vs
+320–328 ns), the hash having moved from the constructor into `[hash]`;
+`pool.intern` +10 ns (97 → 109), its own prototype read and call; every
+`HashMap` get, `deepEqual` pre-filter, record and primitive hash unchanged;
+the collections' build, push and edit rows within the harness's own
+run-to-run spread, which exceeds any difference between the builds. The
+bundle grows: +753 B gzipped on the `intern` entry (6.8 → 7.5 KB, +11%)
+and +1.2 KB on everything (32.2 → 33.4 KB, +3.6%), the walk under a hasher
+and the protocol's messages. **Rejected:** a separate export for the walk,
+so that `deepHash` does not reach it and a consumer who never hashes under
+a hasher does not bundle it: it recovers 370 B gzipped, and only for a
+bundle with no collection in it, since every collection's `[hash]` is a
+prototype method that reaches the walk for its children; a second name for
+one operation is not worth that. The built-in collections are slower under a non-active
 hasher than the field read they serve the active one from: a walk with a
 `WeakMap` probe per node on the first hash, one probe on the second. A
 `RawArray` and a unique symbol hash by an identity, which no key makes

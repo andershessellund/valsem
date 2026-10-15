@@ -26,7 +26,7 @@
 // not add to it: it is a separate function, reached by one comparison.
 // ---------------------------------------------------------------------------
 
-import { hashCode, _recordKeys, _ctorOf, _protocolHash, _isPlainRecord } from './deep-equal.js';
+import { hash, hashCode, _recordKeys, _ctorOf, _protocolHash, _isPlainRecord } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype, _isTemporalType } from './deep-equal.js';
 import { hashString, hashNumber, mix, _activeHasher, _isActive, _remembering, type Hasher, type Remembering } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
@@ -359,13 +359,17 @@ function hashObjectValue(obj: object): number {
     // per deepHash. A [hashCode] on a class WITHOUT [hash] is not read: it
     // was a declaration once, and is refused now, since a number computed
     // any other way is one the hasher valsem interns with never saw.
-    const ctor = _ctorOf(obj);
+    // One prototype read serves all three lookups: the constructor, [hash]
+    // and (through the chain) [hashCode]. A second `getPrototypeOf` here
+    // cost 10 ns on every hash of a canonical collection.
+    const c = (proto as { constructor?: unknown }).constructor;
+    const ctor = typeof c === 'function' ? c : undefined;
     if (_mutableBuiltinReason(ctor) !== undefined) throw new TypeError(unhashableMessage(obj));
-    const hf = _protocolHash(obj);
-    if (hf !== undefined) {
+    const hf = (proto as Record<symbol, unknown>)[hash];
+    if (typeof hf === 'function') {
       const hc = (obj as any)[hashCode];
       if (typeof hc === 'number') return hc >>> 0;
-      return hf.call(obj, _activeHasher()) >>> 0;
+      return (hf as (this: unknown, hasher: Hasher) => number).call(obj, _activeHasher()) >>> 0;
     }
     const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
     if (handler) return handler(obj, _activeHasher()) >>> 0; // a uint32, as the [hash] path above: handlers may return anything
