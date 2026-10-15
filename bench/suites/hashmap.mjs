@@ -1,14 +1,16 @@
 import { timeSettled, row } from '../lib.mjs';
 import { HashMap } from '../../dist/hash-map.js';
 import { intern } from '../../dist/intern.js';
+import { ValueList } from '../../dist/value-list.js';
 
 export default {
   id: 'hashmap',
   title: 'HashMap — against a native Map',
   description: `
 \`HashMap\` is a native \`Map\` keyed by canonical values: every key is interned on the way in, on \`set\` and on every
-lookup. For a canonical key that is one cache probe over the native lookup; for a raw key it is a pool lookup (hash
-and compare), and a copy into the pool when the key is new. Rows are hits on a 4,096-entry map unless marked. The
+lookup. For a canonical key that is one cache probe over the native lookup, and for a collection key (a canonical
+\`ValueList\`, \`ValueMap\`, ...) a marker check instead; for a raw key it is a pool lookup (hash and compare), and a copy
+into the pool when the key is new. Rows are hits on a 4,096-entry map unless marked. The
 native \`Map\` column is the same map with keys interned beforehand — the escape hatch for the last nanoseconds.
 `,
   columns: ['HashMap', 'native Map'],
@@ -20,6 +22,10 @@ native \`Map\` column is the same map with keys interned beforehand — the esca
     const h = fill(new HashMap()), n = fill(new Map());
     const it = 300_000;
     rows.push(row('get, canonical object key', { HashMap: await timeSettled((i) => h.get(keys[i & 4095]), it), 'native Map': await timeSettled((i) => n.get(keys[i & 4095]), it) }));
+    const lists = keys.map((_, i) => ValueList.from([i, i + 1, i + 2]));
+    const hl = new HashMap(), nl = new Map();
+    for (let i = 0; i < lists.length; i++) { hl.set(lists[i], i); nl.set(lists[i], i); }
+    rows.push(row('get, collection key (a ValueList)', { HashMap: await timeSettled((i) => hl.get(lists[i & 4095]), it), 'native Map': await timeSettled((i) => nl.get(lists[i & 4095]), it) }));
     rows.push(row('get, primitive key', { HashMap: await timeSettled((i) => h.get(i & 4095), it), 'native Map': await timeSettled((i) => n.get(i & 4095), it) }));
     rows.push(row('set, existing canonical key', { HashMap: await timeSettled((i) => h.set(keys[i & 4095], i), it), 'native Map': await timeSettled((i) => n.set(keys[i & 4095], i), it) }));
     rows.push(row('get, raw 2-key object (interned first; a native Map misses)', { HashMap: await timeSettled((i) => h.get({ table: 'users', id: i & 4095 }), it), 'native Map': null }));

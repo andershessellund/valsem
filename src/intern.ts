@@ -30,7 +30,7 @@ import {
   _missingValueSemantics,
   _protocolEquals,
   _mutableBuiltinReason,
-  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainData, _isForeignObjectPrototype } from './deep-equal.js';
+  _setCanonicalProbe, _recordKeys, _defineRecordField, _ctorOf, _isPlainDataHere, _isForeignObjectPrototype } from './deep-equal.js';
 import { createInternPool, _poolStats } from './intern-pool.js';
 import { same, _undraft } from './shared.js';
 import { _depthError, _maxDepth } from './limits.js';
@@ -69,7 +69,7 @@ export function isCanonical(value: unknown): boolean {
   if (value === null || typeof value !== 'object') return typeof value !== 'function';
   return (
     _metaOf(value) !== undefined ||
-    ((value as Record<symbol, unknown>)[internedSym] === true && !_isPlainData(value))
+    ((value as Record<symbol, unknown>)[internedSym] === true && !_isPlainDataHere(value))
   );
 }
 
@@ -185,7 +185,7 @@ export function intern<T>(value: T): T {
 
   // Persistent collections / opt-in classes mark themselves canonical —
   // class instances only; on a plain record the symbol is an ordinary key.
-  if ((obj as any)[internedSym] === true && !_isPlainData(obj)) return value;
+  if ((obj as any)[internedSym] === true && !_isPlainDataHere(obj)) return value;
 
   // Already interned via the legacy WeakMap path — fast path.
   if (_metaOf(obj) !== undefined) return value;

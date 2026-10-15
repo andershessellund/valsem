@@ -301,8 +301,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   // protocol symbol is an ordinary key, so an own `[interned]: true` on a
   // record cannot forge canonicality.)
   if (
-    ((a as Record<symbol, unknown>)[interned] === true && !_isPlainData(a)) ||
-    ((b as Record<symbol, unknown>)[interned] === true && !_isPlainData(b))
+    ((a as Record<symbol, unknown>)[interned] === true && !_isPlainDataHere(a)) ||
+    ((b as Record<symbol, unknown>)[interned] === true && !_isPlainDataHere(b))
   ) {
     return false;
   }
@@ -613,14 +613,29 @@ export function _isPlainRecord(obj: object): boolean {
 }
 
 /**
- * @internal Plain data — a record or an array: the two shapes whose content
- * is their own properties, where a protocol symbol is a key (a record) or
- * dropped (an array), never the protocol. The `[interned]` marker is read
- * off class instances only; checked here so that an own `[interned]: true`
- * on an array cannot forge canonicality any more than on a record.
+ * @internal Plain data of THIS realm — a record or an array: the two shapes
+ * whose content is their own properties, where a protocol symbol is a key (a
+ * record) or dropped (an array), never the protocol. The `[interned]` marker
+ * is read off class instances only; checked here so that an own
+ * `[interned]: true` on an array or a record cannot forge canonicality.
+ *
+ * Only for that marker check, which runs first on every `intern`, every
+ * collection lookup and every walk that meets a canonical collection. It
+ * reads one prototype: {@link _isPlainRecord} takes a second for every class
+ * instance, to rule out another realm's `Object.prototype`, and that read was
+ * the whole regression of a lookup on a canonical collection key (D67). What
+ * this lets through, another realm's record carrying valsem's marker as an
+ * own key, only code can write, and code can mark a class just as well.
+ *
+ * Not done: re-reading the marker in here, before the prototype, lets V8 learn
+ * the marked classes and fold the prototype read. That pays while one
+ * collection type dominates (a `ValueList` key, 30 → 13 ns) and costs once
+ * several meet here (39 → 48 ns, near the cost this replaced).
  */
-export function _isPlainData(obj: object): boolean {
-  return Array.isArray(obj) || _isPlainRecord(obj);
+export function _isPlainDataHere(obj: object): boolean {
+  if (Array.isArray(obj)) return true;
+  const proto = Object.getPrototypeOf(obj);
+  return proto === Object.prototype || proto === null;
 }
 
 /**
