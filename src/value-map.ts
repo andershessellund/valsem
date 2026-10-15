@@ -22,7 +22,7 @@ import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned
 import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { _hashWith, _pairTerm } from './deep-hash.js';
-import { mix, _cacheOf, _isActive, type Hasher } from './hasher.js';
+import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createMapDraft, type MapState } from './draft-map.js';
 import {
@@ -93,9 +93,9 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
    */
   [hashSym](hasher: Hasher): number {
     if (_isActive(hasher)) return this.#hash;
-    const cache = _cacheOf(hasher);
-    const acc = trieSum(this.#root, CFG.stride, cache, (slots, i) =>
-      _pairTerm(_hashWith(slots[i], hasher, cache), _hashWith(slots[i + 1], hasher, cache)),
+    const under = _remembering(hasher);
+    const acc = trieSum(this.#root, CFG.stride, under, (slots, i) =>
+      _pairTerm(_hashWith(slots[i], under), _hashWith(slots[i + 1], under)),
     );
     return mix(mix(TAG, this.#root.n), acc);
   }

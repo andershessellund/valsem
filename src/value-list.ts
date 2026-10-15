@@ -33,7 +33,7 @@ import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
 import { _hashWith } from './deep-hash.js';
-import { mix, _cacheOf, _isActive, type Hasher, type HashCache } from './hasher.js';
+import { mix, _isActive, _remembering, type Hasher, type Remembering } from './hasher.js';
 import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, spliceArgs, _undraft } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
@@ -122,30 +122,29 @@ function power(p: number, n: number): number {
   return r;
 }
 
-/** The polynomial of the elements under `node`, remembered in `cache`. */
-function nodeHashUnder(node: CNode, hasher: Hasher, cache: HashCache, P: number): number {
-  const hit = cache.get(node);
+/** The polynomial of the elements under `node`, which the hasher remembers. */
+function nodeHashUnder(node: CNode, hasher: Remembering, P: number): number {
+  const hit = hasher.recall(node);
   if (hit !== undefined) return hit;
   let h = 0;
   const kids = node.kids;
   if (node.ht === 1) {
-    for (let i = 0; i < kids.length; i++) h = (Math.imul(h, P) + _hashWith(kids[i], hasher, cache)) >>> 0;
+    for (let i = 0; i < kids.length; i++) h = (Math.imul(h, P) + _hashWith(kids[i], hasher)) >>> 0;
   } else {
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i] as CNode;
-      h = (Math.imul(h, power(P, k.n)) + nodeHashUnder(k, hasher, cache, P)) >>> 0;
+      h = (Math.imul(h, power(P, k.n)) + nodeHashUnder(k, hasher, P)) >>> 0;
     }
   }
-  cache.set(node, h);
+  hasher.remember(node, h);
   return h;
 }
 
 /** The hash under `hasher` of the list whose closed runs are `root` and whose open run is `tail`. */
-function listHashUnder(root: CNode | null, tail: readonly unknown[], hasher: Hasher): number {
-  const cache = _cacheOf(hasher);
+function listHashUnder(root: CNode | null, tail: readonly unknown[], hasher: Remembering): number {
   const P = baseOf(hasher);
-  let h = root === null ? 0 : nodeHashUnder(root, hasher, cache, P);
-  for (let i = 0; i < tail.length; i++) h = (Math.imul(h, P) + _hashWith(tail[i], hasher, cache)) >>> 0;
+  let h = root === null ? 0 : nodeHashUnder(root, hasher, P);
+  for (let i = 0; i < tail.length; i++) h = (Math.imul(h, P) + _hashWith(tail[i], hasher)) >>> 0;
   return mix(mix(TAG, (root === null ? 0 : root.n) + tail.length), h);
 }
 
@@ -447,7 +446,7 @@ export class ValueList<T> implements Iterable<T> {
   }
   /** The hash under `hasher`: a polynomial of the elements' hashes, folded per consed node and remembered in the hasher's cache, so a push costs the open run (see `listHashUnder`). */
   [hashSym](hasher: Hasher): number {
-    return _isActive(hasher) ? this.#hash : listHashUnder(this.#root, this.#tail, hasher);
+    return _isActive(hasher) ? this.#hash : listHashUnder(this.#root, this.#tail, _remembering(hasher));
   }
   get [internedSym](): true {
     return true;

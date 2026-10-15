@@ -11,7 +11,7 @@ import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned
 import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, noInitial } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { _hashWith, _pairTerm } from './deep-hash.js';
-import { mix, _cacheOf, _isActive, type Hasher } from './hasher.js';
+import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createSetDraft, type SetState } from './draft-set.js';
 import {
@@ -105,8 +105,8 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   /** The hash under `hasher`: the order-independent sum of the members' terms, folded per trie node and remembered in the hasher's cache (see `ValueMap`). */
   [hashSym](hasher: Hasher): number {
     if (_isActive(hasher)) return this.#hash;
-    const cache = _cacheOf(hasher);
-    const acc = trieSum(this.#root, CFG.stride, cache, (slots, i) => _pairTerm(TAG, _hashWith(slots[i], hasher, cache)));
+    const under = _remembering(hasher);
+    const acc = trieSum(this.#root, CFG.stride, under, (slots, i) => _pairTerm(TAG, _hashWith(slots[i], under)));
     return mix(mix(TAG, this.#root.n), acc);
   }
   /** The canonical-type marker: every instance is canonical by construction. */

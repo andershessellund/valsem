@@ -14,7 +14,7 @@
 import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
 import { _hashWith } from './deep-hash.js';
-import { mix, _cacheOf, _isActive, type Hasher } from './hasher.js';
+import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
 import { same, atIndex, entryOf, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
@@ -73,8 +73,8 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   /** The hash under `hasher`, from the two lists' hashes under it, as the active one is from theirs. */
   [hashSym](hasher: Hasher): number {
     if (_isActive(hasher)) return this.#hash;
-    const cache = _cacheOf(hasher);
-    return mix(mix(SEED, _hashWith(this.#keys, hasher, cache)), _hashWith(this.#vals, hasher, cache));
+    const under = _remembering(hasher);
+    return mix(mix(SEED, _hashWith(this.#keys, under)), _hashWith(this.#vals, under));
   }
   get [internedSym](): true {
     return true;

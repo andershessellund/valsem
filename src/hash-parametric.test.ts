@@ -379,6 +379,45 @@ describe('reproducibility', () => {
   });
 });
 
+describe('the memory is the hasher\'s own', () => {
+  it('a hasher without one is refused, naming what makes one', () => {
+    const bare: Hasher = { string: h1.string, number: h1.number };
+    expect(() => deepHash({ a: 1 }, bare)).toThrow(/must remember what it hashes \(recall and remember\).*createMarvin32Hasher/);
+    expect(() => deepHash(ValueList.of(1), bare)).toThrow(/recall and remember/);
+    expect(() => deepHash(1, bare)).toThrow(/recall and remember/); // the contract is the hasher's, whatever the value
+    // The active walk never asks for one: a bare hasher is what `configureHasher` takes.
+    expect(typeof bare.recall).toBe('undefined');
+  });
+
+  it('is asked before a walk and told after, for what cannot change, and however the hasher keeps it', () => {
+    // A hasher that remembers in a Map of its own, counting: valsem does not
+    // know or care that it is not a WeakMap.
+    const kept = new Map<object, number>();
+    let recalls = 0;
+    const counting: Hasher = {
+      string: h1.string,
+      number: h1.number,
+      recall: (obj) => {
+        recalls++;
+        return kept.get(obj);
+      },
+      remember: (obj, hash) => void kept.set(obj, hash),
+    };
+    const list = ValueList.from(Array.from({ length: 100 }, (_, i) => ({ i })));
+    const first = deepHash(list, counting);
+    expect(first).toBe(deepHash(list, h1)); // the key is what decides the hash, not the memory
+    expect(kept.size).toBeGreaterThan(100); // the elements, canonical records, and the list's nodes
+    const asked = recalls;
+    expect(deepHash(list, counting)).toBe(first);
+    expect(recalls - asked).toBe(1); // the second hash is one recall: the root's
+    // A raw record is not remembered: it may change.
+    const raw = { a: [1, 2] };
+    deepHash(raw, counting);
+    expect(kept.has(raw)).toBe(false);
+    expect(kept.has(raw.a)).toBe(false);
+  });
+});
+
 describe('incrementality', () => {
   it('a ValueList hashed after each of 20,000 pushes costs what the pushes do, not their square', () => {
     const hasher = createMarvin32Hasher(1, 2);

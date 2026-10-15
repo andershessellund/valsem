@@ -216,9 +216,13 @@ class instance through its `[hash](hasher)`, so the companion invariant
 holds under it too. Nothing baked into a canonical object or a consed node
 is under such a hasher, so it is a walk, not a cache read; what cannot
 change — canonical plain data, value-type instances, the collections'
-nodes — is remembered in a weak cache per hasher (kept beside the hasher,
-keyed by it weakly), so shared structure is hashed once per hasher and a
-value one edit away from one already hashed costs the edit. The
+nodes — the hasher remembers, itself: `Hasher` has `recall(obj)` and
+`remember(obj, hash)`, which the walk asks before an object and tells
+after, and which the hashers `createMarvin32Hasher` makes keep in a
+`WeakMap`; a hasher given to `deepHash` without them is refused, naming
+the factory. So shared structure is hashed once per hasher and a value
+one edit away from one already hashed costs the edit, and how a hasher
+remembers is its own business. The
 collections' hashes under it must not read their shape, which follows the
 active hasher's seed and so the process: a `ValueMap` or `ValueSet` sums
 its entries' terms, commutatively, per trie node; a `ValueList` folds the

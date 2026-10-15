@@ -595,8 +595,11 @@ it on the instance), and the number a class may still carry precomputed in
 place of `[hash]`, which makes it a value as before but one that hashes
 under the active hasher only; `deepHash(instance, hasher)` throws for such
 a class, and for a registered `hashFn` of one parameter, naming the fix. A
-hasher other than the active one remembers what it has hashed, weakly, in a
-cache of its own, kept beside the hasher rather than on it, and only for
+hasher other than the active one remembers what it has hashed, itself:
+`Hasher` has `recall(obj)` and `remember(obj, hash)`, optional, since the
+active hasher's are never called and `configureHasher` takes a bare pair;
+`deepHash(value, hasher)` refuses a hasher without them, naming
+`createMarvin32Hasher`, whose hashers keep a `WeakMap`. Remembered is only
 what cannot change: canonical plain data, value-type instances, and the
 collections' consed nodes.
 
@@ -607,12 +610,15 @@ replayable choice made from the hash of a state, the same choice in every
 run, with the hash of a long `ValueList` staying incremental as the state
 grows. The protocol gives it without a second hash on every value: one
 method serves every hasher, the active one included, so the cost to a
-class author is a parameter. The cache is per hasher because nothing baked
-into a value is under any hasher but the active one, and it caches only
-the immutable, since a hash under any hasher is a promise about content
-that does not change. It sits beside the hasher, found through it weakly,
-so that a `Hasher` stays the pair of functions it always was and a dropped
-hasher takes its table with it. The collections' hashes under a hasher are
+class author is a parameter. The memory is the hasher's because nothing
+baked into a value is under any hasher but the active one, so each hasher
+must remember for itself, and it remembers only the immutable, since a
+hash under any hasher is a promise about content that does not change. It
+is the hasher's own, behind two methods, so that valsem's walk and the
+collections ask and tell and never know how it is kept — a `WeakMap` in
+the hashers valsem makes, so a dropped value takes its entry and a dropped
+hasher its memory; anything else in a hasher of the caller's. The
+collections' hashes under a hasher are
 shape-free by construction — a commutative sum per trie node, a polynomial
 per list node, composable whatever the node's position — because a trie's
 branching and a list's chunk boundaries follow the active hasher's seed,
@@ -634,9 +640,14 @@ the top level only, with children rehashed from scratch: O(n) per hash of a
 list of n, and quadratic along a chain of pushes, which is the cost D18's
 consed nodes exist to avoid; the per-node cache keeps a push at O(1) under
 a hasher used consistently (40,000 pushes with a hash after each: 44 ms).
-**Rejected:** the cache as a member of `Hasher`. Every custom hasher given
-to `configureHasher` would then have to carry one, a breaking change to
-that interface for a table the hasher never reads. **Rejected:** reading
+**Rejected:** a `WeakMap` from hasher to cache kept by valsem beside the
+hasher, the first form of this entry's PR, so that `Hasher` could stay the
+bare pair. It cost one probe per call, which was nothing, and it leaked
+the mechanism: a cache type and a lookup threaded through every
+collection's `[hash]`, each knowing the memory was a `WeakMap` and where
+to find it, for a hasher that never used one. Two optional methods give
+the hasher the memory without asking anything of a hasher that only
+buckets. **Rejected:** reading
 `[hashCode]` under another hasher when `[hash]` is absent, as a
 best-effort answer: it would be the active hash, silently, exactly where a
 caller asked for something else. **Cost.** A breaking change to the

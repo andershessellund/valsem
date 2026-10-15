@@ -43,7 +43,9 @@ environment that meets the [feature floor](/guide/requirements).
 
 ### A hasher of your own
 
-`deepHash(value, hasher)` hashes under any `Hasher`, and
+`deepHash(value, hasher)` hashes under any `Hasher` that remembers what it
+hashes (`recall` and `remember`, which the hashers `createMarvin32Hasher`
+makes have, and a bare pair for `configureHasher` need not), and
 `createMarvin32Hasher(k0, k1)` built on constants is one under which the
 same value hashes the same in every process — a fingerprint you can
 compare across runs, or the seed of a choice that must replay. That is the

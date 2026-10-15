@@ -19,14 +19,16 @@
 // Hashing is parametric in the hasher: `deepHash(value, hasher)` hashes under
 // any Hasher, not only the active one, through the same combiners and the
 // `[hash](hasher)` protocol method of every value class. Nothing baked into a
-// canonical object or a consed node is under such a hasher, so each one gets
-// a weak cache of its own (`_cacheOf`), kept here beside the hasher rather
-// than on it: a Hasher stays the pair of functions it always was, and what
-// valsem remembers under it is valsem's business.
+// canonical object or a consed node is under such a hasher, so a hasher used
+// that way remembers, itself, the hash under it of what cannot change
+// (`recall`/`remember`): how it remembers is its own business, and the
+// hashers made here keep a WeakMap.
 // ---------------------------------------------------------------------------
 
 /**
- * A pluggable pair of seeded leaf-hash primitives (string / number → uint32).
+ * A pluggable pair of seeded leaf-hash primitives (string / number → uint32),
+ * and, for a hasher used with `deepHash(value, hasher)`, a memory of what it
+ * has hashed.
  *
  * Implementations MUST treat `-0` as `+0` so the companion invariant
  * `deepEqual(a, b) ⟹ deepHash(a) === deepHash(b)` holds. The ACTIVE hasher
@@ -37,33 +39,44 @@
  * `deepHash(value, hasher)`, and for that reason is NOT flood-resistant:
  * never bucket untrusted data by it, and never install it as the active
  * hasher of a process that ingests any.
+ *
+ * `recall` and `remember` are the hasher's memory, consulted by
+ * `deepHash(value, hasher)` and never by the active walk, whose hashes are
+ * baked into the values: nothing baked in is under any other hasher, so
+ * such a hasher remembers, itself, the hash under it of every object that
+ * cannot change — canonical plain data, value-type instances, the
+ * collections' consed nodes — and shared structure is hashed once per
+ * hasher (a `ValueList` pushed one element at a time hashes in O(1) per
+ * push under a hasher used consistently, since every node below the push is
+ * remembered). How a hasher remembers is its own business; the ones
+ * `createMarvin32Hasher` makes keep a `WeakMap`, so a dropped value takes
+ * its entry and a dropped hasher its memory. A hasher given to
+ * `configureHasher` alone may leave both out; one given to `deepHash` must
+ * have them, and the call says so if not.
  */
 export interface Hasher {
   /** Hash a string to a 32-bit value. */
   readonly string: (s: string) => number;
   /** Hash a JS number to a 32-bit value (`-0` treated as `+0`). */
   readonly number: (n: number) => number;
+  /** The hash under this hasher of an object that never changes, if this hasher has hashed it before. */
+  readonly recall?: (obj: object) => number | undefined;
+  /** Remember `hash` as the hash of `obj`, which never changes, under this hasher. */
+  readonly remember?: (obj: object, hash: number) => void;
 }
 
-/**
- * @internal What a hasher other than the active one remembers: the hash under
- * it of every object that cannot change — canonical plain data, value-type
- * instances, the collections' consed nodes — and nothing else. One table per
- * hasher, found through the hasher object (weakly, so a dropped hasher takes
- * its table with it), with weak keys, so a dropped value takes its entry.
- * Shared consed structure is hashed once per hasher: a `ValueList` pushed one
- * element at a time hashes in O(1) per push under a hasher used consistently,
- * because every node below the push is already in that hasher's table.
- */
-export type HashCache = WeakMap<WeakKey, number>;
+/** @internal A hasher with its memory: what `deepHash(value, hasher)` walks with, once it has checked. */
+export type Remembering = Hasher & Required<Pick<Hasher, 'recall' | 'remember'>>;
 
-const caches = new WeakMap<Hasher, HashCache>();
-
-/** @internal The cache of `hasher`, created on first use. Never asked for the active hasher: its hashes live on the values. */
-export function _cacheOf(hasher: Hasher): HashCache {
-  let cache = caches.get(hasher);
-  if (cache === undefined) caches.set(hasher, (cache = new WeakMap()));
-  return cache;
+/** @internal `hasher` with its memory, or a `TypeError` naming what it lacks. */
+export function _remembering(hasher: Hasher): Remembering {
+  if (typeof hasher.recall !== 'function' || typeof hasher.remember !== 'function') {
+    throw new TypeError(
+      'deepHash(value, hasher): the hasher must remember what it hashes (recall and remember); ' +
+        'createMarvin32Hasher(k0, k1) makes one that does',
+    );
+  }
+  return hasher as Remembering;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +177,17 @@ export function createMarvin32Hasher(k0: number, k1: number): Hasher {
     return (h ^ (h >>> 16)) >>> 0;
   };
 
-  return { string, number };
+  // What this hasher has hashed, under it: the objects that cannot change,
+  // weakly, so that a value dropped elsewhere is dropped here too.
+  const memory = new WeakMap<object, number>();
+  return {
+    string,
+    number,
+    recall: (obj) => memory.get(obj),
+    remember: (obj, hash) => {
+      memory.set(obj, hash);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

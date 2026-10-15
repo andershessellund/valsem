@@ -19,8 +19,8 @@
 // a consed node's hash). `deepHash(value, hasher)` with any other hasher is
 // the walk UNDER that hasher: nothing baked in is under it, so the leaves go
 // through its functions, a class instance through `[hash](hasher)`, and what
-// cannot change — canonical data, value types, the collections' nodes — is
-// remembered in the hasher's own weak cache (hasher.ts), so that shared
+// cannot change — canonical data, value types, the collections' nodes — the
+// hasher remembers, itself (`recall`/`remember`, hasher.ts), so that shared
 // structure is hashed once per hasher. The first walk is the one every
 // pool and collection runs; its cost is the library's, and the second must
 // not add to it: it is a separate function, reached by one comparison.
@@ -28,7 +28,7 @@
 
 import { hashCode, _recordKeys, _ctorOf, _protocolHash, _registeredHashTakesHasher, _isPlainRecord } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype, _isTemporalType } from './deep-equal.js';
-import { hashString, hashNumber, mix, _activeHasher, _isActive, _cacheOf, type Hasher, type HashCache } from './hasher.js';
+import { hashString, hashNumber, mix, _activeHasher, _isActive, _remembering, type Hasher, type Remembering } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _undraft } from './shared.js';
 
@@ -283,7 +283,7 @@ function unhashableMessage(obj: object): string {
  * ```
  */
 export function deepHash(value: unknown, hasher?: Hasher): number {
-  if (hasher !== undefined && !_isActive(hasher)) return hashWith(value, hasher, _cacheOf(hasher));
+  if (hasher !== undefined && !_isActive(hasher)) return hashWith(value, _remembering(hasher));
   if (value === null) return TAG_NULL;
   if (value === undefined) return TAG_UNDEFINED;
 
@@ -414,14 +414,14 @@ export function _arrayHashWithAcc(arr: readonly unknown[]): { h: number; acc: nu
 // by `hasher` and every class instance asked through `[hash](hasher)` (or a
 // registered hash written for the hasher). Nothing an object carries is
 // under this hasher, so there is no baked-in answer to read; what there is
-// instead is the hasher's cache, consulted before any object is walked and
-// written after, for the objects that cannot change: canonical plain data
+// instead is the hasher's memory, asked before any object is walked and
+// told after, for the objects that cannot change: canonical plain data
 // (in the meta store), and class instances, whose hash is a declaration of
 // immutability. A raw record or array is walked every time, as the active
 // walk does with it.
 //
 // The collections take part through their own `[hash]`, which hashes their
-// consed nodes under the same cache: hamt.ts and value-list.ts. Their
+// consed nodes under the same memory: hamt.ts and value-list.ts. Their
 // results must not depend on the shape their nodes have, since that shape
 // follows the ACTIVE hasher's seed and would make a hash under a fixed key
 // differ between processes, which is the one thing such a hasher is for.
@@ -449,14 +449,14 @@ function elementTermWith(index: number, elementHash: number, hasher: Hasher): nu
 
 /**
  * @internal `deepHash(value, hasher)` for a hasher that is not the active
- * one, with the hasher's cache in hand: what the collections' `[hash]` call
- * for their children, so that one `_cacheOf` lookup serves a whole walk.
+ * one and is known to remember: what the collections' `[hash]` call for
+ * their children, so that the check is made once per walk.
  */
-export function _hashWith(value: unknown, hasher: Hasher, cache: HashCache): number {
-  return hashWith(value, hasher, cache);
+export function _hashWith(value: unknown, hasher: Remembering): number {
+  return hashWith(value, hasher);
 }
 
-function hashWith(value: unknown, hasher: Hasher, cache: HashCache): number {
+function hashWith(value: unknown, hasher: Remembering): number {
   if (value === null) return TAG_NULL;
   if (value === undefined) return TAG_UNDEFINED;
 
@@ -477,29 +477,29 @@ function hashWith(value: unknown, hasher: Hasher, cache: HashCache): number {
 
   const obj = value as object;
 
-  const hit = cache.get(obj);
+  const hit = hasher.recall(obj);
   if (hit !== undefined) return hit;
 
   const undrafted = _undraft(obj);
-  if (undrafted !== obj) return hashWith(undrafted, hasher, cache);
+  if (undrafted !== obj) return hashWith(undrafted, hasher);
 
   depth++;
   try {
     if (depth > _maxDepth()) throw _depthError('deepHash');
-    return hashObjectWith(obj, hasher, cache);
+    return hashObjectWith(obj, hasher);
   } finally {
     depth--;
   }
 }
 
-function hashObjectWith(obj: object, hasher: Hasher, cache: HashCache): number {
+function hashObjectWith(obj: object, hasher: Remembering): number {
   if (Array.isArray(obj)) {
     let acc = 0;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + elementTermWith(i, hashWith(obj[i], hasher, cache), hasher)) | 0;
+      acc = (acc + elementTermWith(i, hashWith(obj[i], hasher), hasher)) | 0;
     }
     const h = _arrayHashOf(obj.length, acc);
-    if (_metaOf(obj) !== undefined) cache.set(obj, h); // canonical: frozen, so the hash holds
+    if (_metaOf(obj) !== undefined) hasher.remember(obj, h); // canonical: frozen, so the hash holds
     return h;
   }
 
@@ -513,7 +513,7 @@ function hashObjectWith(obj: object, hasher: Hasher, cache: HashCache): number {
     else if (handler !== undefined && _registeredHashTakesHasher(handler)) h = handler(obj, hasher) >>> 0;
     else if (handler !== undefined || hashCode in (obj as any)) throw new TypeError(activeOnlyMessage(obj, handler !== undefined));
     else throw new TypeError(unhashableMessage(obj));
-    cache.set(obj, h); // a hash declares that the instance never changes
+    hasher.remember(obj, h); // a hash declares that the instance never changes
     return h;
   }
 
@@ -525,11 +525,11 @@ function hashObjectWith(obj: object, hasher: Hasher, cache: HashCache): number {
     const k = keys[i]!;
     const v = rec[k];
     if (v === undefined) continue;
-    acc = (acc + entryTermWith(k, hashWith(v, hasher, cache), hasher)) >>> 0;
+    acc = (acc + entryTermWith(k, hashWith(v, hasher), hasher)) >>> 0;
     keyCount++;
   }
   const h = _recordHashOf(keyCount, acc);
-  if (_metaOf(obj) !== undefined) cache.set(obj, h);
+  if (_metaOf(obj) !== undefined) hasher.remember(obj, h);
   return h;
 }
 
