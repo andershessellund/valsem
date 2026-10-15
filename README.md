@@ -134,7 +134,7 @@ intern({ tags: new Set(['a']) });
 ```
 
 **Extensible.** Your own classes become values with two members — `[equals]`
-and a companion `[hashCode]` — or one registration, `deepEqual.register`,
+and a companion `[hash]` — or one registration, `deepEqual.register`,
 and then compare, hash, intern, and key a map like anything else. Third-party
 types work the same way; Temporal ships ready-made behind `valsem/temporal`.
 See [Extending](#extending).
@@ -164,7 +164,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Result | a frozen copy | a frozen **canonical** value — equal content ⟹ `===` |
 | `Map` / `Set` in state | `enableMapSet()` | `ValueMap` / `ValueSet` (drafted as `DraftMap` / `DraftSet`); native `Map`/`Set` are rejected with the replacement named |
 | `Date` in state | allowed | rejected — use `ValueDate.from(date)` (or Temporal via `valsem/temporal`) |
-| Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — `[equals]` + `[hashCode]`, or one registration, see [Extending](#extending); a value is an opaque leaf in a recipe (`Draft<ValueDate>` is `ValueDate`) unless it implements `[toDraft]` — give a registered class at least one method so the types can tell |
+| Class instances in state | drafted if `[immerable]` | rejected unless the class is a value — `[equals]` + `[hash]`, or one registration, see [Extending](#extending); a value is an opaque leaf in a recipe (`Draft<ValueDate>` is `ValueDate`) unless it implements `[toDraft]` — give a registered class at least one method so the types can tell |
 | Patches | JSON-Patch-like `{op, path, value}` | semantic ops — `record.set`, `list.splice`, `map.delete`, `set.add`, … — all values canonical |
 | `current()` / `original()` | yes | yes — `current()` returns a canonical snapshot, and the draft stays live |
 | Iterating a `Map` or `Set` draft | yields drafts | a `DraftMap`'s values (and a `DraftList`'s elements) come as drafts too, so `for (const [, v] of d.m) v.x = 1` edits; keys and set members come as the **values** they are, since a set member's content is its identity. A loop that only reads is cheaper over `current(d.m)`, which drafts nothing |
@@ -383,19 +383,19 @@ compared, memoised, or recur, and not for data built once and compared once.
 
 ## Extending
 
-Any class becomes a value by implementing `[equals]` and carrying a
-`[hashCode]` (a number, precomputed — equal values must hash equal):
+Any class becomes a value by implementing `[equals]` and `[hash]`: given a
+hasher, hash the content through it (equal values must hash equal):
 
 ```ts
-import { deepEqual, equals, hashCode, deepHash, intern, HashMap } from 'valsem';
+import { deepEqual, equals, hash, deepHash, intern, HashMap, type Hasher } from 'valsem';
 
 class Money {
-  readonly [hashCode]: number;
-  constructor(readonly amount: number, readonly currency: string) {
-    this[hashCode] = deepHash([amount, currency]);
-  }
+  constructor(readonly amount: number, readonly currency: string) {}
   [equals](o: unknown): boolean {
     return o instanceof Money && o.amount === this.amount && o.currency === this.currency;
+  }
+  [hash](hasher: Hasher): number {
+    return deepHash([this.amount, this.currency], hasher);
   }
 }
 deepEqual(new Money(5, 'EUR'), new Money(5, 'EUR'));        // true
@@ -403,9 +403,16 @@ intern(new Money(5, 'EUR')) === intern(new Money(5, 'EUR')); // true — pooled,
 new HashMap().set(new Money(5, 'EUR'), 'x').get(new Money(5, 'EUR')); // 'x' — keyed by content
 ```
 
-The hash is the declaration that makes it a value: carrying one says the
-instance never changes, and with that promise valsem pools it, keys by it,
-and stores it in state. The
+The hash is the declaration that makes it a value: implementing one says
+the instance never changes, and with that promise valsem pools it, keys by
+it, and stores it in state. Taking the hasher as a parameter is what lets
+one method serve every hasher: the process's own, seeded, which every pool
+and collection buckets by (valsem computes that once per interned instance
+and keeps it as `[hashCode]`), and any other you hold —
+`deepHash(value, createMarvin32Hasher(k0, k1))` with a key of your own is
+the same number in every process, for a fingerprint or a seeded choice that
+must replay. A class may still carry a precomputed `[hashCode]` instead,
+as before; it is a value under the process's hasher only. The
 [extending guide](https://andershessellund.github.io/valsem/guide/extending)
 has the rest: the comparable-only tier, registering types you do not own,
 canonical instances by construction with `createInternPool`, Temporal via
@@ -483,7 +490,7 @@ it costs.
 | `OrderedMap`, `OrderedSet` | the same, insertion-ordered — order is part of the value; `indexOf`, `at`, `insertedAt` in O(log n) (`DraftOrderedMap`/`DraftOrderedSet` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `InternedString`, `RawArray` | a string with its hash paid once; a large response admitted slice by slice |
-| `equals`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
+| `equals`, `hash`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
 | `toDraft`, `valsem/draft` | making types draftable — the protocol `produce` uses for everything but plain objects and arrays |
 | `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches you own |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |

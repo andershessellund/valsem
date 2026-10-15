@@ -6,23 +6,23 @@ and implement whichever tier you mean:
 | Symbol       | Makes the class                                                 | Shape                                       |
 | ------------ | --------------------------------------------------------------- | ------------------------------------------- |
 | `equals`     | **comparable** — `deepEqual` answers by content                 | `[equals](other): boolean`                  |
-| `hashCode`   | **a value** — hashable, internable, usable wherever a value goes | `[hashCode]: number` (a field, getter, or method) |
+| `hash`       | **a value** — hashable, internable, usable wherever a value goes | `[hash](hasher): number` — a method that hashes the content through the hasher it is given |
 | `interned`   | an **auto-interning type** — every instance canonical by construction | `[interned]: true`                    |
 
 ```ts
-import { deepEqual, equals, hashCode, deepHash, intern } from 'valsem';
+import { deepEqual, equals, hash, deepHash, intern, type Hasher } from 'valsem';
 
 class Money {
-  readonly [hashCode]: number;
-
-  constructor(readonly amount: number, readonly currency: string) {
-    this[hashCode] = deepHash([amount, currency]);
-  }
+  constructor(readonly amount: number, readonly currency: string) {}
 
   [equals](other: unknown): boolean {
     return other instanceof Money
       && other.amount === this.amount
       && other.currency === this.currency;
+  }
+
+  [hash](hasher: Hasher): number {
+    return deepHash([this.amount, this.currency], hasher);
   }
 }
 
@@ -33,7 +33,7 @@ intern(new Money(5, 'DKK')) === intern(new Money(5, 'DKK')); // true — one poo
 The two tiers are a statement about mutability. An equality alone claims
 nothing beyond "here is how to compare two of these right now", which is
 honest even for a mutable object. A hash is only useful if it never changes,
-so **`[hashCode]` declares that instances are immutable after construction**
+so **`[hash]` declares that instances are immutable after construction**
 — and with that declaration the class is a value everywhere: `deepHash`
 hashes it, `intern` pools equal instances into one canonical `===` instance
 (unfrozen — immutability is the class's own contract), and it can be a
@@ -41,13 +41,34 @@ hashes it, `intern` pools equal instances into one canonical `===` instance
 `produce`. Only claim it if it is true: a pooled instance is shared by every
 holder, so one mutation corrupts all of them and invalidates the pooled hash.
 
-Implement `equals` and `hashCode` **together** — the companion invariant
-(`equals ⟹ same hashCode`) is what makes hashing and interning correct. A
-class with `[equals]` but no `[hashCode]` compares by content and is refused
-everywhere else — `deepHash`, `intern`, the collections, `HashMap` keys,
-`memoize`, `produce` — with an error naming the missing hash. Nothing is
-passed through silently: a `HashMap` keyed by such an object would miss
-every equal lookup.
+Implement `equals` and `hash` **together** — the companion invariant
+(`equals ⟹ same hash`, under every hasher) is what makes hashing and
+interning correct. A class with `[equals]` but no `[hash]` compares by
+content and is refused everywhere else — `deepHash`, `intern`, the
+collections, `HashMap` keys, `memoize`, `produce` — with an error naming the
+missing hash. Nothing is passed through silently: a `HashMap` keyed by such
+an object would miss every equal lookup.
+
+`[hash]` takes the hasher so that one method serves every hasher. Hash the
+parts that are values with `deepHash(part, hasher)`, the leaves with
+`hasher.string` and `hasher.number`, and combine with `mix`; never read the
+active hasher or a hash you computed earlier. Called with the **active**
+hasher, the process's own, it gives the hash every pool and collection
+buckets by — valsem computes that once, when it interns an instance, and
+keeps it as the instance's `[hashCode]`. Called with a hasher of the
+caller's, through `deepHash(value, hasher)`, it gives the hash under that
+one: a `createMarvin32Hasher(k0, k1)` built on constants hashes the same
+value the same in every process, which is what a reproducible fingerprint,
+or a seeded choice that must replay, needs. Such a hasher is not
+flood-resistant, since its key is no secret — never bucket untrusted data by
+it, and never install it as the active hasher of a process that ingests
+any; see [hardening](/guide/hardening#a-hasher-of-your-own).
+
+**The older form still works.** A class may carry a precomputed
+`[hashCode]` — a number, a getter, or a method — instead of `[hash]`, as
+before this protocol existed; it is a value under the active hasher, and
+that is where it stops: `deepHash(instance, hasher)` throws for it, naming
+`[hash]` as the fix. Write `[hash]` for new classes.
 
 For third-party types you cannot edit, register handlers globally — the same
 two tiers, so the hash is optional:
@@ -55,12 +76,14 @@ two tiers, so the hash is optional:
 ```ts
 import { deepEqual, deepHash } from 'valsem';
 
-// A value: comparable, hashable, internable.
+// A value: comparable, hashable, internable — under any hasher.
 deepEqual.register(
   Money,
   (a, b) => a.amount === b.amount && a.currency === b.currency,
-  (m) => deepHash([m.amount, m.currency]),
+  (m, hasher) => deepHash([m.amount, m.currency], hasher),
 );
+// A hashFn of one parameter is the precomputed form: a value under the
+// active hasher only, as a precomputed [hashCode] is.
 
 // Comparable only — deepEqual by content; deepHash and intern still refuse it.
 deepEqual.register(Legacy, (a, b) => a.id === b.id);
@@ -78,7 +101,7 @@ refuses a hash for them, since a hash would declare them immutable — see
 
 ## Interned value types with `createInternPool`
 
-`intern` already pools any class with `[equals]` and `[hashCode]`, so you do
+`intern` already pools any class with `[equals]` and `[hash]`, so you do
 not need a pool to get canonical instances — you need one when you want them
 **by construction**: `Point.of(1, 2) === Point.of(1, 2)` with no `intern`
 call anywhere, the same deal the built-in collections get. Allocate a
@@ -86,12 +109,11 @@ per-class `InternPool`, route construction through it, and mark the type
 `[interned]` so every walk recognises its instances as canonical in O(1):
 
 ```ts
-import { createInternPool, equals, hashCode, interned } from 'valsem';
+import { createInternPool, equals, hash, interned, mix, type Hasher } from 'valsem';
 
 const pool = createInternPool<Point>();
 
 class Point {
-  declare readonly [hashCode]: number;
   declare readonly [interned]: true;
 
   private constructor(readonly x: number, readonly y: number) {}
@@ -100,10 +122,12 @@ class Point {
     return other instanceof Point && other.x === this.x && other.y === this.y;
   }
 
+  [hash](hasher: Hasher): number {
+    return mix(hasher.number(this.x), hasher.number(this.y));
+  }
+
   static of(x: number, y: number): Point {
-    const p = new Point(x, y);
-    (p as any)[hashCode] = (x * 73856093) ^ (y * 19349663);
-    return pool.intern(p); // frozen, marked interned, deduplicated
+    return pool.intern(new Point(x, y)); // hashed and stamped, frozen, marked interned, deduplicated
   }
 }
 
@@ -244,7 +268,7 @@ interface IntervalState extends DraftState<Interval> {
 }
 
 class Interval {
-  // …canonical value type: private constructor, pool, [equals], [hashCode]…
+  // …canonical value type: private constructor, pool, [equals], [hash]…
   [toDraft](parent?: DraftState): IntervalState {
     const state = createDraftState<IntervalState>({
       kind: 'interval', parent, base: this,

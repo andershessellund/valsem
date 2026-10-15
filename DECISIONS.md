@@ -181,9 +181,12 @@ are forever. DESIGN.md §5.1.
 
 ### D26. The hash is the immutability declaration
 
-`[hashCode]` (or a registered `hashFn`) makes a class a value: hashable,
-internable, a key. An equality alone makes it comparable only, and is the
-only registration the mutable built-ins accept.
+`[hash](hasher)` — or a precomputed `[hashCode]`, or a registered `hashFn`
+— makes a class a value: hashable, internable, a key. An equality alone
+makes it comparable only, and is the only registration the mutable
+built-ins accept. Which of the three forms a class uses decides only
+whether it hashes under a hasher other than the active one (D68); the
+declaration is the same.
 
 **Why.** A hash is only useful if it never changes, so supplying one
 *declares* "no reachable mutation". **Rejected:** a separate
@@ -541,7 +544,12 @@ DESIGN.md §4.1, §7.3.
 The default leaf hash is Marvin32 (the DoS-resistant family .NET ships)
 seeded per process from `crypto.getRandomValues`; `configureHasher` swaps
 in a keyed PRF once, at startup, and refuses to run after the first hash.
-`globalThis.crypto` is required at import.
+`globalThis.crypto` is required at import. The seed requirement is on the
+active hasher, the one every pool and collection buckets by; a hasher
+built on a key of the caller's, for `deepHash(value, hasher)` (D68), is
+reproducible on purpose and for that reason not flood-resistant, which the
+hardening guide says plainly: never bucket untrusted data by it, never
+install it as the active hasher of a process that ingests any.
 
 **Why.** An attacker cannot precompute colliding inputs, at ~1.0–1.4× the
 cost of FNV. Hashes are baked into pooled values and consed nodes, so a
@@ -572,6 +580,76 @@ comparisons per new version, and leaves published hashes open.
 **Deferred:** a keyed PRF as the last step of every container hash, which
 would make published hashes safe at a cost on every `intern`; the hardening
 guide rules out publishing them instead.
+
+### D68. Hashing is parametric in the hasher: `[hash](hasher)`, and `deepHash(value, hasher)`
+
+A value class hashes through a method of its prototype, `[hash](hasher)`,
+which hashes the content through the `Hasher` it is given: the parts that
+are values with `deepHash(part, hasher)`, the leaves with `hasher.string`
+and `hasher.number`, combined with `mix`. `deepHash(value, hasher)` hashes
+any value under any hasher that way, with the same combiners; left out,
+the hasher is the active one, and the walk is the one it always was.
+`[hashCode]` stays, and means the hash under the active hasher: the number
+`intern` and a pool compute once through `[hash]` and keep (the pool stamps
+it on the instance), and the number a class may still carry precomputed in
+place of `[hash]`, which makes it a value as before but one that hashes
+under the active hasher only; `deepHash(instance, hasher)` throws for such
+a class, and for a registered `hashFn` of one parameter, naming the fix. A
+hasher other than the active one remembers what it has hashed, weakly, in a
+cache of its own, kept beside the hasher rather than on it, and only for
+what cannot change: canonical plain data, value-type instances, and the
+collections' consed nodes.
+
+**Why.** A hash under a key the caller chose is the same in every process,
+which the active hash, keyed by a secret drawn per process (D28), can never
+be — and a consumer (stifinder, 2026-10) needs exactly that: a seeded,
+replayable choice made from the hash of a state, the same choice in every
+run, with the hash of a long `ValueList` staying incremental as the state
+grows. The protocol gives it without a second hash on every value: one
+method serves every hasher, the active one included, so the cost to a
+class author is a parameter. The cache is per hasher because nothing baked
+into a value is under any hasher but the active one, and it caches only
+the immutable, since a hash under any hasher is a promise about content
+that does not change. It sits beside the hasher, found through it weakly,
+so that a `Hasher` stays the pair of functions it always was and a dropped
+hasher takes its table with it. The collections' hashes under a hasher are
+shape-free by construction — a commutative sum per trie node, a polynomial
+per list node, composable whatever the node's position — because a trie's
+branching and a list's chunk boundaries follow the active hasher's seed,
+and a hash that read them would differ between processes under one fixed
+key, which is the one thing such a key is for. Tests: `hash-under`, which
+spawns a second process and checks that a fixed key gives the same hash of
+lists, tries, ordered collections and plain data there, while the active
+hash does not; and the property law under another hasher in
+`property-values`.
+
+**Rejected:** a second cached hash slot on every value, stamped at intern
+under a fixed key. It costs every value a field and every intern a second
+walk for a feature few processes use, and it fixes one key for the process
+where a caller may want several. **Rejected:** a process-global fixed seed
+through `configureHasher`, which a test could set in its setup. It is
+global, it must precede any interning, and it gives up flood resistance for
+the whole process to make one hash reproducible. **Rejected:** a cache at
+the top level only, with children rehashed from scratch: O(n) per hash of a
+list of n, and quadratic along a chain of pushes, which is the cost D18's
+consed nodes exist to avoid; the per-node cache keeps a push at O(1) under
+a hasher used consistently (40,000 pushes with a hash after each: 44 ms).
+**Rejected:** the cache as a member of `Hasher`. Every custom hasher given
+to `configureHasher` would then have to carry one, a breaking change to
+that interface for a table the hasher never reads. **Rejected:** reading
+`[hashCode]` under another hasher when `[hash]` is absent, as a
+best-effort answer: it would be the active hash, silently, exactly where a
+caller asked for something else. **Cost.** A breaking change to the
+extension protocol, taken before 1.0: new classes implement `[hash]`;
+existing ones keep working. The active-hasher path is unchanged — the walk
+under another hasher is a separate function reached by one comparison, and
+`[hashCode]` is still read first — but was not benchmarked for this
+entry's PR (the maintainer's machine was unavailable); the benchmark is
+owed before 1.0. The built-in collections are slower under a non-active
+hasher than the field read they serve the active one from: a walk with a
+`WeakMap` probe per node on the first hash, one probe on the second. A
+`RawArray` and a unique symbol hash by an identity, which no key makes
+reproducible, and the docs say so. DESIGN.md §3.2, §3.3, §5.1.
 
 ### D19. Hardening rules
 

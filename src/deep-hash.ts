@@ -8,14 +8,27 @@
 //   2. Array → recursive ordered hash
 //   3. Mutable built-in (by constructor chain) → throw, naming the replacement
 //   4. a[hashCode] (property, getter or method) → class-defined hash
-//   5. hashCodeMethods.get(a.constructor) → registry (registered types)
-//   6. Plain object → structural order-independent hash
-//   7. Class without handler → throw
+//   5. a[hash](hasher) (a method of the prototype) → class-defined hash
+//   6. hashCodeMethods.get(a.constructor) → registry (registered types)
+//   7. Plain object → structural order-independent hash
+//   8. Class without handler → throw
+//
+// Two walks, one dispatch. `deepHash(value)` is the ACTIVE walk: the leaves
+// go through the process hasher, and whatever is canonical answers from what
+// was baked into it when it was made (the meta store, a `[hashCode]` field,
+// a consed node's hash). `deepHash(value, hasher)` with any other hasher is
+// the walk UNDER that hasher: nothing baked in is under it, so the leaves go
+// through its functions, a class instance through `[hash](hasher)`, and what
+// cannot change — canonical data, value types, the collections' nodes — is
+// remembered in the hasher's own weak cache (hasher.ts), so that shared
+// structure is hashed once per hasher. The first walk is the one every
+// pool and collection runs; its cost is the library's, and the second must
+// not add to it: it is a separate function, reached by one comparison.
 // ---------------------------------------------------------------------------
 
-import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
+import { hashCode, _recordKeys, _ctorOf, _protocolHash, _registeredHashTakesHasher, _isPlainRecord } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype, _isTemporalType } from './deep-equal.js';
-import { hashString, hashNumber, mix } from './hasher.js';
+import { hashString, hashNumber, mix, _activeHasher, _isActive, _cacheOf, type Hasher, type HashCache } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _undraft } from './shared.js';
 
@@ -170,6 +183,15 @@ export function _elementTerm(index: number, elementHash: number): number {
   return scramble(mix(hashNumber(index), elementHash));
 }
 
+/**
+ * @internal The term of one (key hash, value hash) pair in a commutative
+ * accumulator — the record entry term with the key already hashed, for the
+ * collections' walks under a hasher, where a key is any value.
+ */
+export function _pairTerm(keyHash: number, valueHash: number): number {
+  return scramble(mix(keyHash, valueHash));
+}
+
 /** @internal Fold a record accumulator into the final hash. */
 export function _recordHashOf(keyCount: number, acc: number): number {
   return mix(mix(TAG_OBJECT, keyCount), acc >>> 0);
@@ -222,8 +244,8 @@ function unhashableMessage(obj: object): string {
  * guaranteed (hash collisions are possible).
  *
  * Handles: primitives (including `NaN`, `+0`/`-0`, `bigint`), plain objects
- * (key-order-independent), arrays, and any class implementing `[hashCode]` or
- * registered via `deepEqual.register()`.
+ * (key-order-independent), arrays, and any class implementing `[hash]` or
+ * `[hashCode]`, or registered via `deepEqual.register()`.
  *
  * Symbols are values: a registered symbol hashes by its name, a unique one
  * by an identity assigned on first sight. Symbol-keyed record entries count
@@ -234,14 +256,34 @@ function unhashableMessage(obj: object): string {
  * TypedArrays, which valsem does not treat as values. Those errors name the
  * immutable replacement.
  *
+ * **Under a hasher of your own.** `deepHash(value, hasher)` hashes the same
+ * value under any {@link Hasher}: the leaves through its functions, class
+ * instances through their `[hash](hasher)`, the collections likewise, with
+ * the same combiners — so the companion invariant holds under it too. A
+ * hasher built on a fixed key (`createMarvin32Hasher(k0, k1)`) gives the
+ * same hash in every process: a reproducible fingerprint, or the seed of a
+ * choice that must replay. Such a hasher is not flood-resistant, so never
+ * bucket untrusted data by it. Hashing under it is a walk, not a cache read,
+ * but what cannot change — canonical data, value types, the collections'
+ * nodes — is remembered per hasher, weakly, so a value that shares structure
+ * with one already hashed costs the difference: a `ValueList` hashed after
+ * every push costs O(1) per push under a hasher used consistently. A class
+ * that carries a precomputed `[hashCode]` and no `[hash]` cannot be hashed
+ * under another hasher, and the error says so. Left out, the hasher is the
+ * active one, and the hash is the one every pool and collection uses.
+ *
  * @example
  * ```ts
  * deepHash({ a: 1, b: 2 }) === deepHash({ b: 2, a: 1 }); // true
  * deepHash([1, 2]) !== deepHash([2, 1]);                   // true — order matters
  * deepHash(new Set([1, 2, 3]));                            // throws — use ValueSet
+ *
+ * const fixed = createMarvin32Hasher(0x5eed, 0x1234);
+ * deepHash(state, fixed); // the same number in every process
  * ```
  */
-export function deepHash(value: unknown): number {
+export function deepHash(value: unknown, hasher?: Hasher): number {
+  if (hasher !== undefined && !_isActive(hasher)) return hashWith(value, hasher, _cacheOf(hasher));
   if (value === null) return TAG_NULL;
   if (value === undefined) return TAG_UNDEFINED;
 
@@ -306,12 +348,17 @@ function hashObjectValue(obj: object): number {
   const proto = Object.getPrototypeOf(obj);
   if (proto !== Object.prototype && proto !== null && !_isForeignObjectPrototype(proto)) {
     // A class instance: the [hashCode] protocol (a property or a legacy
-    // method), else the registry by the PROTOTYPE's constructor. Neither is
-    // consulted on a plain record, where a protocol symbol is an ordinary
-    // key — so a record cannot forge its hash with an own [hashCode].
-    // The mutable built-ins are refused first, whatever protocol or
-    // registration they carry (a `class Stamp extends Date` with a
-    // `[hashCode]` is still re-timeable) — the same order `intern` applies.
+    // method), then [hash](hasher) off the prototype with the active hasher,
+    // else the registry by the PROTOTYPE's constructor. None is consulted on
+    // a plain record, where a protocol symbol is an ordinary key — so a
+    // record cannot forge its hash with an own [hashCode]. The mutable
+    // built-ins are refused first, whatever protocol or registration they
+    // carry (a `class Stamp extends Date` with a `[hashCode]` is still
+    // re-timeable) — the same order `intern` applies. [hashCode] is read
+    // first because it is the cheap one: a field on every built-in value
+    // type, and the number `intern` cached for a class with [hash] (so
+    // [hash] runs once per canonical instance under the active hasher, not
+    // once per deepHash).
     const ctor = _ctorOf(obj);
     if (_mutableBuiltinReason(ctor) !== undefined) throw new TypeError(unhashableMessage(obj));
     if (hashCode in (obj as any)) {
@@ -319,8 +366,10 @@ function hashObjectValue(obj: object): number {
       if (typeof hc === 'number') return hc >>> 0;
       if (typeof hc === 'function') return hc.call(obj) >>> 0;
     }
+    const hf = _protocolHash(obj);
+    if (hf !== undefined) return hf.call(obj, _activeHasher()) >>> 0;
     const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
-    if (handler) return handler(obj) >>> 0; // a uint32, as the [hashCode] path above: handlers may return anything
+    if (handler) return handler(obj, _activeHasher()) >>> 0; // a uint32, as the [hashCode] path above: handlers may return anything
     throw new TypeError(unhashableMessage(obj));
   }
 
@@ -356,4 +405,143 @@ export function _arrayHashWithAcc(arr: readonly unknown[]): { h: number; acc: nu
     acc = (acc + _elementTerm(i, deepHash(arr[i]))) | 0;
   }
   return { h: _arrayHashOf(arr.length, acc), acc: acc >>> 0, n: arr.length };
+}
+
+// ---------------------------------------------------------------------------
+// The walk under a hasher that is not the active one
+//
+// The same dispatch and the same combiners as above, with every leaf hashed
+// by `hasher` and every class instance asked through `[hash](hasher)` (or a
+// registered hash written for the hasher). Nothing an object carries is
+// under this hasher, so there is no baked-in answer to read; what there is
+// instead is the hasher's cache, consulted before any object is walked and
+// written after, for the objects that cannot change: canonical plain data
+// (in the meta store), and class instances, whose hash is a declaration of
+// immutability. A raw record or array is walked every time, as the active
+// walk does with it.
+//
+// The collections take part through their own `[hash]`, which hashes their
+// consed nodes under the same cache: hamt.ts and value-list.ts. Their
+// results must not depend on the shape their nodes have, since that shape
+// follows the ACTIVE hasher's seed and would make a hash under a fixed key
+// differ between processes, which is the one thing such a hasher is for.
+// ---------------------------------------------------------------------------
+
+/** @internal The hash of a symbol under `hasher`. */
+function symbolHashWith(s: symbol, hasher: Hasher): number {
+  const key = Symbol.keyFor(s);
+  if (key !== undefined) return mix(TAG_SYMBOL, hasher.string(key));
+  // The identity number is process-wide (`_symbolId`), so this is the one
+  // leaf a fixed key does not make reproducible across processes: a unique
+  // symbol has no content to hash.
+  return mix(TAG_UNIQUE_SYMBOL, hasher.number(_symbolId(s)));
+}
+
+/** @internal One record entry's accumulator term under `hasher`. */
+function entryTermWith(key: string | symbol, valueHash: number, hasher: Hasher): number {
+  return scramble(mix(typeof key === 'string' ? hasher.string(key) : symbolHashWith(key, hasher), valueHash));
+}
+
+/** @internal One array element's accumulator term under `hasher`. */
+function elementTermWith(index: number, elementHash: number, hasher: Hasher): number {
+  return scramble(mix(hasher.number(index), elementHash));
+}
+
+/**
+ * @internal `deepHash(value, hasher)` for a hasher that is not the active
+ * one, with the hasher's cache in hand: what the collections' `[hash]` call
+ * for their children, so that one `_cacheOf` lookup serves a whole walk.
+ */
+export function _hashWith(value: unknown, hasher: Hasher, cache: HashCache): number {
+  return hashWith(value, hasher, cache);
+}
+
+function hashWith(value: unknown, hasher: Hasher, cache: HashCache): number {
+  if (value === null) return TAG_NULL;
+  if (value === undefined) return TAG_UNDEFINED;
+
+  switch (typeof value) {
+    case 'boolean':
+      return value ? TAG_TRUE : TAG_FALSE;
+    case 'number':
+      return mix(TAG_NUMBER, hasher.number(value === 0 ? 0 : value !== value ? NaN : value));
+    case 'string':
+      return mix(TAG_STRING, hasher.string(value));
+    case 'bigint':
+      return mix(TAG_BIGINT, hasher.string(String(value)));
+    case 'symbol':
+      return symbolHashWith(value, hasher);
+    case 'function':
+      throw new TypeError(`deepHash: function is not supported`);
+  }
+
+  const obj = value as object;
+
+  const hit = cache.get(obj);
+  if (hit !== undefined) return hit;
+
+  const undrafted = _undraft(obj);
+  if (undrafted !== obj) return hashWith(undrafted, hasher, cache);
+
+  depth++;
+  try {
+    if (depth > _maxDepth()) throw _depthError('deepHash');
+    return hashObjectWith(obj, hasher, cache);
+  } finally {
+    depth--;
+  }
+}
+
+function hashObjectWith(obj: object, hasher: Hasher, cache: HashCache): number {
+  if (Array.isArray(obj)) {
+    let acc = 0;
+    for (let i = 0; i < obj.length; i++) {
+      acc = (acc + elementTermWith(i, hashWith(obj[i], hasher, cache), hasher)) | 0;
+    }
+    const h = _arrayHashOf(obj.length, acc);
+    if (_metaOf(obj) !== undefined) cache.set(obj, h); // canonical: frozen, so the hash holds
+    return h;
+  }
+
+  if (!_isPlainRecord(obj)) {
+    const ctor = _ctorOf(obj);
+    if (_mutableBuiltinReason(ctor) !== undefined) throw new TypeError(unhashableMessage(obj));
+    const hf = _protocolHash(obj);
+    const handler = hf === undefined && ctor !== undefined ? _hashCodeMethods.get(ctor) : undefined;
+    let h: number;
+    if (hf !== undefined) h = hf.call(obj, hasher) >>> 0;
+    else if (handler !== undefined && _registeredHashTakesHasher(handler)) h = handler(obj, hasher) >>> 0;
+    else if (handler !== undefined || hashCode in (obj as any)) throw new TypeError(activeOnlyMessage(obj, handler !== undefined));
+    else throw new TypeError(unhashableMessage(obj));
+    cache.set(obj, h); // a hash declares that the instance never changes
+    return h;
+  }
+
+  const rec = obj as Record<string | symbol, unknown>;
+  const keys = _recordKeys(rec);
+  let acc = 0;
+  let keyCount = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!;
+    const v = rec[k];
+    if (v === undefined) continue;
+    acc = (acc + entryTermWith(k, hashWith(v, hasher, cache), hasher)) >>> 0;
+    keyCount++;
+  }
+  const h = _recordHashOf(keyCount, acc);
+  if (_metaOf(obj) !== undefined) cache.set(obj, h);
+  return h;
+}
+
+/** The error for a class that hashes under the active hasher only: a precomputed `[hashCode]`, or a registered hash that takes no hasher. */
+function activeOnlyMessage(obj: object, registered: boolean): string {
+  const name = _ctorOf(obj)?.name || 'an anonymous class';
+  return registered
+    ? `deepHash: ${name} is registered with a hash that takes no hasher, so it hashes under the ` +
+        `active hasher only. To hash it under another, register a hashFn of two parameters, ` +
+        `(value, hasher), that hashes the content through the hasher it is given.`
+    : `deepHash: ${name} carries a precomputed [hashCode] and no [hash], so it hashes under the ` +
+        `active hasher only. To hash it under another, implement [hash](hasher): a method that ` +
+        `hashes the content through the hasher it is given (deepHash(part, hasher), hasher.string, ` +
+        `hasher.number, mix).`;
 }

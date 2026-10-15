@@ -15,20 +15,55 @@
 // For deployments that ingest untrusted data and worry about seed recovery via
 // timing, `configureHasher` swaps in a stronger keyed PRF (e.g. SipHash) built
 // over `getHashSeed()`.
+//
+// Hashing is parametric in the hasher: `deepHash(value, hasher)` hashes under
+// any Hasher, not only the active one, through the same combiners and the
+// `[hash](hasher)` protocol method of every value class. Nothing baked into a
+// canonical object or a consed node is under such a hasher, so each one gets
+// a weak cache of its own (`_cacheOf`), kept here beside the hasher rather
+// than on it: a Hasher stays the pair of functions it always was, and what
+// valsem remembers under it is valsem's business.
 // ---------------------------------------------------------------------------
 
 /**
  * A pluggable pair of seeded leaf-hash primitives (string / number → uint32).
  *
- * Implementations MUST be seeded (so collisions are not offline-predictable)
- * and MUST treat `-0` as `+0` so the companion invariant
- * `deepEqual(a, b) ⟹ deepHash(a) === deepHash(b)` holds.
+ * Implementations MUST treat `-0` as `+0` so the companion invariant
+ * `deepEqual(a, b) ⟹ deepHash(a) === deepHash(b)` holds. The ACTIVE hasher
+ * (the default, or the one `configureHasher` installed) MUST be seeded, so
+ * that collisions are not offline-predictable: it is what every pool and
+ * collection buckets by. A hasher built on a key you chose — `createMarvin32Hasher(k0, k1)`
+ * with constants, say — gives reproducible hashes through
+ * `deepHash(value, hasher)`, and for that reason is NOT flood-resistant:
+ * never bucket untrusted data by it, and never install it as the active
+ * hasher of a process that ingests any.
  */
 export interface Hasher {
   /** Hash a string to a 32-bit value. */
   readonly string: (s: string) => number;
   /** Hash a JS number to a 32-bit value (`-0` treated as `+0`). */
   readonly number: (n: number) => number;
+}
+
+/**
+ * @internal What a hasher other than the active one remembers: the hash under
+ * it of every object that cannot change — canonical plain data, value-type
+ * instances, the collections' consed nodes — and nothing else. One table per
+ * hasher, found through the hasher object (weakly, so a dropped hasher takes
+ * its table with it), with weak keys, so a dropped value takes its entry.
+ * Shared consed structure is hashed once per hasher: a `ValueList` pushed one
+ * element at a time hashes in O(1) per push under a hasher used consistently,
+ * because every node below the push is already in that hasher's table.
+ */
+export type HashCache = WeakMap<WeakKey, number>;
+
+const caches = new WeakMap<Hasher, HashCache>();
+
+/** @internal The cache of `hasher`, created on first use. Never asked for the active hasher: its hashes live on the values. */
+export function _cacheOf(hasher: Hasher): HashCache {
+  let cache = caches.get(hasher);
+  if (cache === undefined) caches.set(hasher, (cache = new WeakMap()));
+  return cache;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,8 +116,13 @@ const f64 = new Float64Array(1);
 const u32 = new Uint32Array(f64.buffer);
 
 /**
- * Build a seeded {@link Hasher} using **Marvin32** over UTF-16 code-unit pairs
- * for strings and a seeded avalanche for numbers. This is valsem's default.
+ * Build a {@link Hasher} using **Marvin32** over UTF-16 code-unit pairs for
+ * strings and a keyed avalanche for numbers, under the 64-bit key given. This
+ * is valsem's default, keyed by the process seed; built with a key of your
+ * own it is a hasher for `deepHash(value, hasher)`: the same value hashes the
+ * same under the same key in every process, which is what a reproducible
+ * fingerprint or a seeded, replayable choice needs. A hasher whose key is not
+ * secret is not flood-resistant: never bucket untrusted data by it.
  *
  * @param k0 - Low 32 bits of the 64-bit key.
  * @param k1 - High 32 bits of the 64-bit key.
@@ -156,6 +196,22 @@ export let hashNumber: (n: number) => number = (n) => {
   arm();
   return hashNumber(n);
 };
+
+/**
+ * @internal The active hasher, as an object: what a `[hash](hasher)` method
+ * or a registered `hashFn` receives when the hash wanted is the process's
+ * own. Handing it out counts as hashing (the ordering guard is armed), since
+ * what the callee computes with it is baked into a value.
+ */
+export function _activeHasher(): Hasher {
+  if (!hashed) arm();
+  return active;
+}
+
+/** @internal Is `hasher` the active one? Asked by `deepHash(value, hasher)` to take the baked-in path; asking does not arm. */
+export function _isActive(hasher: Hasher): boolean {
+  return hasher === active;
+}
 
 /**
  * Replace the leaf hashing primitives process-wide.

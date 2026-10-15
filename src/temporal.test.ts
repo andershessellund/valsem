@@ -8,7 +8,7 @@
 // by design — see temporal-missing.test.ts.
 import { describe, it, expect } from 'vitest';
 import { Temporal as T } from './temporal.test-helpers.js';
-import { deepEqual, deepHash, intern } from './index.js';
+import { deepEqual, deepHash, intern, createMarvin32Hasher } from './index.js';
 
 await import('./temporal.js');
 
@@ -28,6 +28,23 @@ describe('temporal — value semantics', () => {
       expect(a, kind).not.toBe(b);
       expect(deepEqual(a, b), kind).toBe(true);
       expect(deepHash(a), kind).toBe(deepHash(b));
+    }
+  });
+
+  it('every kind hashes under another hasher: the registered hash takes the hasher it is given', () => {
+    const h = createMarvin32Hasher(0x7e3, 0x9a1);
+    const twin = createMarvin32Hasher(0x7e3, 0x9a1);
+    const pairs: [string, unknown, unknown][] = [
+      ['PlainDate', T.PlainDate.from('2026-08-31'), T.PlainDate.from('2026-08-31')],
+      ['Instant', T.Instant.from('2026-08-31T00:00Z'), T.Instant.from('2026-08-31T00:00:00.000Z')],
+      ['ZonedDateTime', T.ZonedDateTime.from('2026-08-31T00:00[UTC]'), T.ZonedDateTime.from('2026-08-31T00:00[UTC]')],
+      ['Duration', T.Duration.from('P1DT2H'), T.Duration.from('P1DT2H')],
+    ];
+    for (const [kind, a, b] of pairs) {
+      expect(deepHash(a, h), kind).toBe(deepHash(b, h));
+      expect(deepHash(a, twin), kind).toBe(deepHash(b, h));
+      expect(deepHash(a, h), kind).not.toBe(deepHash(a));
+      expect(deepHash({ at: a }, h), kind).toBe(deepHash({ at: b }, h));
     }
   });
 

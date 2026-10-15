@@ -215,7 +215,7 @@ describe('deepHash', () => {
     class Opaque {
       constructor(readonly id: string) {}
     }
-    expect(() => deepHash(new Opaque('a'))).toThrow('has no [hashCode]');
+    expect(() => deepHash(new Opaque('a'))).toThrow('has no [hash], [hashCode]');
   });
 
   it('[hashCode] takes priority over registry', () => {
@@ -268,7 +268,7 @@ describe('deepHash — diagnostic for unregistered Temporal', () => {
   it('keeps the generic message for other unregistered classes', () => {
     class Whatever {}
     expect(() => deepHash(new Whatever())).toThrow(
-      /class instance 'Whatever' has no \[hashCode\] or registered hash handler/,
+      /class instance 'Whatever' has no \[hash\], \[hashCode\] or registered hash handler/,
     );
   });
 });

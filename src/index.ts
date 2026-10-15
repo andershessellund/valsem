@@ -6,15 +6,16 @@
 // canonical instance), plus value collections (`ValueList`/`ValueMap`/
 // `ValueSet`, the insertion-ordered `OrderedMap`/`OrderedSet`, `ValueDate`/
 // `InternedString`/`RawArray`, the mutable `HashMap`/`HashSet`), `produce`
-// and `memoize`, and the extension points (`equals`/`hashCode`/`interned`
-// symbols, `createInternPool`, `toDraft`) that let any type participate.
+// and `memoize`, and the extension points (`equals`/`hash`/`hashCode`/
+// `interned` symbols, `createInternPool`, `toDraft`) that let any type
+// participate.
 //
 // Temporal value semantics live behind the `valsem/temporal` subpath; the
 // stable surface for binding authors (wire formats, storage layers) behind
 // `valsem/binding`.
 // ---------------------------------------------------------------------------
 
-export { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+export { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
 export { deepHash } from './deep-hash.js';
 export { HashMap } from './hash-map.js';
 export { HashSet } from './hash-set.js';
@@ -31,7 +32,7 @@ export { ValueDate } from './value-date.js';
 export { RawArray } from './raw-array.js';
 export { createInternPool } from './intern-pool.js';
 export type { InternPool } from './intern-pool.js';
-export { configureHasher, createMarvin32Hasher, getHashSeed } from './hasher.js';
+export { configureHasher, createMarvin32Hasher, getHashSeed, mix } from './hasher.js';
 export { configureLimits } from './limits.js';
 export type { Hasher } from './hasher.js';
 export { produce, produceWithPatches, applyPatches, draftOf, castDraft, nothing, isDraft, toDraft } from './produce.js';

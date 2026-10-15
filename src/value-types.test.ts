@@ -386,7 +386,7 @@ describe('an equality alone is comparable, not a value', () => {
     expect(() => intern({ v: make() })).toThrow(missing);
     expect(() => intern([make()])).toThrow(missing);
     // The text points at the fix.
-    expect(() => intern(make())).toThrow(/\[hashCode\]/);
+    expect(() => intern(make())).toThrow(/\[hash\]\(hasher\)/);
   });
 
   it('every entry point refuses it rather than keying by reference', () => {
@@ -416,7 +416,7 @@ describe('anything less is rejected, never passed through', () => {
     class Foo {
       x = 1;
     }
-    const neither = /has no \[hashCode\] or registered hash handler/;
+    const neither = /has no \[hash\], \[hashCode\] or registered hash handler/;
     expect(() => intern(new Foo())).toThrow(neither);
     expect(() => intern({ f: new Foo() })).toThrow(neither);
     expect(() => deepHash(new Foo())).toThrow(neither);

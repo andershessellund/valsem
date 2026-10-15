@@ -17,6 +17,9 @@ import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
 import { ValueSet } from './value-set.js';
+import { OrderedMap } from './ordered-map.js';
+import { OrderedSet } from './ordered-set.js';
+import { createMarvin32Hasher } from './hasher.js';
 import { leaf, shuffledClone, valueTree } from './property.test-helpers.js';
 import { mulberry32, shuffle } from './rng.test-helpers.js';
 
@@ -54,6 +57,66 @@ describe('property — companion invariant', () => {
       }),
       { numRuns: 200 },
     );
+  });
+});
+
+// The same law under a hasher that is not the active one: the walk is a
+// different one (nothing baked in is under this hasher), so it is tested
+// as its own law, over the same domain, against the same derived equals.
+describe('property — companion invariant under another hasher', () => {
+  const h = createMarvin32Hasher(0x5eed_1234, 0x0000_abcd);
+  const twin = createMarvin32Hasher(0x5eed_1234, 0x0000_abcd);
+  const other = createMarvin32Hasher(0x0000_abcd, 0x5eed_1234);
+
+  it('independently built equals hash alike under it, and as a twin of the same key hashes them', () => {
+    fc.assert(
+      fc.property(valueTree, seedArb, (v, seed) => {
+        const c = shuffledClone(v, mulberry32(seed));
+        expect(deepHash(v, h)).toBe(deepHash(c, h));
+        expect(deepHash(c, twin)).toBe(deepHash(v, h));
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('unrelated pairs: hash disagreement implies inequality; equality implies hash agreement', () => {
+    fc.assert(
+      fc.property(valueTree, valueTree, (a, b) => {
+        if (deepHash(a, h) !== deepHash(b, h)) expect(deepEqual(a, b)).toBe(false);
+        if (deepEqual(a, b)) expect(deepHash(a, h)).toBe(deepHash(b, h));
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('is stable across calls and across interning, and is not the active hash, nor another key\'s', () => {
+    // A value with no leaf to hash — null, undefined, a boolean, an empty
+    // container — hashes to a tagged constant, the same under every hasher.
+    // Everything else differs, with 32-bit probability, from the active hash
+    // and from another key's.
+    const hasContent = (v: unknown): boolean => {
+      if (v === null || v === undefined || typeof v === 'boolean') return false;
+      if (typeof v !== 'object') return true;
+      if (Array.isArray(v)) return v.some(hasContent);
+      const proto = Object.getPrototypeOf(v) as unknown;
+      if (proto === Object.prototype || proto === null) return Object.values(v as object).some(hasContent);
+      if (v instanceof ValueMap || v instanceof OrderedMap) return [...v].some(([k, x]) => hasContent(k) || hasContent(x));
+      if (v instanceof ValueList || v instanceof ValueSet || v instanceof OrderedSet) return [...v].some(hasContent);
+      return true; // a leaf value type: a number, a string, an identity
+    };
+    let coincidences = 0;
+    fc.assert(
+      fc.property(valueTree, (v) => {
+        const u = deepHash(v, h);
+        expect(deepHash(v, h)).toBe(u);
+        expect(deepHash(intern(v), h)).toBe(u);
+        if (!hasContent(v)) return;
+        if (u === deepHash(v)) coincidences++;
+        if (u === deepHash(v, other)) coincidences++;
+      }),
+      { numRuns: 300 },
+    );
+    expect(coincidences).toBe(0);
   });
 });
 

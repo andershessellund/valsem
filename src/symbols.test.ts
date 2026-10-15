@@ -2,7 +2,7 @@
 // Symbols are values — as values and as record keys.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { intern } from './intern.js';
 import { HashMap } from './hash-map.js';
@@ -151,7 +151,7 @@ describe('symbol keys on record drafts', () => {
   });
 
   it('the protocol symbols are reserved keys', () => {
-    for (const sym of [equals, hashCode, interned, toDraft, DRAFT_STATE]) {
+    for (const sym of [equals, hash, hashCode, interned, toDraft, DRAFT_STATE]) {
       expect(() => produce(base, (d) => void ((d as Record<symbol, unknown>)[sym] = 1))).toThrow(
         /reserved protocol key/,
       );

@@ -40,7 +40,7 @@
 
 import { intern, internHash, _accOf, _internPrehashed } from './intern.js';
 import { _entryTerm, _recordHashOf, _arrayHashOf, _elementTerm } from './deep-hash.js';
-import { _defineRecordField, _recordKeys, equals, hashCode, interned } from './deep-equal.js';
+import { _defineRecordField, _recordKeys, equals, hash, hashCode, interned } from './deep-equal.js';
 import { _freeze } from './checks.js';
 import { indexArg, pushAll, spliceAll } from './shared.js';
 import {
@@ -298,13 +298,14 @@ function unsupportedOnDraft(operation: 'defineProperty' | 'preventExtensions'): 
 /**
  * The protocol symbols are reserved keys: a record carrying `[hashCode]` or
  * `[interned]` would read as self-hashing or canonical to every walk, and
- * `[equals]`/`[toDraft]` would turn a record into a kind. Writing them into
- * a draft is a bug, not a value.
+ * `[equals]`/`[hash]`/`[toDraft]` would turn a record into a kind. Writing
+ * them into a draft is a bug, not a value.
  */
 function assertNotReserved(prop: symbol): void {
   if (
     prop === DRAFT_STATE ||
     prop === equals ||
+    prop === hash ||
     prop === hashCode ||
     prop === interned ||
     prop === toDraft

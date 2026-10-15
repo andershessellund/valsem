@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 
 import { deepEqual } from './deep-equal.js';
-import { hashString } from './hasher.js';
+import type { Hasher } from './hasher.js';
 
 /** The Temporal types this module knows about, in registration order. */
 const KINDS = [
@@ -170,22 +170,22 @@ export function registerTemporal(): void {
  * - `Duration`: its ten fields (`toString()` would be coarser — it folds
  *   sub-second units).
  */
-function buildHash(kind: Kind): (value: TemporalValue) => number {
+function buildHash(kind: Kind): (value: TemporalValue, hasher: Hasher) => number {
   if (kind === 'ZonedDateTime') {
-    return (value) =>
-      hashString(
+    return (value, hasher) =>
+      hasher.string(
         `Temporal.ZonedDateTime|${value.epochNanoseconds}|${value.timeZoneId}|${value.calendarId}`,
       );
   }
   if (kind === 'Duration') {
-    return (value) => {
+    return (value, hasher) => {
       const d = value as unknown as DurationLike;
       let s = 'Temporal.Duration';
       for (const f of DURATION_FIELDS) s += '|' + d[f];
-      return hashString(s);
+      return hasher.string(s);
     };
   }
-  return (value) => hashString(`Temporal.${kind}|${value.toString()}`);
+  return (value, hasher) => hasher.string(`Temporal.${kind}|${value.toString()}`);
 }
 
 /**

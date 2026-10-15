@@ -18,9 +18,11 @@
 // node, never recomputed for shared structure.
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect } from './shared.js';
 import { intern, internHash } from './intern.js';
+import { _hashWith, _pairTerm } from './deep-hash.js';
+import { mix, _cacheOf, _isActive, type Hasher } from './hasher.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createMapDraft, type MapState } from './draft-map.js';
 import {
@@ -34,6 +36,7 @@ import {
   trieForEach,
   trieFrom,
   trieDiff,
+  trieSum,
   NOT_FOUND,
   _trieStats,
   type HNode,
@@ -43,6 +46,8 @@ import {
 const INTERNAL = Symbol('valsem.value-map');
 
 const CFG = createTrieConfig(2);
+/** The type tag of a map's hash under a hasher other than the active one (the active hash is the consed root's, tagged in hamt.ts). */
+const TAG = 0x564d;
 
 /**
  * Persistent (immutable) map with structural identity.
@@ -79,6 +84,20 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
   /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /**
+   * The hash under `hasher`: the order-independent sum of the entries'
+   * terms, each entry hashed through the hasher, folded per trie node and
+   * remembered in the hasher's cache, so a map one edit away from one
+   * already hashed re-sums its path-copied nodes only.
+   */
+  [hashSym](hasher: Hasher): number {
+    if (_isActive(hasher)) return this.#hash;
+    const cache = _cacheOf(hasher);
+    const acc = trieSum(this.#root, CFG.stride, cache, (slots, i) =>
+      _pairTerm(_hashWith(slots[i], hasher, cache), _hashWith(slots[i + 1], hasher, cache)),
+    );
+    return mix(mix(TAG, this.#root.n), acc);
   }
   /** The canonical-type marker: every instance is canonical by construction. */
   get [internedSym](): true {

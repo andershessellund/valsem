@@ -39,7 +39,7 @@
 import { createInternPool, type InternPool } from './intern-pool.js';
 import { internHash } from './intern.js';
 import { _symbolId } from './deep-hash.js';
-import { mix } from './hasher.js';
+import { mix, type HashCache } from './hasher.js';
 import { same, sameSlots, IteratorBase } from './shared.js';
 
 /** Absent-key sentinel for {@link trieGet} — distinct from a stored `undefined`. */
@@ -122,6 +122,33 @@ function consC(cfg: TrieConfig, khash: number, slots: unknown[]): CNode {
   const found = cfg.cpool.lookup(h, (c) => c.khash === khash && sameSlots(c.slots, slots));
   if (found !== undefined) return found;
   return cfg.cpool.register({ t: 1, h, n: slots.length / cfg.stride, khash, slots, w: undefined }, h);
+}
+
+/**
+ * The sum, modulo 2³², of `term` over every entry under `node` — the
+ * commutative accumulator a collection's hash under a hasher other than the
+ * active one is folded from (value-map.ts, value-set.ts). A sum is a
+ * function of the entries alone, whatever shape the trie gives them, and
+ * the shape is the active hasher's: it follows the seed of the process, so
+ * a hash that read it would differ between processes under one fixed key.
+ * Each node's sum is remembered in `cache`, the hasher's, so an edit
+ * re-sums only the nodes it path-copied, at most seven, and shares the rest.
+ */
+export function trieSum(
+  node: HNode,
+  stride: Stride,
+  cache: HashCache,
+  term: (slots: readonly unknown[], i: number) => number,
+): number {
+  const hit = cache.get(node);
+  if (hit !== undefined) return hit;
+  const slots = node.slots;
+  const dataEnd = node.t === 0 ? popcount(node.dmap) * stride : slots.length;
+  let acc = 0;
+  for (let i = 0; i < dataEnd; i += stride) acc = (acc + term(slots, i)) >>> 0;
+  for (let i = dataEnd; i < slots.length; i++) acc = (acc + trieSum(slots[i] as HNode, stride, cache, term)) >>> 0;
+  cache.set(node, acc);
+  return acc;
 }
 
 export function createTrieConfig(stride: Stride): TrieConfig {

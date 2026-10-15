@@ -803,6 +803,6 @@ describe('InternPool — a [hashCode] method', () => {
         return false;
       }
     }
-    expect(() => createInternPool<Bad>().intern(new Bad())).toThrow(/\[hashCode\] must be a number, or a method returning one, got string/);
+    expect(() => createInternPool<Bad>().intern(new Bad())).toThrow(/\[hashCode\] number \(or a method returning one\); got string/);
   });
 });

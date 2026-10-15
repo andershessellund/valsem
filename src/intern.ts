@@ -11,7 +11,7 @@
 //
 // Supported value types: primitives (returned as-is), plain objects, arrays,
 // the auto-interning types (marked `[interned]`), and any class with both an
-// equality and a hash — `[equals]` + `[hashCode]` on the class, or
+// equality and a hash — `[equals]` + `[hash]` (or `[hashCode]`) on the class, or
 // `deepEqual.register(Type, equalsFn, hashFn)` (Temporal, via
 // `valsem/temporal`, and consumer value types). A hash declares immutability,
 // so such instances are pooled by their own equality, unfrozen.
@@ -156,7 +156,7 @@ let depth = 0;
  *   record semantics); its key order is kept.
  * - Canonical objects — already interned, or of an auto-interning type such
  *   as the collections — are returned immediately, no lookup.
- * - A class with an equality **and a hash** (`[equals]` + `[hashCode]`, or
+ * - A class with an equality **and a hash** (`[equals]` + `[hash]` or `[hashCode]`, or
  *   `deepEqual.register(Type, equalsFn, hashFn)` — Temporal via
  *   `valsem/temporal`) is a value: instances are pooled by that equality and
  *   returned canonical. They are not frozen; a hash declares that they are

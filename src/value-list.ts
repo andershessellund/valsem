@@ -29,10 +29,11 @@
 // `pushed`, `toSpliced`, `concat` and `slice` are all calls to it.
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
 import { intern, internHash } from './intern.js';
-import { mix } from './hasher.js';
+import { _hashWith } from './deep-hash.js';
+import { mix, _cacheOf, _isActive, type Hasher, type HashCache } from './hasher.js';
 import { same, sameSlots, IteratorBase, findIndexIn, mapIn, filterIn, reduceIn, indexArg, atIndex, elementIndex, insertionIndex, INSPECT, inspectAs, type InspectOptions, type Inspect, spliceArgs, _undraft } from './shared.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createListDraft, type ListState } from './draft-list.js';
@@ -85,6 +86,68 @@ function endsBranchRun(length: number, last: CNode): boolean {
 }
 
 const cpool = createInternPool<CNode>();
+
+// ---------------------------------------------------------------------------
+// The hash under a hasher other than the active one.
+//
+// The consed hash above is a fold over the tree, and the tree's shape is the
+// active hasher's: a run ends where the SEEDED hash of an element says so.
+// A hash under a fixed key that read the shape would differ between
+// processes, which is the one thing such a hasher is for. So under another
+// hasher the list hashes as the polynomial Σ hᵢ·Pⁿ⁻¹⁻ⁱ of its elements' hashes,
+// which is a function of the sequence alone, and whose value for a node can
+// be remembered whatever the node's position: a sequence's polynomial is
+// H(left)·P^|right| + H(right), so a branch folds its kids from their cached
+// values and their element counts, and a push re-hashes the open tail and
+// nothing below it. P is drawn from the hasher's own key (and made odd, a
+// unit modulo 2³²), so the coefficients are as secret as the hasher is; a
+// hasher with a known key is not flood-resistant whatever the combiner.
+// ---------------------------------------------------------------------------
+
+/** The type tag of a list's hash under a hasher other than the active one. */
+const TAG = 0x564c;
+
+/** The polynomial base under `hasher`. */
+function baseOf(hasher: Hasher): number {
+  return hasher.number(0x11575) | 1;
+}
+
+/** `p` to the `n`, modulo 2³². */
+function power(p: number, n: number): number {
+  let r = 1;
+  for (; n > 0; n >>>= 1) {
+    if (n & 1) r = Math.imul(r, p);
+    p = Math.imul(p, p);
+  }
+  return r;
+}
+
+/** The polynomial of the elements under `node`, remembered in `cache`. */
+function nodeHashUnder(node: CNode, hasher: Hasher, cache: HashCache, P: number): number {
+  const hit = cache.get(node);
+  if (hit !== undefined) return hit;
+  let h = 0;
+  const kids = node.kids;
+  if (node.ht === 1) {
+    for (let i = 0; i < kids.length; i++) h = (Math.imul(h, P) + _hashWith(kids[i], hasher, cache)) >>> 0;
+  } else {
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i] as CNode;
+      h = (Math.imul(h, power(P, k.n)) + nodeHashUnder(k, hasher, cache, P)) >>> 0;
+    }
+  }
+  cache.set(node, h);
+  return h;
+}
+
+/** The hash under `hasher` of the list whose closed runs are `root` and whose open run is `tail`. */
+function listHashUnder(root: CNode | null, tail: readonly unknown[], hasher: Hasher): number {
+  const cache = _cacheOf(hasher);
+  const P = baseOf(hasher);
+  let h = root === null ? 0 : nodeHashUnder(root, hasher, cache, P);
+  for (let i = 0; i < tail.length; i++) h = (Math.imul(h, P) + _hashWith(tail[i], hasher, cache)) >>> 0;
+  return mix(mix(TAG, (root === null ? 0 : root.n) + tail.length), h);
+}
 
 function consLeaf(items: unknown[], hashes: number[]): CNode {
   let h = mix(0xc1ea, items.length);
@@ -381,6 +444,10 @@ export class ValueList<T> implements Iterable<T> {
 
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /** The hash under `hasher`: a polynomial of the elements' hashes, folded per consed node and remembered in the hasher's cache, so a push costs the open run (see `listHashUnder`). */
+  [hashSym](hasher: Hasher): number {
+    return _isActive(hasher) ? this.#hash : listHashUnder(this.#root, this.#tail, hasher);
   }
   get [internedSym](): true {
     return true;
