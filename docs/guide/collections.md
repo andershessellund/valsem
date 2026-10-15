@@ -4,7 +4,7 @@
 
 `ValueList`, `ValueMap`, `ValueSet`, and `InternedString` are **immutable**
 collections whose *instances* are interned: two with equal contents are the
-same reference (`===`), carry a precomputed `[hashCode]`, and can be compared,
+same reference (`===`), carry their hash, and can be compared,
 deduplicated, and used as keys for free.
 
 ```ts

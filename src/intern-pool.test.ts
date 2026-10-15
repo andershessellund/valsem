@@ -11,7 +11,9 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { createInternPool, _poolStats, _idleDriver, _idleState } from './intern-pool.js';
 import { intern } from './intern.js';
-import { equals, hashCode, interned } from './deep-equal.js';
+import { equals, hash, hashCode, interned } from './deep-equal.js';
+import { deepHash } from './deep-hash.js';
+import type { Hasher } from './hasher.js';
 
 const gc = (globalThis as { gc?: () => void }).gc;
 const hasGC = typeof gc === 'function';
@@ -56,12 +58,14 @@ class Point {
   constructor(
     readonly x: number,
     readonly y: number,
-  ) {
-    (this as Record<symbol, unknown>)[hashCode as unknown as symbol] =
-      ((x * 73856093) ^ (y * 19349663)) >>> 0;
-  }
+  ) {}
   [equals](other: unknown): boolean {
     return other instanceof Point && other.x === this.x && other.y === this.y;
+  }
+  // A hash of the test's own, not the hasher's: these suites place instances
+  // in the table on purpose, and need the numbers they chose.
+  [hash](): number {
+    return ((this.x * 73856093) ^ (this.y * 19349663)) >>> 0;
   }
 }
 
@@ -403,8 +407,9 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
       declare readonly [interned]: true;
       static nested: K | undefined;
       static fired = false;
-      constructor(readonly id: number) {
-        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = 0x7777;
+      constructor(readonly id: number) {}
+      [hash](): number {
+        return 0x7777;
       }
       [equals](o: unknown): boolean {
         if (!K.fired && o instanceof K && o.id !== this.id) {
@@ -438,8 +443,9 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
       declare readonly [interned]: true;
       static nested: K | undefined;
       static fired = false;
-      constructor(readonly id: number) {
-        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = 0x7777;
+      constructor(readonly id: number) {}
+      [hash](): number {
+        return 0x7777;
       }
       [equals](o: unknown): boolean {
         if (!K.fired && o instanceof K && o.id !== this.id) {
@@ -475,8 +481,9 @@ describe.skipIf(!hasGC)('InternPool — reclamation (needs --expose-gc)', () => 
     let armed = false;
     class K {
       declare readonly [hashCode]: number;
-      constructor(readonly id: number) {
-        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = 0x5eed;
+      constructor(readonly id: number) {}
+      [hash](): number {
+        return 0x5eed;
       }
       [equals](o: unknown): boolean {
         if (armed) {
@@ -717,10 +724,11 @@ describe.skipIf(!hasGC)('InternPool — idle time (needs --expose-gc)', () => {
 describe('InternPool — intern and lookup, at the edges', () => {
   it('intern accepts an instance its constructor froze: pooled, unmarked, and recognised', () => {
     class Frozen {
-      declare readonly [hashCode]: number;
       constructor(readonly x: number) {
-        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = x;
-        Object.freeze(this);
+        Object.freeze(this); // so the pool can stamp nothing: it answers through [hash], one call per read
+      }
+      [hash](): number {
+        return this.x;
       }
       [equals](o: unknown): boolean {
         return o instanceof Frozen && o.x === this.x;
@@ -754,8 +762,9 @@ describe('InternPool — intern and lookup, at the edges', () => {
       class K {
         declare readonly [hashCode]: number;
         declare readonly [interned]: true;
-        constructor(readonly id: number) {
-          (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = H;
+        constructor(readonly id: number) {}
+        [hash](): number {
+          return H;
         }
         [equals](o: unknown): boolean {
           if (armed) {
@@ -778,12 +787,14 @@ describe('InternPool — intern and lookup, at the edges', () => {
   });
 });
 
-describe('InternPool — a [hashCode] method', () => {
-  it('is called, as deepHash calls it: every instance lands at its own hash, and the pool stays O(1) a call', () => {
+describe('InternPool — the [hash] method', () => {
+  it('is called once, with the active hasher, and stamped: every instance lands at its own hash, and the pool stays O(1) a call', () => {
+    let calls = 0;
     class M {
       constructor(readonly n: number) {}
-      [hashCode](): number {
-        return Math.imul(this.n, 0x9e3779b1) >>> 0;
+      [hash](hasher: Hasher): number {
+        calls++;
+        return hasher.number(this.n);
       }
       [equals](o: unknown): boolean {
         return o instanceof M && o.n === this.n;
@@ -795,14 +806,26 @@ describe('InternPool — a [hashCode] method', () => {
     expect(performance.now() - t).toBeLessThan(200); // one slot for all of them took 350 ms
     for (let i = 0; i < 4000; i += 97) expect(pool.intern(new M(i))).toBe(first[i]);
     expect(pool.intern(new M(1))).not.toBe(pool.intern(new M(2)));
+    // Stamped on the canonical instance, so a read is a property read and [hash] is not called again.
+    const before = calls;
+    expect((first[5] as unknown as Record<symbol, unknown>)[hashCode]).toBe(deepHash(first[5]));
+    expect(deepHash(first[5])).toBe(deepHash(new M(5)));
+    expect(calls - before).toBe(1); // the fresh M(5) only
     class Bad {
-      get [hashCode](): unknown {
+      [hash](): unknown {
         return 'seven';
       }
       [equals](): boolean {
         return false;
       }
     }
-    expect(() => createInternPool<Bad>().intern(new Bad())).toThrow(/\[hashCode\] must be a number, or a method returning one, got string/);
+    expect(() => createInternPool<Bad>().intern(new Bad())).toThrow(/\[hash\] must return a number; got string/);
+    class Legacy {
+      readonly [hashCode] = 1;
+      [equals](): boolean {
+        return false;
+      }
+    }
+    expect(() => createInternPool<Legacy>().intern(new Legacy())).toThrow(/must implement \[hash\]\(hasher\)/);
   });
 });

@@ -84,7 +84,8 @@
 // FinalizationRegistry, requestIdleCallback and setImmediate where they exist.
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym, _protocolHash } from './deep-equal.js';
+import { _activeHasher } from './hasher.js';
 
 /**
  * The index is SHARDS tables, not one. Replacing a table begins by allocating
@@ -507,14 +508,16 @@ export interface InternPool<T extends object> {
   register(value: T, hash: number): T;
 
   /**
-   * Intern `object` using its own `[hashCode]` and `[equals]` symbols.
+   * Intern `object` using its type's `[hash]` and `[equals]`.
    *
    * On a cache hit the canonical instance is returned and `object` is
    * discarded (no allocation committed). On a miss `object` is frozen,
    * marked `[interned]=true`, registered, and returned as the new
    * canonical instance.
    *
-   * The object must have `[hashCode]: number` set before calling this.
+   * The object's type implements `[hash](hasher)`: the pool computes the
+   * hash under the active hasher and stamps it on the instance as
+   * `[hashCode]`, so that every later read is a property read.
    */
   intern(object: T): T;
 
@@ -623,13 +626,24 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
   intern(object: T): T {
     if ((object as Record<symbol, unknown>)[internedSym] === true || this.#unmarked?.has(object)) return object;
-    // The protocol admits a `[hashCode]` property, getter or method (deepHash
-    // reads all three). Read as a number only, a method multiplied to NaN:
-    // every instance landed in one slot, and the pool went quadratic.
+    // The type's [hash] under the active hasher, computed here, once, and
+    // stamped below as the instance's [hashCode], beside the marker; an
+    // instance this pool already stamped is read, not recomputed. Read as a
+    // number only: a method multiplied to NaN once, every instance landed in
+    // one slot, and the pool went quadratic.
+    const hf = _protocolHash(object);
+    if (hf === undefined) {
+      throw new TypeError(
+        `valsem: pool.intern — the type must implement [hash](hasher); a [hashCode] of its own is not a declaration since 0.2`,
+      );
+    }
     const hc = (object as Record<symbol, unknown>)[hashCodeSym];
-    const hash = typeof hc === 'function' ? (hc as (this: unknown) => unknown).call(object) : hc;
-    if (typeof hash !== 'number') {
-      throw new TypeError(`valsem: pool.intern — [hashCode] must be a number, or a method returning one, got ${typeof hash}`);
+    const computed = typeof hc !== 'number';
+    let hash = hc as number;
+    if (computed) {
+      const h: unknown = hf.call(object, _activeHasher());
+      if (typeof h !== 'number') throw new TypeError(`valsem: pool.intern — [hash] must return a number; got ${typeof h}`);
+      hash = h >>> 0;
     }
     const eq = (object as Record<symbol, unknown>)[equalsSym];
     const found = this.lookup(
@@ -642,8 +656,12 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
     // remembered here so that this pool recognises it in O(1) as the marker
     // would. (The rest of valsem then meets it as a value-type instance
     // without the marker — pooled by its equality and hash on first sight.)
-    if (Object.isExtensible(object)) (object as Record<symbol, unknown>)[internedSym] = true;
-    else (this.#unmarked ??= new WeakSet()).add(object);
+    // The stamped [hashCode] goes the same way: a frozen instance keeps
+    // answering through [hash], one call per read.
+    if (Object.isExtensible(object)) {
+      (object as Record<symbol, unknown>)[internedSym] = true;
+      if (computed) (object as Record<symbol, unknown>)[hashCodeSym] = hash;
+    } else (this.#unmarked ??= new WeakSet()).add(object);
     Object.freeze(object);
     return this.register(object, hash);
   }
@@ -758,14 +776,12 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
  * const pool = createInternPool<Point>();
  *
  * class Point {
- *   declare readonly [hashCode]: number;
  *   declare readonly [interned]: true;
  *   private constructor(readonly x: number, readonly y: number) {}
  *   [equals](o: unknown) { return o instanceof Point && o.x === this.x && o.y === this.y; }
+ *   [hash](hasher: Hasher) { return mix(hasher.number(this.x), hasher.number(this.y)); }
  *   static of(x: number, y: number): Point {
- *     const p = new Point(x, y);
- *     (p as any)[hashCode] = (x * 73856093) ^ (y * 19349663);
- *     return pool.intern(p); // frozen, marked interned, deduplicated
+ *     return pool.intern(new Point(x, y)); // frozen, marked interned, hashed and stamped, deduplicated
  *   }
  * }
  * ```

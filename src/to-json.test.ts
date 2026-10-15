@@ -19,7 +19,8 @@ import { produce } from './produce.js';
 import { current } from './current.js';
 import { deepHash } from './deep-hash.js';
 import { createInternPool } from './intern-pool.js';
-import { equals, hashCode, interned } from './deep-equal.js';
+import { equals, hash, interned } from './deep-equal.js';
+import type { Hasher } from './hasher.js';
 import { toDraft, createDraftState, markChanged, assertUnrevoked, DRAFT_STATE, type DraftState } from './draft-core.js';
 import { ValueList } from './value-list.js';
 import { ValueMap } from './value-map.js';
@@ -255,8 +256,8 @@ class Interval {
     const h = deepHash(['interval', lo, hi]);
     return intervals.lookup(h, (c) => c.lo === lo && c.hi === hi) ?? intervals.register(new Interval(lo, hi), h);
   }
-  get [hashCode](): number {
-    return deepHash(['interval', this.lo, this.hi]);
+  [hash](hasher: Hasher): number {
+    return deepHash(['interval', this.lo, this.hi], hasher);
   }
   get [interned](): true {
     return true;

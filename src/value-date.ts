@@ -16,9 +16,9 @@
 // never changes.
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
-import { hashNumber, mix } from './hasher.js';
+import { hashNumber, mix, type Hasher } from './hasher.js';
 
 const pool = createInternPool<ValueDate>();
 const INTERNAL = Symbol('valsem.value-date');
@@ -61,6 +61,10 @@ export class ValueDate {
   /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /** The hash under `hasher`: the epoch through the hasher, as the active one is through the process's. */
+  [hashSym](hasher: Hasher): number {
+    return mix(0xda7e, hasher.number(this.epochMs));
   }
   /** The canonical-type marker: every instance is canonical by construction. */
   get [internedSym](): true {

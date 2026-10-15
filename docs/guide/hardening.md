@@ -41,6 +41,22 @@ and the collections' accumulators, so swapping mid-run would corrupt identity.
 Web Crypto (`globalThis.crypto`) is a platform requirement, present in every
 environment that meets the [feature floor](/guide/requirements).
 
+### A hasher of your own
+
+`deepHash(value, hasher)` hashes under any `Hasher` that remembers what it
+hashes (`recall` and `remember`, which the hashers `createMarvin32Hasher`
+makes have, and a bare pair for `configureHasher` need not), and
+`createMarvin32Hasher(k0, k1)` built on constants is one under which the
+same value hashes the same in every process — a fingerprint you can
+compare across runs, or the seed of a choice that must replay. That is the
+point of it, and it is also why it is not flood-resistant: its key is no
+secret, so colliding inputs can be computed offline. Use such a hasher for
+what it is for, and nothing that buckets untrusted input by it: never pass
+it to `configureHasher` in a process that ingests data from outside, and
+never key a table by its hashes. The active hasher, keyed by the process
+seed, is what every pool and collection buckets by, and `deepHash(value)`
+without a hasher is always that one.
+
 ### Keep hash values in the process
 
 The seed stops an attacker who can only send input. It does not stop one who
@@ -54,7 +70,7 @@ hashes yielded 4,000 such records, and interning them took 0.66 s against
 6 ms for as many random records. A keyed PRF as the leaf hash changes
 nothing here, because the attack never computes a leaf hash.
 
-So `deepHash`, `internHash` and `[hashCode]` values stay inside the process.
+So `deepHash` and `internHash` values stay inside the process.
 An ETag, a cache key or anything else that leaves it should be a
 cryptographic hash (SHA-256, say) of the serialised value.
 

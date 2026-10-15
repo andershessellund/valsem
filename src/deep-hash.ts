@@ -7,15 +7,32 @@
 //   1. Primitives → direct hash
 //   2. Array → recursive ordered hash
 //   3. Mutable built-in (by constructor chain) → throw, naming the replacement
-//   4. a[hashCode] (property, getter or method) → class-defined hash
+//   4. a[hash](hasher), a method of the prototype → class-defined hash,
+//      served from a[hashCode] where valsem has cached it
 //   5. hashCodeMethods.get(a.constructor) → registry (registered types)
 //   6. Plain object → structural order-independent hash
 //   7. Class without handler → throw
+//
+// One walk, parametric in the hasher. `deepHash(value)` walks under the
+// ACTIVE hasher, the process's: the leaves go through its functions, and
+// whatever is canonical answers from what was baked into it when it was
+// made (the meta store, a `[hashCode]` field, a consed node's hash).
+// `deepHash(value, hasher)` with any other hasher is the same walk under
+// that one: nothing baked in is under it, so a class instance goes through
+// `[hash](hasher)` every time, and what cannot change — canonical data,
+// value types, the collections' nodes — the hasher remembers, itself
+// (`recall`/`remember`, hasher.ts), so that shared structure is hashed once
+// per hasher. Which hasher it is decides four things in the walk: which
+// leaf function is called, where a remembered hash is looked for, whether
+// `[hashCode]` is read, and whether the result is remembered. Each is one
+// comparison. A second copy of the walk for the active hasher saved 2.5 ns
+// on a primitive hash and nothing on any operation built from one, and
+// cost a duplicated dispatch and a kilobyte of bundle (D68).
 // ---------------------------------------------------------------------------
 
-import { hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
+import { hash, hashCode, _recordKeys, _ctorOf } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype, _isTemporalType } from './deep-equal.js';
-import { hashString, hashNumber, mix } from './hasher.js';
+import { mix, hashString, hashNumber, _active, _hashed, _arm, _activeHasher, _remembering, type Hasher, type Remembering } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { _undraft } from './shared.js';
 
@@ -148,11 +165,27 @@ export function _symbolId(s: symbol): number {
   return id;
 }
 
-/** @internal The hash of a symbol value or key. */
-export function _symbolHash(s: symbol): number {
+// The leaves. Under the active hasher the call is the direct one, through
+// the live bindings, which the engine folds to the hasher's own function; a
+// call through the parameter costs ~2.5 ns more on a 6 ns hash, measured,
+// which is where a primitive-heavy build spends its time.
+function leafString(s: string, hasher: Hasher): number {
+  return hasher === _active ? hashString(s) : hasher.string(s);
+}
+function leafNumber(n: number, hasher: Hasher): number {
+  return hasher === _active ? hashNumber(n) : hasher.number(n);
+}
+
+/** The hash of a symbol under `hasher`: a registered one by its name, a unique one by an identity assigned on first sight. */
+function symbolHash(s: symbol, hasher: Hasher): number {
   const key = Symbol.keyFor(s);
-  if (key !== undefined) return mix(TAG_SYMBOL, hashString(key));
-  let h = _hashCache.get(s) as number | undefined; // this copy's fast path
+  if (key !== undefined) return mix(TAG_SYMBOL, leafString(key, hasher));
+  // The identity number is process-wide (`_symbolId`), so this is the one
+  // leaf a fixed key does not make reproducible across processes: a unique
+  // symbol has no content to hash. Under the active hasher it is cached in
+  // this copy's store.
+  if (hasher !== _active) return mix(TAG_UNIQUE_SYMBOL, hasher.number(_symbolId(s)));
+  let h = _hashCache.get(s) as number | undefined;
   if (h === undefined) {
     h = mix(TAG_UNIQUE_SYMBOL, hashNumber(_symbolId(s)));
     _hashCache.set(s, h);
@@ -160,14 +193,38 @@ export function _symbolHash(s: symbol): number {
   return h;
 }
 
-/** @internal One record entry's accumulator term. */
-export function _entryTerm(key: string | symbol, valueHash: number): number {
-  return scramble(mix(typeof key === 'string' ? hashString(key) : _symbolHash(key), valueHash));
+/** @internal The hash of a symbol value or key, under the active hasher. */
+export function _symbolHash(s: symbol): number {
+  return symbolHash(s, _activeHasher());
 }
 
-/** @internal One array element's accumulator term. */
+/** One record entry's accumulator term under `hasher`. */
+function entryTerm(key: string | symbol, valueHash: number, hasher: Hasher): number {
+  return scramble(mix(typeof key === 'string' ? leafString(key, hasher) : symbolHash(key, hasher), valueHash));
+}
+
+/** @internal One record entry's accumulator term, under the active hasher: what `intern` and `produce` fold with. */
+export function _entryTerm(key: string | symbol, valueHash: number): number {
+  return entryTerm(key, valueHash, _activeHasher());
+}
+
+/** One array element's accumulator term under `hasher`. */
+function elementTerm(index: number, elementHash: number, hasher: Hasher): number {
+  return scramble(mix(leafNumber(index, hasher), elementHash));
+}
+
+/** @internal One array element's accumulator term, under the active hasher. */
 export function _elementTerm(index: number, elementHash: number): number {
-  return scramble(mix(hashNumber(index), elementHash));
+  return elementTerm(index, elementHash, _activeHasher());
+}
+
+/**
+ * @internal The term of one (key hash, value hash) pair in a commutative
+ * accumulator — the record entry term with the key already hashed, for the
+ * collections' walks under a hasher, where a key is any value.
+ */
+export function _pairTerm(keyHash: number, valueHash: number): number {
+  return scramble(mix(keyHash, valueHash));
 }
 
 /** @internal Fold a record accumulator into the final hash. */
@@ -222,7 +279,7 @@ function unhashableMessage(obj: object): string {
  * guaranteed (hash collisions are possible).
  *
  * Handles: primitives (including `NaN`, `+0`/`-0`, `bigint`), plain objects
- * (key-order-independent), arrays, and any class implementing `[hashCode]` or
+ * (key-order-independent), arrays, and any class implementing `[hash]` or
  * registered via `deepEqual.register()`.
  *
  * Symbols are values: a registered symbol hashes by its name, a unique one
@@ -234,14 +291,48 @@ function unhashableMessage(obj: object): string {
  * TypedArrays, which valsem does not treat as values. Those errors name the
  * immutable replacement.
  *
+ * **Under a hasher of your own.** `deepHash(value, hasher)` hashes the same
+ * value under any {@link Hasher}: the leaves through its functions, class
+ * instances through their `[hash](hasher)`, the collections likewise, with
+ * the same combiners — so the companion invariant holds under it too. A
+ * hasher built on a fixed key (`createMarvin32Hasher(k0, k1)`) gives the
+ * same hash in every process: a reproducible fingerprint, or the seed of a
+ * choice that must replay. Such a hasher is not flood-resistant, so never
+ * bucket untrusted data by it. Hashing under it is a walk, not a cache read,
+ * but what cannot change — canonical data, value types, the collections'
+ * nodes — is remembered per hasher, weakly, so a value that shares structure
+ * with one already hashed costs the difference: a `ValueList` hashed after
+ * every push costs O(1) per push under a hasher used consistently. Left
+ * out, the hasher is the active one, and the hash is the one every pool
+ * and collection uses.
+ *
  * @example
  * ```ts
  * deepHash({ a: 1, b: 2 }) === deepHash({ b: 2, a: 1 }); // true
  * deepHash([1, 2]) !== deepHash([2, 1]);                   // true — order matters
  * deepHash(new Set([1, 2, 3]));                            // throws — use ValueSet
+ *
+ * const fixed = createMarvin32Hasher(0x5eed, 0x1234);
+ * deepHash(state, fixed); // the same number in every process
  * ```
  */
-export function deepHash(value: unknown): number {
+export function deepHash(value: unknown, hasher?: Hasher): number {
+  // The one walk, under `hasher`: the active hasher, or one that remembers.
+  // Everything the two differ in is a question of the hasher, asked where
+  // it arises: the leaves go through its functions; what cannot change
+  // answers from the meta store under the active hasher (the interner fills
+  // it, and the built-in types carry their hash as `[hashCode]`), and from
+  // the hasher's own memory under any other. The walk recurses through this
+  // function, so what is settled here is settled by one comparison a level:
+  // a wrapper around it cost 2.5 ns a call, measured, on a 6 ns hash.
+  if (hasher === undefined) {
+    // Hashing has begun: the ordering guard of `configureHasher` is armed
+    // here rather than in the leaf trampolines, which the walk may not reach.
+    if (!_hashed) _arm();
+    hasher = _active;
+  } else if (hasher !== _active && typeof hasher.recall !== 'function') {
+    _remembering(hasher); // throws, naming what it lacks
+  }
   if (value === null) return TAG_NULL;
   if (value === undefined) return TAG_UNDEFINED;
 
@@ -254,26 +345,33 @@ export function deepHash(value: unknown): number {
       // payload are whatever the CPU left there (0/0 is fff8… on x86-64 and
       // 7ff8… on arm64; V8 keeps the bits), where `deepEqual` and `same` say
       // equal — so the hash must too (the companion invariant, §3.2).
-      return mix(TAG_NUMBER, hashNumber(value === 0 ? 0 : value !== value ? NaN : value));
+      return mix(TAG_NUMBER, leafNumber(value === 0 ? 0 : value !== value ? NaN : value, hasher));
     case 'string':
-      return mix(TAG_STRING, hashString(value));
+      return mix(TAG_STRING, leafString(value, hasher));
     case 'bigint':
-      return mix(TAG_BIGINT, hashString(String(value)));
+      return mix(TAG_BIGINT, leafString(String(value), hasher));
     case 'symbol':
-      return _symbolHash(value);
+      return symbolHash(value, hasher);
     case 'function':
       throw new TypeError(`deepHash: function is not supported`);
   }
 
   const obj = value as object;
 
-  // Canonical objects carry their hash (the interner fills the meta store).
-  const meta = _metaOf(obj);
-  if (meta !== undefined) return meta.h;
+  // What cannot change has been hashed before: under the active hasher a
+  // canonical object carries its hash (the interner fills the meta store);
+  // under any other, the hasher remembers what it has walked.
+  if (hasher === _active) {
+    const meta = _metaOf(obj);
+    if (meta !== undefined) return meta.h;
+  } else {
+    const hit = (hasher as Remembering).recall(obj);
+    if (hit !== undefined) return hit;
+  }
 
   // A draft hashes as the value it holds right now, as `intern` takes it.
   const undrafted = _undraft(obj);
-  if (undrafted !== obj) return deepHash(undrafted);
+  if (undrafted !== obj) return deepHash(undrafted, hasher);
 
   // Decode-boundary depth cap: the recursive walk below is where hostile
   // (or cyclic) input would otherwise exhaust the stack. Cached canonical
@@ -284,7 +382,7 @@ export function deepHash(value: unknown): number {
   depth++;
   try {
     if (depth > _maxDepth()) throw _depthError('deepHash');
-    return hashObjectValue(obj);
+    return hashObject(obj, hasher);
   } finally {
     depth--;
   }
@@ -292,36 +390,60 @@ export function deepHash(value: unknown): number {
 
 let depth = 0;
 
-function hashObjectValue(obj: object): number {
+function hashObject(obj: object, hasher: Hasher): number {
+  const active = hasher === _active;
+
   // Array — order-dependent positional accumulator (see the accumulator
   // contract above: this form is what makes array hashes delta-updatable).
   if (Array.isArray(obj)) {
     let acc = 0;
     for (let i = 0; i < obj.length; i++) {
-      acc = (acc + _elementTerm(i, deepHash(obj[i]))) | 0;
+      acc = (acc + elementTerm(i, deepHash(obj[i], hasher), hasher)) | 0;
     }
-    return _arrayHashOf(obj.length, acc);
+    const h = _arrayHashOf(obj.length, acc);
+    // A canonical array is frozen, so another hasher may remember its hash;
+    // a raw one may change, and is walked every time, as under the active
+    // hasher, whose store the interner alone writes.
+    if (!active && _metaOf(obj) !== undefined) (hasher as Remembering).remember(obj, h);
+    return h;
   }
 
   const proto = Object.getPrototypeOf(obj);
   if (proto !== Object.prototype && proto !== null && !_isForeignObjectPrototype(proto)) {
-    // A class instance: the [hashCode] protocol (a property or a legacy
-    // method), else the registry by the PROTOTYPE's constructor. Neither is
-    // consulted on a plain record, where a protocol symbol is an ordinary
-    // key — so a record cannot forge its hash with an own [hashCode].
-    // The mutable built-ins are refused first, whatever protocol or
-    // registration they carry (a `class Stamp extends Date` with a
-    // `[hashCode]` is still re-timeable) — the same order `intern` applies.
-    const ctor = _ctorOf(obj);
+    // A class instance: [hash](hasher) off the prototype, else the registry
+    // by the PROTOTYPE's constructor. Neither is consulted on a plain
+    // record, where a protocol symbol is an ordinary key — so a record
+    // cannot forge its hash. The mutable built-ins are refused first,
+    // whatever protocol or registration they carry (a `class Stamp extends
+    // Date` with a `[hash]` is still re-timeable) — the same order `intern`
+    // applies. Under the active hasher a class with [hash] is served from
+    // [hashCode] where there is one: the field every built-in value type
+    // keeps, or the number a pool stamped — valsem's cache of this very
+    // hash, so [hash] runs once per canonical instance, not once per
+    // deepHash. A [hashCode] on a class WITHOUT [hash] is not read: it was
+    // a declaration once, and is refused now, since a number computed any
+    // other way is one the hasher valsem interns with never saw. One
+    // prototype read serves all three lookups.
+    const c = (proto as { constructor?: unknown }).constructor;
+    const ctor = typeof c === 'function' ? c : undefined;
     if (_mutableBuiltinReason(ctor) !== undefined) throw new TypeError(unhashableMessage(obj));
-    if (hashCode in (obj as any)) {
-      const hc = (obj as any)[hashCode];
-      if (typeof hc === 'number') return hc >>> 0;
-      if (typeof hc === 'function') return hc.call(obj) >>> 0;
+    const hf = (proto as Record<symbol, unknown>)[hash];
+    let h: number;
+    if (typeof hf === 'function') {
+      if (active) {
+        const hc = (obj as any)[hashCode];
+        if (typeof hc === 'number') return hc >>> 0;
+      }
+      h = (hf as (this: unknown, hasher: Hasher) => number).call(obj, hasher) >>> 0;
+    } else {
+      const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
+      if (handler === undefined) throw new TypeError(unhashableMessage(obj));
+      h = handler(obj, hasher) >>> 0; // a uint32, as the [hash] path above: handlers may return anything
     }
-    const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
-    if (handler) return handler(obj) >>> 0; // a uint32, as the [hashCode] path above: handlers may return anything
-    throw new TypeError(unhashableMessage(obj));
+    // A hash declares that the instance never changes, so another hasher
+    // may remember it; under the active one, `intern` keeps it.
+    if (!active) (hasher as Remembering).remember(obj, h);
+    return h;
   }
 
   // Plain object — key-order-independent
@@ -338,10 +460,12 @@ function hashObjectValue(obj: object): number {
     const k = keys[i]!;
     const v = rec[k];
     if (v === undefined) continue; // undefined-valued key ≡ absent (matches deepEqual)
-    acc = (acc + _entryTerm(k, deepHash(v))) >>> 0;
+    acc = (acc + entryTerm(k, deepHash(v, hasher), hasher)) >>> 0;
     keyCount++;
   }
-  return _recordHashOf(keyCount, acc);
+  const h = _recordHashOf(keyCount, acc);
+  if (!active && _metaOf(obj) !== undefined) (hasher as Remembering).remember(obj, h);
+  return h;
 }
 
 /**
@@ -356,4 +480,13 @@ export function _arrayHashWithAcc(arr: readonly unknown[]): { h: number; acc: nu
     acc = (acc + _elementTerm(i, deepHash(arr[i]))) | 0;
   }
   return { h: _arrayHashOf(arr.length, acc), acc: acc >>> 0, n: arr.length };
+}
+
+/**
+ * @internal `deepHash(value, hasher)` for a hasher that is not the active
+ * one and is known to remember: what the collections' `[hash]` call for
+ * their children, so that the check is made once per walk.
+ */
+export function _hashWith(value: unknown, hasher: Remembering): number {
+  return deepHash(value, hasher);
 }
