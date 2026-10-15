@@ -406,14 +406,14 @@ The four value-protocol symbols, cross-realm registered as
 | --- | --- | --- |
 | `equals` | **comparable**: `deepEqual` answers by content | `[equals](other): boolean` on the prototype; also the kind discriminator |
 | `hash` | **a value**: hashable, internable, a key, state | `[hash](hasher): number` on the prototype, hashing the content through the hasher it is given; declares immutability (D26, D68) |
-| `hashCode` | the value's hash **under the active hasher** | `[hashCode]: number` as property, getter or method: what valsem caches for a class with `[hash]` when it interns an instance, and what a class may carry precomputed instead of `[hash]`, which still makes it a value but one that hashes under the active hasher only |
+| `hashCode` | **valsem's cache** of the value's hash under the active hasher | `[hashCode]: number`, written by valsem: a field on its own value types, the meta store for a class `intern` pooled, a stamp on an instance `pool.intern` pooled. Read only on a class that has `[hash]`; a `[hashCode]` a class set itself, the declaration before 0.2, is refused (D26) |
 | `interned` | **auto-interning type**: every instance canonical by construction | `[interned]: true`; requires a private constructor (D27) |
 
 The registry form for types you cannot edit: `deepEqual.register(Type,
 equalsFn)` makes it comparable; `deepEqual.register(Type, equalsFn, hashFn)`
 makes it a value, `hashFn` called as `hashFn(value, hasher)`; one declared
-with a single parameter is the precomputed form, a value under the active
-hasher only. A value's registration is fixed: registering the type again
+with a single parameter is refused at registration. A value's registration
+is fixed: registering the type again
 throws unless it repeats the identical pair, since canonical instances were
 hashed and pooled by the first; a comparable-only registration may be
 replaced or upgraded (D26). Dispatch keys

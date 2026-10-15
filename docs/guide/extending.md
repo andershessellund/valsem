@@ -66,12 +66,15 @@ flood-resistant, since its key is no secret — never bucket untrusted data by
 it, and never install it as the active hasher of a process that ingests
 any; see [hardening](/guide/hardening#a-hasher-of-your-own).
 
-**The older form still works.** A class may carry a precomputed
-`[hashCode]` — a number, a getter, or a method — instead of `[hash]`, as
-before this protocol existed; valsem buckets by whatever number that is,
-so it is a value in this process, and
-that is where it stops: `deepHash(instance, hasher)` throws for it, naming
-`[hash]` as the fix. Write `[hash]` for new classes.
+**Coming from a precomputed `[hashCode]`.** Before 0.2 a class declared
+itself a value by carrying a `[hashCode]` number it computed itself. That
+is refused now, with the reason: a number computed any way at all is one
+the hasher valsem interns with never saw, so a seeded hash, or a SipHash
+plugged in with `configureHasher` for a deployment that ingests untrusted
+data, did not cover the class — and nothing said so. Replace it with
+`[hash](hasher) { return deepHash([…the content…], hasher); }` and drop
+the field: `[hashCode]` is valsem's cache of that hash, which it writes
+when it interns an instance, not yours to set.
 
 For third-party types you cannot edit, register handlers globally — the same
 two tiers, so the hash is optional:
@@ -85,8 +88,8 @@ deepEqual.register(
   (a, b) => a.amount === b.amount && a.currency === b.currency,
   (m, hasher) => deepHash([m.amount, m.currency], hasher),
 );
-// A hashFn of one parameter is the precomputed form: a value under the
-// active hasher only, as a precomputed [hashCode] is.
+// A hashFn of one parameter — the form before 0.2 — is refused at
+// registration, for the same reason a precomputed [hashCode] is.
 
 // Comparable only — deepEqual by content; deepHash and intern still refuse it.
 deepEqual.register(Legacy, (a, b) => a.id === b.id);

@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, afterEach } from 'vitest';
 import { intern, isCanonical, fastEqual } from './intern.js';
-import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { produce, produceWithPatches, applyPatches, type Patch } from './produce.js';
 import { current } from './current.js';
@@ -174,13 +174,16 @@ describe('protocol symbols are ordinary keys on plain records', () => {
     expect(() => deepHash(e)).toThrow(/function/); // a function value is not a value
     expect(deepEqual({ x: 1, [equals]: 1 }, { x: 2, [equals]: 1 })).toBe(false);
   });
-  it('class instances keep the protocol, own field or prototype getter alike', () => {
+  it('class instances keep the protocol: [hash] off the prototype, and [hashCode] as its cache, own field or getter alike', () => {
     class Own {
-      [hashCode] = 7;
+      [hashCode] = 7; // valsem's slot, pre-filled: read as the cache of [hash], since the class has one
       [interned] = true;
       constructor(readonly v: number) {}
       [equals](o: unknown): boolean {
         return o instanceof Own && o.v === this.v;
+      }
+      [hash](): number {
+        return 7;
       }
     }
     expect(deepHash(new Own(1))).toBe(7);

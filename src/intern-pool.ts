@@ -508,18 +508,16 @@ export interface InternPool<T extends object> {
   register(value: T, hash: number): T;
 
   /**
-   * Intern `object` using its own `[hash]` (or `[hashCode]`) and `[equals]`
-   * symbols.
+   * Intern `object` using its type's `[hash]` and `[equals]`.
    *
    * On a cache hit the canonical instance is returned and `object` is
    * discarded (no allocation committed). On a miss `object` is frozen,
    * marked `[interned]=true`, registered, and returned as the new
    * canonical instance.
    *
-   * The object's type implements `[hash](hasher)`, and the pool computes the
+   * The object's type implements `[hash](hasher)`: the pool computes the
    * hash under the active hasher and stamps it on the instance as
-   * `[hashCode]`, so that every later read is a property read; or the object
-   * has `[hashCode]: number` set before calling this.
+   * `[hashCode]`, so that every later read is a property read.
    */
   intern(object: T): T;
 
@@ -628,25 +626,24 @@ class InternPoolImpl<T extends object> implements InternPool<T> {
 
   intern(object: T): T {
     if ((object as Record<symbol, unknown>)[internedSym] === true || this.#unmarked?.has(object)) return object;
-    // The protocol admits a `[hashCode]` property, getter or method (deepHash
-    // reads all three). Read as a number only, a method multiplied to NaN:
-    // every instance landed in one slot, and the pool went quadratic.
-    const hc = (object as Record<symbol, unknown>)[hashCodeSym];
-    let hash = typeof hc === 'function' ? (hc as (this: unknown) => unknown).call(object) : hc;
-    // Without one, the type's [hash] under the active hasher: computed here,
-    // once, and stamped below as the instance's [hashCode], beside the marker.
-    let computed = false;
-    if (hash === undefined) {
-      const hf = _protocolHash(object);
-      if (hf !== undefined) {
-        hash = hf.call(object, _activeHasher()) >>> 0;
-        computed = true;
-      }
-    }
-    if (typeof hash !== 'number') {
+    // The type's [hash] under the active hasher, computed here, once, and
+    // stamped below as the instance's [hashCode], beside the marker; an
+    // instance this pool already stamped is read, not recomputed. Read as a
+    // number only: a method multiplied to NaN once, every instance landed in
+    // one slot, and the pool went quadratic.
+    const hf = _protocolHash(object);
+    if (hf === undefined) {
       throw new TypeError(
-        `valsem: pool.intern — the type must implement [hash](hasher), or the instance carry a [hashCode] number (or a method returning one); got ${typeof hash}`,
+        `valsem: pool.intern — the type must implement [hash](hasher); a [hashCode] of its own is not a declaration since 0.2`,
       );
+    }
+    const hc = (object as Record<symbol, unknown>)[hashCodeSym];
+    const computed = typeof hc !== 'number';
+    let hash = hc as number;
+    if (computed) {
+      const h: unknown = hf.call(object, _activeHasher());
+      if (typeof h !== 'number') throw new TypeError(`valsem: pool.intern — [hash] must return a number; got ${typeof h}`);
+      hash = h >>> 0;
     }
     const eq = (object as Record<symbol, unknown>)[equalsSym];
     const found = this.lookup(

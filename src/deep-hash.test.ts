@@ -4,7 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { deepHash } from './deep-hash.js';
-import { deepEqual, equals, hashCode } from './deep-equal.js';
+import { deepEqual, equals, hash } from './deep-equal.js';
+import type { Hasher } from './hasher.js';
 import { intern } from './intern.js';
 import { Temporal } from './temporal.test-helpers.js';
 
@@ -173,7 +174,7 @@ describe('deepHash', () => {
 
   // --- Class instances (v2 behavior) ---
 
-  it('class with [hashCode] → uses symbol', () => {
+  it('class with [hash] → uses the method, with the active hasher', () => {
     class Money {
       constructor(
         readonly amount: number,
@@ -186,8 +187,8 @@ describe('deepHash', () => {
           this.currency === other.currency
         );
       }
-      [hashCode](): number {
-        return this.amount * 31 + this.currency.length;
+      [hash](hasher: Hasher): number {
+        return hasher.number(this.amount * 31 + this.currency.length);
       }
     }
     const a = new Money(100, 'USD');
@@ -205,7 +206,7 @@ describe('deepHash', () => {
     deepEqual.register(
       Vec2,
       (a, b) => a.x === b.x && a.y === b.y,
-      (v) => v.x * 31 + v.y,
+      (v, hasher) => hasher.number(v.x * 31 + v.y),
     );
     expect(deepHash(new Vec2(1, 2))).toBe(deepHash(new Vec2(1, 2)));
     expect(deepHash(new Vec2(1, 2))).not.toBe(deepHash(new Vec2(3, 4)));
@@ -215,13 +216,13 @@ describe('deepHash', () => {
     class Opaque {
       constructor(readonly id: string) {}
     }
-    expect(() => deepHash(new Opaque('a'))).toThrow('has no [hash], [hashCode]');
+    expect(() => deepHash(new Opaque('a'))).toThrow('has no [hash] or registered');
   });
 
-  it('[hashCode] takes priority over registry', () => {
+  it('[hash] takes priority over registry', () => {
     class Token {
       constructor(readonly value: number) {}
-      [hashCode](): number {
+      [hash](): number {
         return 42;
       }
       [equals](other: unknown): boolean {
@@ -231,7 +232,7 @@ describe('deepHash', () => {
     deepEqual.register(
       Token,
       () => false,
-      () => 999,
+      (_t, hasher) => (void hasher, 999),
     );
     expect(deepHash(new Token(1))).toBe(42);
   });
@@ -245,8 +246,8 @@ describe('deepHash', () => {
       [equals](other: unknown): boolean {
         return other instanceof Pair && this.a === other.a && this.b === other.b;
       }
-      [hashCode](): number {
-        return this.a * 37 + this.b;
+      [hash](hasher: Hasher): number {
+        return hasher.number(this.a * 37 + this.b);
       }
     }
     const p1 = new Pair(1, 2);
@@ -268,7 +269,7 @@ describe('deepHash — diagnostic for unregistered Temporal', () => {
   it('keeps the generic message for other unregistered classes', () => {
     class Whatever {}
     expect(() => deepHash(new Whatever())).toThrow(
-      /class instance 'Whatever' has no \[hash\], \[hashCode\] or registered hash handler/,
+      /class instance 'Whatever' has no \[hash\] or registered hash handler/,
     );
   });
 });

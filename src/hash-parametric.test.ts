@@ -139,7 +139,11 @@ describe('the [hash] protocol', () => {
     expect(new HashMap<Point, number>().set(p, 1).get(Point.of(1, 2))).toBe(1);
   });
 
-  it('a class with [hashCode] alone is still a value, under the active hasher only', () => {
+  it('a class with [hashCode] and no [hash] is not a value: the form before 0.2, refused with the reason', () => {
+    // The number was computed any way at all — here through deepHash, as
+    // the README once showed; often not — and the hasher valsem interns
+    // with never saw it: a seeded hash, or a SipHash plugged in, did not
+    // cover the class, and nothing said so.
     class Legacy {
       readonly [hashCode]: number;
       constructor(readonly v: number) {
@@ -149,19 +153,19 @@ describe('the [hash] protocol', () => {
         return o instanceof Legacy && o.v === this.v;
       }
     }
-    expect(deepHash(new Legacy(1))).toBe(deepHash(new Legacy(1)));
-    expect(intern(new Legacy(1))).toBe(intern(new Legacy(1)));
-    expect(new HashMap<Legacy, string>().set(new Legacy(1), 'one').get(new Legacy(1))).toBe('one');
-    expect(() => deepHash(new Legacy(1), h1)).toThrow(/Legacy carries a precomputed \[hashCode\] and no \[hash\]/);
-    expect(() => deepHash(new Legacy(1), h1)).toThrow(/implement \[hash\]\(hasher\)/);
-    expect(() => deepHash({ nested: [new Legacy(1)] }, h1)).toThrow(/Legacy carries a precomputed/);
-    expect(() => deepHash(ValueList.of(new Legacy(1)), h1)).toThrow(/Legacy carries a precomputed/);
-    expect(() => deepHash(ValueMap.from([[new Legacy(1), 1]]), h1)).toThrow(/Legacy carries a precomputed/);
-    // The active hasher is the one it was computed under, so it still answers there.
-    expect(deepHash([new Legacy(1)])).toBe(deepHash([new Legacy(1)]));
+    const refused = /Legacy carries a \[hashCode\] but no \[hash\].*hasher valsem interns with.*configureHasher.*\[hashCode\] is valsem's cache/s;
+    expect(() => deepHash(new Legacy(1))).toThrow(refused);
+    expect(() => intern(new Legacy(1))).toThrow(refused);
+    expect(() => new HashMap<Legacy, string>().set(new Legacy(1), 'one')).toThrow(refused);
+    expect(() => deepHash(new Legacy(1), h1)).toThrow(refused);
+    expect(() => deepHash({ nested: [new Legacy(1)] }, h1)).toThrow(refused);
+    expect(() => deepHash(ValueList.of(new Legacy(1)), h1)).toThrow(refused);
+    expect(deepEqual(new Legacy(1), new Legacy(1))).toBe(true); // comparable, by its [equals]
   });
 
-  it('a class with both answers [hashCode] under the active hasher and [hash] under another', () => {
+  it('[hashCode] beside [hash] is read as the cache under the active hasher, and never under another', () => {
+    // The slot is valsem's to write (a pool stamps it); a class that fills it
+    // itself is trusted as a pool would be, under the active hasher only.
     class Both {
       constructor(readonly v: number) {}
       get [hashCode](): number {
@@ -178,7 +182,7 @@ describe('the [hash] protocol', () => {
     expect(deepHash(new Both(1), h1)).toBe(h1.number(1));
   });
 
-  it('the registry form: a hashFn written for the hasher serves every hasher; one of a single parameter, the active one only', () => {
+  it('the registry form: a hashFn written for the hasher serves every hasher; one of a single parameter is refused at registration', () => {
     class Vec {
       constructor(
         readonly x: number,
@@ -197,15 +201,15 @@ describe('the [hash] protocol', () => {
     class Old {
       constructor(readonly id: string) {}
     }
-    deepEqual.register(
-      Old,
-      (a, b) => a.id === b.id,
-      (o) => deepHash(o.id),
-    );
-    expect(deepHash(new Old('a'))).toBe(deepHash('a'));
-    expect(intern(new Old('a'))).toBe(intern(new Old('a')));
-    expect(() => deepHash(new Old('a'), h1)).toThrow(/Old is registered with a hash that takes no hasher/);
-    expect(() => deepHash(new Old('a'), h1)).toThrow(/\(value, hasher\)/);
+    // The form before 0.2, refused where it is written, not where it is used.
+    expect(() =>
+      deepEqual.register(
+        Old,
+        (a, b) => a.id === b.id,
+        (o) => deepHash(o.id),
+      ),
+    ).toThrow(/the hashFn for Old takes one parameter.*\(value, hasher\) => …/s);
+    expect(() => deepHash(new Old('a'))).toThrow(/has no \[hash\] or registered/); // nothing was registered
   });
 
   it('[hash] is read off the prototype, like [equals]: an own property is not the protocol', () => {
@@ -232,7 +236,7 @@ describe('the [hash] protocol', () => {
     expect(() => deepHash(new Date(0), h1)).toThrow(/ValueDate/);
     expect(() => deepHash(new Map(), h1)).toThrow(/ValueMap/);
     expect(() => deepHash(() => 1, h1)).toThrow(/function/);
-    expect(() => deepHash(new (class Opaque {})(), h1)).toThrow(/has no \[hash\], \[hashCode\]/);
+    expect(() => deepHash(new (class Opaque {})(), h1)).toThrow(/has no \[hash\] or registered/);
     class Half {
       [equals](): boolean {
         return true;

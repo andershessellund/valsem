@@ -98,27 +98,25 @@ export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
 
 /**
- * Symbol for the companion hash code on class instances: **the number valsem
- * interns and buckets by** — what `deepHash(instance)` answers, and what
- * every pool, `HashMap` and collection keys on. It is the hash under the
- * *active* hasher, the process's one: Marvin32 keyed by the seed drawn per
- * process, or what `configureHasher` installed once at startup, fixed from
- * the first hash on. (A hasher you build for `deepHash(value, hasher)` is
- * never that one.)
+ * Symbol for **valsem's cache of a value's hash**: the number valsem interns
+ * and buckets by — what `deepHash(instance)` answers, and what every pool,
+ * `HashMap` and collection keys on. It is the hash under the *active*
+ * hasher, the process's one: Marvin32 keyed by the seed drawn per process,
+ * or what `configureHasher` installed once at startup, fixed from the first
+ * hash on. (A hasher you build for `deepHash(value, hasher)` is never that
+ * one.)
  *
- * valsem's own value types serve it from a field, so the hash of a canonical
- * collection is a property read, and a class with {@link hash} gets it for
- * nothing: `intern` computes it once through `[hash]` with the active hasher
- * and keeps it in the meta store; `pool.intern` computes it the same way and
- * stamps it on the instance. A class may also carry a `[hashCode]` of its
- * own — a precomputed `number`, a getter, or a method returning one — and
- * that alone still makes it a value, as it always has: hashable, internable,
- * a key; valsem buckets by whatever number it is. What such a class cannot
- * do is hash under any other hasher: its number is the bucketing hash, not a
- * hash under the hasher asked for, so `deepHash(instance, hasher)` throws
- * for it rather than answer wrongly, naming `[hash]` as the fix. Implement
- * {@link hash} for new classes; keep `[hashCode]` where a precomputed number
- * is what you have.
+ * valsem writes it; a class does not. valsem's own value types serve it
+ * from a field, so the hash of a canonical collection is a property read;
+ * for a class with {@link hash}, `intern` computes it once through `[hash]`
+ * with the active hasher and keeps it in the meta store, and `pool.intern`
+ * computes it the same way and stamps it on the instance. It is read only
+ * on a class that has {@link hash}: a `[hashCode]` a class set itself was
+ * the declaration before 0.2, and is refused now, with the reason — a
+ * number computed any other way is one the hasher valsem interns with
+ * never saw, so a seeded hash, or a SipHash plugged in for a deployment
+ * that ingests untrusted data, did not cover the class, and nothing said
+ * so.
  */
 export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
 
@@ -157,11 +155,10 @@ export const interned: unique symbol = Symbol.for('valsem.interned.v1') as any;
 
 const equalsMethods = new Map<Function, (a: any, b: any) => boolean>();
 // A registered hash is called with the hasher the hash is wanted under: the
-// active one, mostly. One written before hashers were a parameter — `(m) =>
-// deepHash([m.amount, m.currency])` — ignores it and answers under the active
-// hasher whatever it was given, which under another hasher would be a wrong
-// answer given silently; `deepHash(value, hasher)` reads the function's
-// declared arity to refuse it instead (see `_registeredHashTakesHasher`).
+// active one, mostly, and any other through `deepHash(value, hasher)`. It
+// must hash through that hasher, so `register` refuses one declared with a
+// single parameter — the form from before hashers were a parameter, which
+// answered under the active hasher whatever it was given.
 const hashCodeMethods = new Map<Function, (a: any, hasher: Hasher) => number>();
 
 // Injected by the intern module (which imports this one — same pattern as
@@ -387,12 +384,21 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     // Same constructor ⟹ same prototype ⟹ the same [equals].
     if (plainB || _ctorOf(a) !== _ctorOf(b)) return false;
     // Hash pre-filter: the companion invariant (equal ⟹ same hash) means two
-    // distinct precomputed [hashCode]s prove inequality without running a
-    // potentially O(n) [equals].
+    // distinct cached hashes prove inequality without running a potentially
+    // O(n) [equals]. [hashCode] is valsem's cache of [hash], and is read as
+    // that only on a class that has [hash]: on any other it is a number of
+    // the class's own, which proves nothing.
     const ha = (a as Record<symbol, unknown>)[hashCode];
     const hb = (b as Record<symbol, unknown>)[hashCode];
     // Read as deepHash reads them (`>>> 0`): -1 and 0xffffffff are one hash.
-    if (typeof ha === 'number' && typeof hb === 'number' && ha >>> 0 !== hb >>> 0) return false;
+    if (
+      typeof ha === 'number' &&
+      typeof hb === 'number' &&
+      typeof (protoA as Record<symbol, unknown>)[hash] === 'function' &&
+      ha >>> 0 !== hb >>> 0
+    ) {
+      return false;
+    }
     return (eqA as (this: unknown, o: unknown) => boolean).call(a, b) === true;
   }
 
@@ -487,11 +493,11 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  * registered with an equality only; a hash for them is refused.
  *
  * `hashFn` is the registry's form of {@link hash}: it is called as
- * `hashFn(value, hasher)` and should hash the content through the hasher it
- * is given, so that the type hashes under any hasher. A `hashFn` declared
- * with one parameter is taken as the precomputed form (the registry's
- * `[hashCode]`): it still makes the type a value under the active hasher,
- * and `deepHash(value, hasher)` under another throws, naming the fix.
+ * `hashFn(value, hasher)` and must hash the content through the hasher it
+ * is given, so that the hasher valsem interns with — seeded, or the one
+ * `configureHasher` installed — covers the type, and so does any other
+ * through `deepHash(value, hasher)`. One declared with a single parameter
+ * is refused at registration.
  *
  * The companion invariant applies: `equalsFn(a, b)` ⟹ `hashFn(a, h) === hashFn(b, h)`.
  *
@@ -531,6 +537,16 @@ deepEqual.register = function register<T>(
           `${type.name} instances by content.`,
       );
     }
+    // Declared arity is the one thing a function says about itself before
+    // it runs. (A rest or a defaulted parameter does not count towards
+    // `length`; spell the hasher parameter out.)
+    if (hashFn.length < 2) {
+      throw new TypeError(
+        `deepEqual.register: the hashFn for ${type.name} takes one parameter, and a hash must go through ` +
+          `the hasher valsem interns with: write it as (value, hasher) => …, hashing the content with ` +
+          `deepHash(part, hasher), hasher.string and hasher.number.`,
+      );
+    }
   }
   const priorHash = hashCodeMethods.get(type);
   if (priorHash !== undefined) {
@@ -567,18 +583,6 @@ export function _protocolHash(obj: object): ((this: unknown, hasher: Hasher) => 
 }
 
 /**
- * @internal Does the registered hash of `ctor` take the hasher it is given?
- * Declared arity is the one thing a function says about itself before it
- * runs: a `hashFn` of two parameters was written for the hasher, one of
- * fewer answers under the active hasher whatever it is passed. (A rest or a
- * defaulted parameter does not count towards `length`; spell the hasher
- * parameter out.)
- */
-export function _registeredHashTakesHasher(fn: Function): boolean {
-  return fn.length >= 2;
-}
-
-/**
  * @internal Why a class instance is not a value — or `undefined` when it has
  * both an equality and a hash, by symbol or by registration. `deepHash` and
  * `intern` both throw with this text, so one type tells one story wherever a
@@ -596,14 +600,19 @@ export function _missingValueSemantics(obj: object): string | undefined {
     return `this ${name} is a draft, and this draft escaped its produce() call: drafts are only valid inside the recipe`;
   }
   const eq = _protocolEquals(obj);
-  const hc = (obj as Record<symbol, unknown>)[hashCode];
   const hasEquals = eq !== undefined || (ctor !== undefined && equalsMethods.has(ctor));
-  const hasHash =
-    typeof hc === 'number' ||
-    typeof hc === 'function' ||
-    _protocolHash(obj) !== undefined ||
-    (ctor !== undefined && hashCodeMethods.has(ctor));
+  const hasHash = _protocolHash(obj) !== undefined || (ctor !== undefined && hashCodeMethods.has(ctor));
   if (hasEquals && hasHash) return undefined;
+  // A [hashCode] of the class's own was the declaration before 0.2: a number
+  // computed any way at all, which the hasher valsem interns with never saw.
+  if (!hasHash && hashCode in obj) {
+    return (
+      `${name} carries a [hashCode] but no [hash]: since valsem 0.2 a class hashes through ` +
+      `[hash](hasher), so that the hasher valsem interns with — seeded, or the one configureHasher ` +
+      `installed — covers it. Replace the precomputed [hashCode] with [hash](hasher) { return ` +
+      `deepHash([…the content…], hasher); }; [hashCode] is valsem's cache of that hash, not yours to set`
+    );
+  }
   if (hasEquals) {
     return (
       `${name} compares by content but is not a value: it has an equality but no hash, and ` +
@@ -619,7 +628,7 @@ export function _missingValueSemantics(obj: object): string | undefined {
     return `Temporal.${name} is not registered as a value. Add Temporal support with a side-effect import: import 'valsem/temporal'`;
   }
   return (
-    `class instance '${name}' has no [hash], [hashCode] or registered hash handler, and no equality: ` +
+    `class instance '${name}' has no [hash] or registered hash handler, and no equality: ` +
     `it is not a value. Implement [equals] and [hash](hasher), or deepEqual.register(${name}, equalsFn, hashFn)`
   );
 }

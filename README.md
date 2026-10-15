@@ -411,8 +411,9 @@ and collection buckets by (valsem computes that once per interned instance
 and keeps it as `[hashCode]`), and any other you hold —
 `deepHash(value, createMarvin32Hasher(k0, k1))` with a key of your own is
 the same number in every process, for a fingerprint or a seeded choice that
-must replay. A class may still carry a precomputed `[hashCode]` instead,
-as before; it is a value under the process's hasher only. The
+must replay. A `[hashCode]` a class computed itself, the declaration
+before 0.2, is refused with the reason: a number the hasher never saw is
+one no seed, and no SipHash you plugged in, protects. The
 [extending guide](https://andershessellund.github.io/valsem/guide/extending)
 has the rest: the comparable-only tier, registering types you do not own,
 canonical instances by construction with `createInternPool`, Temporal via

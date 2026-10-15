@@ -23,7 +23,8 @@ import {
   type PatchRecorder,
   type Patch,
 } from './draft.js';
-import { equals, hashCode, interned, deepEqual } from './deep-equal.js';
+import { equals, hash, hashCode, interned, deepEqual } from './deep-equal.js';
+import type { Hasher } from './hasher.js';
 import { deepHash } from './deep-hash.js';
 import { createInternPool } from './intern-pool.js';
 import { intern } from './intern.js';
@@ -43,7 +44,6 @@ const pool = createInternPool<Interval>();
 
 /** A canonical closed interval with a plain-record `meta` — a value with a nested record inside. */
 class Interval {
-  declare readonly [hashCode]: number;
   declare readonly [interned]: true;
   private constructor(
     readonly lo: number,
@@ -53,11 +53,12 @@ class Interval {
   [equals](o: unknown): boolean {
     return o instanceof Interval && o.lo === this.lo && o.hi === this.hi && o.meta === this.meta;
   }
+  [hash](hasher: Hasher): number {
+    return deepHash([this.lo, this.hi, this.meta], hasher);
+  }
   static of(lo: number, hi: number, meta: { label: string } = { label: '' }): Interval {
     const m = intern(meta); // canonicalise the nested record so [equals] can compare it by identity
-    const iv = new Interval(lo, hi, m);
-    (iv as unknown as Record<symbol, unknown>)[hashCode] = deepHash([lo, hi, m]);
-    return pool.intern(iv);
+    return pool.intern(new Interval(lo, hi, m)); // hashed and stamped by the pool
   }
 
   // The protocol: produce calls this to draft an Interval.
@@ -220,6 +221,9 @@ describe('a third-party draftable', () => {
       declare readonly [interned]: true;
       [equals](o: unknown): boolean {
         return o === this;
+      }
+      [hash](): number {
+        return 1;
       }
       [toDraft](parent?: DraftState): DraftState<Opaque> & { draft: { [DRAFT_STATE]: DraftState<Opaque>; poke(): void } } {
         const state = createDraftState<DraftState<Opaque> & { draft: { [DRAFT_STATE]: DraftState<Opaque>; poke(): void } }>({

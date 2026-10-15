@@ -43,8 +43,8 @@ describe('intern', () => {
     // Passing it through would let HashMap key by reference and miss every
     // equal lookup silently; see value-types.test.ts for the whole story.
     class Foo { x = 1; }
-    expect(() => intern(new Foo())).toThrow(/Foo.*has no \[hash\], \[hashCode\]/);
-    expect(() => intern({ f: new Foo() })).toThrow(/Foo.*has no \[hash\], \[hashCode\]/);
+    expect(() => intern(new Foo())).toThrow(/Foo.*has no \[hash\] or registered/);
+    expect(() => intern({ f: new Foo() })).toThrow(/Foo.*has no \[hash\] or registered/);
   });
 });
 

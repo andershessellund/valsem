@@ -10,7 +10,8 @@
 // object would miss every equal lookup silently.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from 'vitest';
-import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+import type { Hasher } from './hasher.js';
 import { deepHash } from './deep-hash.js';
 import { intern, internHash, isCanonical, fastEqual } from './intern.js';
 import { HashMap } from './hash-map.js';
@@ -23,20 +24,20 @@ import { produce } from './produce.js';
 import { COLLECTIONS } from './roster.test-helpers.js';
 
 class Money {
-  readonly [hashCode]: number;
   constructor(
     readonly amount: number,
     readonly currency: string,
-  ) {
-    this[hashCode] = deepHash([amount, currency]);
-  }
+  ) {}
   [equals](o: unknown): boolean {
     return o instanceof Money && o.amount === this.amount && o.currency === this.currency;
+  }
+  [hash](hasher: Hasher): number {
+    return deepHash([this.amount, this.currency], hasher);
   }
 }
 const eur = (n: number): Money => new Money(n, 'EUR');
 
-describe('a class with [equals] and [hashCode] is a value', () => {
+describe('a class with [equals] and [hash] is a value', () => {
   it('interns to one canonical instance — unfrozen, and not marked [interned]', () => {
     const a = intern(eur(5));
     const b = intern(eur(5));
@@ -116,7 +117,17 @@ describe('a class with [equals] and [hashCode] is a value', () => {
     expect(produce(base, (d) => void (d.price = eur(1)))).toBe(base);
   });
 
-  it('a getter [hashCode] and a method [hashCode] both count', () => {
+  it('a [hashCode] of the class\'s own is no declaration: field, getter or method, it is refused naming [hash]', () => {
+    // The form before 0.2. A number computed any way at all is one the
+    // hasher valsem interns with never saw, so a seeded hash, or a SipHash
+    // plugged in, did not cover the class — and nothing said so.
+    class Field {
+      constructor(readonly x: number) {}
+      readonly [hashCode] = 7;
+      [equals](o: unknown): boolean {
+        return o instanceof Field && o.x === this.x;
+      }
+    }
     class Getter {
       constructor(readonly x: number) {}
       get [hashCode](): number {
@@ -135,21 +146,28 @@ describe('a class with [equals] and [hashCode] is a value', () => {
         return o instanceof Method && o.x === this.x;
       }
     }
-    expect(intern(new Getter(1))).toBe(intern(new Getter(1)));
-    expect(intern(new Method(1))).toBe(intern(new Method(1)));
-    expect(new HashMap().set(new Getter(1), 'v').get(new Getter(1))).toBe('v');
-    expect(new HashMap().set(new Method(1), 'v').get(new Method(1))).toBe('v');
+    const refused = /carries a \[hashCode\] but no \[hash\].*the hasher valsem interns with.*\[hashCode\] is valsem's cache/s;
+    for (const make of [() => new Field(1), () => new Getter(1), () => new Method(1)]) {
+      expect(() => intern(make())).toThrow(refused);
+      expect(() => deepHash(make())).toThrow(refused);
+      expect(() => new HashMap().set(make(), 'v')).toThrow(refused);
+      expect(deepEqual(make(), make())).toBe(true); // comparable all the same
+    }
   });
 
   it('two types colliding on a hash never alias in the pool', () => {
     class A {
-      readonly [hashCode] = 0x1234;
+      [hash](): number {
+        return 0x1234;
+      }
       [equals](o: unknown): boolean {
         return o instanceof A;
       }
     }
     class B {
-      readonly [hashCode] = 0x1234;
+      [hash](): number {
+        return 0x1234;
+      }
       [equals](o: unknown): boolean {
         return o instanceof B;
       }
@@ -198,7 +216,9 @@ describe('a subclass is its own type, to deepEqual and to the pool alike', () =>
 describe('[equals] is the type\'s, read off the prototype', () => {
   it('an own [equals] on an instance is not protocol — deepEqual and intern agree', () => {
     class Own {
-      readonly [hashCode] = 1;
+      [hash](): number {
+        return 1;
+      }
       readonly [equals] = (o: unknown): boolean => o instanceof Own; // per instance: ignored
     }
     expect(deepEqual(new Own(), new Own())).toBe(false); // reference semantics
@@ -206,7 +226,9 @@ describe('[equals] is the type\'s, read off the prototype', () => {
 
     class Proto {
       constructor(readonly v: number) {}
-      readonly [hashCode] = 1;
+      [hash](): number {
+        return 1;
+      }
       [equals](o: unknown): boolean {
         return o instanceof Proto && o.v === this.v;
       }
@@ -222,7 +244,9 @@ describe('[equals] is the type\'s, read off the prototype', () => {
 describe('[equals] must answer true, not merely truthy', () => {
   it('a truthy non-boolean is "not equal" to deepEqual and to the pool alike', () => {
     class Loose {
-      readonly [hashCode] = 1;
+      [hash](): number {
+        return 1;
+      }
       [equals](o: unknown): boolean {
         return (o instanceof Loose ? 1 : 0) as unknown as boolean; // a contract violation…
       }
@@ -240,7 +264,9 @@ describe('a non-callable [equals] is no protocol', () => {
   it('is rejected consistently, on the first call and every call after', () => {
     class Weird {
       readonly [equals] = true;
-      readonly [hashCode] = 7;
+      [hash](): number {
+        return 7;
+      }
     }
     expect(deepEqual(new Weird(), new Weird())).toBe(false);
     expect(() => intern(new Weird())).toThrow(/Weird has a hash but no equality/);
@@ -256,7 +282,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
       readonly y: number,
     ) {}
   }
-  deepEqual.register(Vec, (a, b) => a.x === b.x && a.y === b.y, (v) => deepHash([v.x, v.y]));
+  deepEqual.register(Vec, (a, b) => a.x === b.x && a.y === b.y, (v, hasher) => deepHash([v.x, v.y], hasher));
 
   it('interns, keys, and memoizes by content', () => {
     const v = intern(new Vec(1, 2));
@@ -280,7 +306,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
         return new P(v);
       }
     }
-    deepEqual.register(P, (a, b) => a.v === b.v, (p) => p.v >>> 0);
+    deepEqual.register(P, (a, b) => a.v === b.v, (p, hasher) => hasher.number(p.v));
     expect(intern(P.of(1))).toBe(intern(P.of(1)));
 
     abstract class Shape {
@@ -294,7 +320,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
         return this.side ** 2;
       }
     }
-    deepEqual.register(Square, (a, b) => a.side === b.side, (s) => s.side >>> 0);
+    deepEqual.register(Square, (a, b) => a.side === b.side, (s, hasher) => hasher.number(s.side));
     expect(deepEqual(new Square(2), new Square(2))).toBe(true);
     // The registry keys on the exact constructor: a subclass is its own type.
     expect(() => intern(new (class Cube extends Square {})(2))).toThrow(/Cube/);
@@ -308,18 +334,18 @@ describe('deepEqual.register with a hash is the same tier', () => {
       ) {}
     }
     const eq = (a: R, b: R): boolean => a.x === b.x && a.y === b.y;
-    const hash = (r: R): number => deepHash([r.x, r.y]);
+    const hash = (r: R, hasher: Hasher): number => deepHash([r.x, r.y], hasher);
     deepEqual.register(R, eq, hash);
     const a = intern(new R(1, 1));
     const b = intern(new R(1, 2));
 
     // The reviewed incoherence: a coarser pair would make the raw instances
     // equal while their canonicals (distinct by identity) stay unequal.
-    expect(() => deepEqual.register(R, (p, q) => p.x === q.x, (r) => deepHash(r.x))).toThrow(
+    expect(() => deepEqual.register(R, (p, q) => p.x === q.x, (r, hasher) => deepHash(r.x, hasher))).toThrow(
       /already registered as a value/,
     );
     expect(() => deepEqual.register(R, eq)).toThrow(/already registered as a value/); // no dropping
-    expect(() => deepEqual.register(R, eq, (r) => deepHash([r.x, r.y]))).toThrow(/already registered/);
+    expect(() => deepEqual.register(R, eq, (r, hasher) => deepHash([r.x, r.y], hasher))).toThrow(/already registered/);
 
     // Nothing changed: raw and canonical still agree.
     expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(false);
@@ -332,7 +358,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
       constructor(readonly v: number) {}
     }
     const eq = (a: R, b: R): boolean => a.v === b.v;
-    const hash = (r: R): number => r.v >>> 0;
+    const hash = (r: R, hasher: Hasher): number => hasher.number(r.v);
     deepEqual.register(R, eq, hash);
     const a = intern(new R(1));
     expect(() => deepEqual.register(R, eq, hash)).not.toThrow();
@@ -351,7 +377,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
     deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y); // nothing was ever pooled
     expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(false);
     expect(() => deepHash(new R(1, 1))).toThrow(/has an equality but no hash/);
-    deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y, (r) => deepHash([r.x, r.y]));
+    deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y, (r, hasher) => deepHash([r.x, r.y], hasher));
     expect(intern(new R(1, 1))).toBe(intern(new R(1, 1)));
   });
 });
@@ -416,7 +442,7 @@ describe('anything less is rejected, never passed through', () => {
     class Foo {
       x = 1;
     }
-    const neither = /has no \[hash\], \[hashCode\] or registered hash handler/;
+    const neither = /has no \[hash\] or registered hash handler/;
     expect(() => intern(new Foo())).toThrow(neither);
     expect(() => intern({ f: new Foo() })).toThrow(neither);
     expect(() => deepHash(new Foo())).toThrow(neither);
@@ -427,7 +453,9 @@ describe('anything less is rejected, never passed through', () => {
 
   it('a hash without an equality', () => {
     class H {
-      readonly [hashCode] = 1;
+      [hash](): number {
+        return 1;
+      }
     }
     expect(() => intern(new H())).toThrow(/has a hash but no equality/);
     expect(() => intern([new H()])).toThrow(/has a hash but no equality/);
@@ -462,8 +490,8 @@ describe('the mutable built-ins', () => {
       [equals](o: unknown): boolean {
         return o instanceof Stamped && o.getTime() === this.getTime();
       }
-      get [hashCode](): number {
-        return this.getTime() >>> 0;
+      [hash](hasher: Hasher): number {
+        return hasher.number(this.getTime());
       }
     }
     expect(() => deepHash(new Stamped(5))).toThrow(/setTime/);
@@ -493,13 +521,13 @@ describe('the protocol, at its edges', () => {
     }
   });
 
-  it('[hashCode] may be a method; it is called on the value and read as a uint32', () => {
+  it('what [hash] returns is read as a uint32', () => {
     class Tag {
       constructor(readonly name: string) {}
       [equals](o: unknown): boolean {
         return o instanceof Tag && o.name === this.name;
       }
-      [hashCode](): number {
+      [hash](): number {
         return -1 - this.name.length; // negative on purpose: normalised, like a handler's
       }
     }
@@ -529,9 +557,9 @@ describe('the protocol, at its edges', () => {
   it('registering an anonymous type twice with different functions is refused, without a name to give', () => {
     const Anonymous = (() => class { readonly v = 1; })();
     const eq = (): boolean => true;
-    const hash = (): number => 1;
+    const hash = (_v: unknown, hasher: Hasher): number => (void hasher, 1);
     deepEqual.register(Anonymous, eq, hash);
     deepEqual.register(Anonymous, eq, hash); // the same pair again: idempotent
-    expect(() => deepEqual.register(Anonymous, eq, () => 2)).toThrow(/this type is already registered as a value/);
+    expect(() => deepEqual.register(Anonymous, eq, (_v, h) => (void h, 2))).toThrow(/this type is already registered as a value/);
   });
 });

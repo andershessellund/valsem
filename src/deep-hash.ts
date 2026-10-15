@@ -7,11 +7,11 @@
 //   1. Primitives → direct hash
 //   2. Array → recursive ordered hash
 //   3. Mutable built-in (by constructor chain) → throw, naming the replacement
-//   4. a[hashCode] (property, getter or method) → class-defined hash
-//   5. a[hash](hasher) (a method of the prototype) → class-defined hash
-//   6. hashCodeMethods.get(a.constructor) → registry (registered types)
-//   7. Plain object → structural order-independent hash
-//   8. Class without handler → throw
+//   4. a[hash](hasher), a method of the prototype → class-defined hash,
+//      served from a[hashCode] where valsem has cached it
+//   5. hashCodeMethods.get(a.constructor) → registry (registered types)
+//   6. Plain object → structural order-independent hash
+//   7. Class without handler → throw
 //
 // Two walks, one dispatch. `deepHash(value)` is the ACTIVE walk: the leaves
 // go through the process hasher, and whatever is canonical answers from what
@@ -26,7 +26,7 @@
 // not add to it: it is a separate function, reached by one comparison.
 // ---------------------------------------------------------------------------
 
-import { hashCode, _recordKeys, _ctorOf, _protocolHash, _registeredHashTakesHasher, _isPlainRecord } from './deep-equal.js';
+import { hashCode, _recordKeys, _ctorOf, _protocolHash, _isPlainRecord } from './deep-equal.js';
 import { _hashCodeMethods, _mutableBuiltinReason, _missingValueSemantics, _isForeignObjectPrototype, _isTemporalType } from './deep-equal.js';
 import { hashString, hashNumber, mix, _activeHasher, _isActive, _remembering, type Hasher, type Remembering } from './hasher.js';
 import { _depthError, _maxDepth } from './limits.js';
@@ -245,7 +245,7 @@ function unhashableMessage(obj: object): string {
  *
  * Handles: primitives (including `NaN`, `+0`/`-0`, `bigint`), plain objects
  * (key-order-independent), arrays, and any class implementing `[hash]` or
- * `[hashCode]`, or registered via `deepEqual.register()`.
+ * registered via `deepEqual.register()`.
  *
  * Symbols are values: a registered symbol hashes by its name, a unique one
  * by an identity assigned on first sight. Symbol-keyed record entries count
@@ -267,10 +267,9 @@ function unhashableMessage(obj: object): string {
  * but what cannot change — canonical data, value types, the collections'
  * nodes — is remembered per hasher, weakly, so a value that shares structure
  * with one already hashed costs the difference: a `ValueList` hashed after
- * every push costs O(1) per push under a hasher used consistently. A class
- * that carries a precomputed `[hashCode]` and no `[hash]` cannot be hashed
- * under another hasher, and the error says so. Left out, the hasher is the
- * active one, and the hash is the one every pool and collection uses.
+ * every push costs O(1) per push under a hasher used consistently. Left
+ * out, the hasher is the active one, and the hash is the one every pool
+ * and collection uses.
  *
  * @example
  * ```ts
@@ -347,29 +346,29 @@ function hashObjectValue(obj: object): number {
 
   const proto = Object.getPrototypeOf(obj);
   if (proto !== Object.prototype && proto !== null && !_isForeignObjectPrototype(proto)) {
-    // A class instance: the [hashCode] protocol (a property or a legacy
-    // method), then [hash](hasher) off the prototype with the active hasher,
-    // else the registry by the PROTOTYPE's constructor. None is consulted on
-    // a plain record, where a protocol symbol is an ordinary key — so a
-    // record cannot forge its hash with an own [hashCode]. The mutable
-    // built-ins are refused first, whatever protocol or registration they
-    // carry (a `class Stamp extends Date` with a `[hashCode]` is still
-    // re-timeable) — the same order `intern` applies. [hashCode] is read
-    // first because it is the cheap one: a field on every built-in value
-    // type, and the number `intern` cached for a class with [hash] (so
-    // [hash] runs once per canonical instance under the active hasher, not
-    // once per deepHash).
+    // A class instance: [hash](hasher) off the prototype, with the active
+    // hasher, else the registry by the PROTOTYPE's constructor. Neither is
+    // consulted on a plain record, where a protocol symbol is an ordinary
+    // key — so a record cannot forge its hash. The mutable built-ins are
+    // refused first, whatever protocol or registration they carry (a `class
+    // Stamp extends Date` with a `[hash]` is still re-timeable) — the same
+    // order `intern` applies. A class with [hash] is served from [hashCode]
+    // where there is one: the field every built-in value type keeps, or the
+    // number a pool stamped — valsem's cache of this very hash, so [hash]
+    // runs once per canonical instance under the active hasher, not once
+    // per deepHash. A [hashCode] on a class WITHOUT [hash] is not read: it
+    // was a declaration once, and is refused now, since a number computed
+    // any other way is one the hasher valsem interns with never saw.
     const ctor = _ctorOf(obj);
     if (_mutableBuiltinReason(ctor) !== undefined) throw new TypeError(unhashableMessage(obj));
-    if (hashCode in (obj as any)) {
+    const hf = _protocolHash(obj);
+    if (hf !== undefined) {
       const hc = (obj as any)[hashCode];
       if (typeof hc === 'number') return hc >>> 0;
-      if (typeof hc === 'function') return hc.call(obj) >>> 0;
+      return hf.call(obj, _activeHasher()) >>> 0;
     }
-    const hf = _protocolHash(obj);
-    if (hf !== undefined) return hf.call(obj, _activeHasher()) >>> 0;
     const handler = ctor === undefined ? undefined : _hashCodeMethods.get(ctor);
-    if (handler) return handler(obj, _activeHasher()) >>> 0; // a uint32, as the [hashCode] path above: handlers may return anything
+    if (handler) return handler(obj, _activeHasher()) >>> 0; // a uint32, as the [hash] path above: handlers may return anything
     throw new TypeError(unhashableMessage(obj));
   }
 
@@ -510,8 +509,7 @@ function hashObjectWith(obj: object, hasher: Remembering): number {
     const handler = hf === undefined && ctor !== undefined ? _hashCodeMethods.get(ctor) : undefined;
     let h: number;
     if (hf !== undefined) h = hf.call(obj, hasher) >>> 0;
-    else if (handler !== undefined && _registeredHashTakesHasher(handler)) h = handler(obj, hasher) >>> 0;
-    else if (handler !== undefined || hashCode in (obj as any)) throw new TypeError(activeOnlyMessage(obj, handler !== undefined));
+    else if (handler !== undefined) h = handler(obj, hasher) >>> 0;
     else throw new TypeError(unhashableMessage(obj));
     hasher.remember(obj, h); // a hash declares that the instance never changes
     return h;
@@ -531,17 +529,4 @@ function hashObjectWith(obj: object, hasher: Remembering): number {
   const h = _recordHashOf(keyCount, acc);
   if (_metaOf(obj) !== undefined) hasher.remember(obj, h);
   return h;
-}
-
-/** The error for a class that hashes under the active hasher only: a precomputed `[hashCode]`, or a registered hash that takes no hasher. */
-function activeOnlyMessage(obj: object, registered: boolean): string {
-  const name = _ctorOf(obj)?.name || 'an anonymous class';
-  return registered
-    ? `deepHash: ${name} is registered with a hash that takes no hasher, so it hashes under the ` +
-        `active hasher only. To hash it under another, register a hashFn of two parameters, ` +
-        `(value, hasher), that hashes the content through the hasher it is given.`
-    : `deepHash: ${name} carries a precomputed [hashCode] and no [hash], so it hashes under the ` +
-        `active hasher only. To hash it under another, implement [hash](hasher): a method that ` +
-        `hashes the content through the hasher it is given (deepHash(part, hasher), hasher.string, ` +
-        `hasher.number, mix).`;
 }

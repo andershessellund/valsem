@@ -16,7 +16,8 @@ import { describe, it, expect, expectTypeOf } from 'vitest';
 import { produce, produceWithPatches, castDraft, nothing, type Draft, type RecipeReturn } from './produce.js';
 import { current, type Undraft } from './current.js';
 import { intern } from './intern.js';
-import { equals, hashCode } from './deep-equal.js';
+import { equals, hash } from './deep-equal.js';
+import type { Hasher } from './hasher.js';
 import { deepHash } from './deep-hash.js';
 import { ValueDate } from './value-date.js';
 import { ValueMap } from './value-map.js';
@@ -28,12 +29,12 @@ import { DraftMap } from './draft-map.js';
 import { DraftList } from './draft-list.js';
 
 class Money {
-  readonly [hashCode]: number;
-  constructor(readonly amount: number) {
-    this[hashCode] = deepHash(amount);
-  }
+  constructor(readonly amount: number) {}
   [equals](o: unknown): boolean {
     return o instanceof Money && o.amount === this.amount;
+  }
+  [hash](hasher: Hasher): number {
+    return deepHash(this.amount, hasher);
   }
   plus(n: number): Money {
     return new Money(this.amount + n);

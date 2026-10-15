@@ -181,12 +181,11 @@ are forever. DESIGN.md §5.1.
 
 ### D26. The hash is the immutability declaration
 
-`[hash](hasher)` — or a precomputed `[hashCode]`, or a registered `hashFn`
-— makes a class a value: hashable, internable, a key. An equality alone
-makes it comparable only, and is the only registration the mutable
-built-ins accept. Which of the three forms a class uses decides only
-whether it hashes under a hasher other than the active one (D68); the
-declaration is the same.
+`[hash](hasher)` — or a registered `hashFn(value, hasher)` — makes a class
+a value: hashable, internable, a key. An equality alone makes it comparable
+only, and is the only registration the mutable built-ins accept. A
+`[hashCode]` a class computes itself, the declaration until 0.1, is refused
+with the reason, and a `hashFn` of one parameter at registration (D68).
 
 **Why.** A hash is only useful if it never changes, so supplying one
 *declares* "no reachable mutation". **Rejected:** a separate
@@ -589,12 +588,12 @@ are values with `deepHash(part, hasher)`, the leaves with `hasher.string`
 and `hasher.number`, combined with `mix`. `deepHash(value, hasher)` hashes
 any value under any hasher that way, with the same combiners; left out,
 the hasher is the active one, and the walk is the one it always was.
-`[hashCode]` stays, and means the hash under the active hasher: the number
-`intern` and a pool compute once through `[hash]` and keep (the pool stamps
-it on the instance), and the number a class may still carry precomputed in
-place of `[hash]`, which makes it a value as before but one that hashes
-under the active hasher only; `deepHash(instance, hasher)` throws for such
-a class, and for a registered `hashFn` of one parameter, naming the fix. A
+`[hashCode]` stays, as valsem's cache of the hash under the active hasher:
+the number `intern` computes once through `[hash]` and keeps in the meta
+store, and a pool stamps on the instance; it is read only on a class that
+has `[hash]`. A `[hashCode]` a class computed itself — the declaration
+until 0.1 — is refused, with the reason, and so is a registered `hashFn` of
+one parameter, at registration. A
 hasher other than the active one remembers what it has hashed, itself:
 `Hasher` has `recall(obj)` and `remember(obj, hash)`, optional, since the
 active hasher's are never called and `configureHasher` takes a bare pair;
@@ -647,16 +646,31 @@ the mechanism: a cache type and a lookup threaded through every
 collection's `[hash]`, each knowing the memory was a `WeakMap` and where
 to find it, for a hasher that never used one. Two optional methods give
 the hasher the memory without asking anything of a hasher that only
-buckets. **Rejected:** reading
-`[hashCode]` under another hasher when `[hash]` is absent, as a
-best-effort answer: it would be the active hash, silently, exactly where a
-caller asked for something else. **Cost.** A breaking change to the
-extension protocol, taken before 1.0: new classes implement `[hash]`;
-existing ones keep working. The active-hasher path is unchanged — the walk
-under another hasher is a separate function reached by one comparison, and
-`[hashCode]` is still read first — but was not benchmarked for this
-entry's PR (the maintainer's machine was unavailable); the benchmark is
-owed before 1.0. The built-in collections are slower under a non-active
+buckets. **Rejected:** keeping the precomputed `[hashCode]` as a
+declaration beside `[hash]`, a value under the active hasher only, which
+this entry's PR first did for compatibility. The maintainer struck it: a
+number a class computes itself is far likelier to be insecure than one the
+built-in hasher made — `(x * 73856093) ^ (y * 19349663)` is predictable
+offline where `deepHash([x, y], hasher)` is seeded — and the reason
+`configureHasher` exists at all (D28: SipHash for a deployment that
+ingests untrusted data) is defeated by a class the plugged-in hasher never
+saw, silently. `[hash](hasher)` makes the safe thing the only thing: every
+leaf of every value goes through the hasher valsem interns with, by
+construction. The refusal names the reason and the fix, and `register`
+refuses a `hashFn` of one parameter where it is written, not where it is
+used. Nothing published used the old form (stifinder and kilde, checked);
+the cost fell on valsem's own suite. **Rejected:** reading `[hashCode]`
+under another hasher when `[hash]` is absent, as a best-effort answer: it
+would be the active hash, silently, exactly where a caller asked for
+something else. **Cost.** A breaking change to the extension protocol,
+taken before 1.0: a class implements `[hash]`, and one that carried a
+`[hashCode]` of its own is refused until it does. `deepHash` reads
+`[hashCode]` only on a class with `[hash]`, one prototype read more on the
+collections' path, and `deepEqual`'s pre-filter trusts it on the same
+condition. The active-hasher path is otherwise unchanged — the walk under
+another hasher is a separate function reached by one comparison — but was
+not benchmarked for this entry's PR (the maintainer's machine was
+unavailable); the benchmark is owed before 1.0. The built-in collections are slower under a non-active
 hasher than the field read they serve the active one from: a walk with a
 `WeakMap` probe per node on the first hash, one probe on the second. A
 `RawArray` and a unique symbol hash by an identity, which no key makes

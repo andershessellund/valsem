@@ -87,6 +87,7 @@ describe('duplicate install — two module graphs', () => {
     // library on copy A must not silently fall to reference semantics when
     // the app's copy B compares it.
     expect(A.equals).toBe(B.equals);
+    expect(A.hash).toBe(B.hash);
     expect(A.hashCode).toBe(B.hashCode);
     expect(A.interned).toBe(B.interned);
     class Money {
@@ -94,8 +95,8 @@ describe('duplicate install — two module graphs', () => {
       [A.equals](o: unknown): boolean {
         return o instanceof Money && o.amount === this.amount;
       }
-      get [A.hashCode](): number {
-        return A.deepHash(this.amount);
+      [A.hash](hasher: Parameters<typeof A.deepHash>[1]): number {
+        return A.deepHash(this.amount, hasher);
       }
     }
     expect(B.deepEqual(new Money(1), new Money(1))).toBe(true);

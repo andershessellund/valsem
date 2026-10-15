@@ -14,7 +14,7 @@ const pool = createInternPool<InternedString>();
 const INTERNAL = Symbol('valsem.interned-string');
 
 /**
- * Opaque interned-string wrapper carrying a precomputed hash.
+ * Opaque interned-string wrapper carrying its hash, computed once.
  *
  * Two `InternedString` instances with `value === value` are the same
  * object reference. The {@link value} is the canonical JavaScript
