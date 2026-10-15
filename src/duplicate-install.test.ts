@@ -88,8 +88,8 @@ describe('duplicate install — two module graphs', () => {
     // the app's copy B compares it.
     expect(A.equals).toBe(B.equals);
     expect(A.hash).toBe(B.hash);
-    expect(A.hashCode).toBe(B.hashCode);
     expect(A.interned).toBe(B.interned);
+    expect('hashCode' in A).toBe(false); // valsem's cache slot: registered so the copies agree, not exported
     class Money {
       constructor(readonly amount: number) {}
       [A.equals](o: unknown): boolean {

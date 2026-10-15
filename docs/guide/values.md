@@ -48,10 +48,11 @@ deepEqual({ a: 1 }, { [Symbol.for('a')]: 1 });                    // false — a
 
 Own **enumerable** string and symbol keys make up a record, in every walk
 alike; non-enumerable properties do not. valsem's own protocol symbols
-(`equals`, `hashCode`, `interned`, `toDraft`) are honoured on **class
-instances only**: on a plain record they are ordinary symbol keys, part of
-the content like any other, so a record carrying an own `[interned]: true`
-or `[hashCode]` cannot pass itself off as canonical or choose its own hash.
+(`equals`, `hash`, `interned`, `toDraft`, and the slot valsem caches a
+hash in) are honoured on **class instances only**: on a plain record they
+are ordinary symbol keys, part of the content like any other, so a record
+carrying an own `[interned]: true` cannot pass itself off as canonical or
+choose its own hash.
 `[equals]` is the *type's*: it is read from the prototype, so an own
 `[equals]` assigned to one instance is not protocol either.
 A draft rejects writing them, since on a record they are almost certainly a
@@ -103,7 +104,7 @@ internHash(a);                                          // cached hash, no trave
 
 **What can be interned.** Primitives are returned unchanged, except `-0`, which is stored as `+0` (the two are one value). Plain objects and
 arrays are interned recursively. A class instance is interned when it is a
-**value** — it has an equality *and a hash*, either `[equals]` + `[hashCode]`
+**value** — it has an equality *and a hash*, either `[equals]` + `[hash]`
 on the class or a `deepEqual.register(Type, equalsFn, hashFn)` pair (which is
 how `valsem/temporal` makes Temporal values canonical): the hash declares that
 instances never change, and `intern` pools equal ones into one `===` instance,

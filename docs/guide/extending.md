@@ -56,7 +56,7 @@ active hasher or a hash you computed earlier. Called with the **active**
 hasher — the process's one, seeded per process or installed once by
 `configureHasher`, the hasher valsem interns with — it gives the hash every
 pool and collection buckets by; valsem computes that once, when it interns
-an instance, and keeps it as the instance's `[hashCode]`. Called with a
+an instance, and keeps it. Called with a
 hasher of the
 caller's, through `deepHash(value, hasher)`, it gives the hash under that
 one: a `createMarvin32Hasher(k0, k1)` built on constants hashes the same
@@ -73,8 +73,8 @@ the hasher valsem interns with never saw, so a seeded hash, or a SipHash
 plugged in with `configureHasher` for a deployment that ingests untrusted
 data, did not cover the class — and nothing said so. Replace it with
 `[hash](hasher) { return deepHash([…the content…], hasher); }` and drop
-the field: `[hashCode]` is valsem's cache of that hash, which it writes
-when it interns an instance, not yours to set.
+the field: the hash valsem computes is its own to cache, and the symbol
+it caches it under is no longer exported.
 
 For third-party types you cannot edit, register handlers globally — the same
 two tiers, so the hash is optional:

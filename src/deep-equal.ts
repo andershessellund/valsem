@@ -26,16 +26,18 @@ import type { Hasher } from './hasher.js';
 // ---------------------------------------------------------------------------
 // Protocol symbols
 //
-// `equals`, `hash`, `hashCode` and `interned` are the PROTOCOL third-party
-// types implement to become values, so they live in the global symbol
-// registry (`Symbol.for`): a `Money` class written against one copy of valsem
-// must be recognised by a differently-versioned copy elsewhere in the
-// dependency graph, or it would silently fall to reference semantics. The
-// keys are VERSIONED, like the hash seed's: a copy only ever reads the
-// protocol it understands, and a future incompatible protocol change bumps
-// the suffix so an older copy sees those instances as plain unregistered
-// classes. Internal symbols (draft state, sentinels) are ordinary
-// `Symbol()`s — per copy.
+// `equals`, `hash` and `interned` are the PROTOCOL third-party types
+// implement to become values, so they live in the global symbol registry
+// (`Symbol.for`): a `Money` class written against one copy of valsem must
+// be recognised by a differently-versioned copy elsewhere in the dependency
+// graph, or it would silently fall to reference semantics. `hashCode`, the
+// slot valsem caches a value's hash in, is registered for the same reason
+// (one copy stamps it, another reads it) but is not part of the protocol a
+// class implements, and is not exported. The keys are VERSIONED, like the
+// hash seed's: a copy only ever reads the protocol it understands, and a
+// future incompatible protocol change bumps the suffix so an older copy
+// sees those instances as plain unregistered classes. Internal symbols
+// (draft state, sentinels) are ordinary `Symbol()`s — per copy.
 // ---------------------------------------------------------------------------
 
 /**
@@ -79,8 +81,8 @@ export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
  * that hasher and nothing else — `deepHash(child, hasher)` for the parts
  * that are values, `hasher.string`/`hasher.number` for the leaves, `mix` to
  * combine. Written that way, the one method serves every hasher: the active
- * one, whose hash valsem caches when the instance is interned (that cached
- * number is what {@link hashCode} means), and any other a caller holds,
+ * one, whose hash valsem caches when the instance is interned, and any
+ * other a caller holds,
  * through `deepHash(value, hasher)`. Implement it alongside {@link equals},
  * maintaining the companion invariant: `a[equals](b) === true → hash(a) ===
  * hash(b)`, under every hasher.
@@ -98,15 +100,19 @@ export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
 
 /**
- * Symbol for **valsem's cache of a value's hash**: the number valsem interns
- * and buckets by — what `deepHash(instance)` answers, and what every pool,
- * `HashMap` and collection keys on. It is the hash under the *active*
- * hasher, the process's one: Marvin32 keyed by the seed drawn per process,
- * or what `configureHasher` installed once at startup, fixed from the first
- * hash on. (A hasher you build for `deepHash(value, hasher)` is never that
- * one.)
+ * Symbol for **valsem's cache of a value's hash**: the number valsem
+ * interns and buckets by — what `deepHash(instance)` answers, and what
+ * every pool, `HashMap` and collection keys on. It is the hash under the
+ * *active* hasher, the process's one: Marvin32 keyed by the seed drawn per
+ * process, or what `configureHasher` installed once at startup, fixed from
+ * the first hash on. (A hasher you build for `deepHash(value, hasher)` is
+ * never that one.)
  *
- * valsem writes it; a class does not. valsem's own value types serve it
+ * Registered (`Symbol.for`) like the protocol symbols, since two copies of
+ * valsem in one process must agree on the slot, but not exported from the
+ * package (it stays in this module's declarations, which the value types'
+ * own declarations name): valsem writes it, a class does not, and
+ * `deepHash` is how it is read. valsem's own value types serve it
  * from a field, so the hash of a canonical collection is a property read;
  * for a class with {@link hash}, `intern` computes it once through `[hash]`
  * with the active hasher and keeps it in the meta store, and `pool.intern`

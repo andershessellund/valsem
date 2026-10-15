@@ -139,7 +139,7 @@ setDone(todo, true);
 
 **What gets drafted.** Plain objects and arrays, and anything implementing
 `[toDraft]`. Everything else — `ValueDate`, `InternedString`, `RawArray`,
-Temporal values, your own `[equals]`/`[hashCode]` classes — is an **opaque
+Temporal values, your own `[equals]`/`[hash]` classes — is an **opaque
 leaf**: the recipe receives the canonical value itself, its methods work,
 its fields are exactly as the class declares them (`Draft<ValueDate>` is
 `ValueDate` — declare a value type's fields `readonly`, since a write through
@@ -157,7 +157,7 @@ recipe receives the pooled instance, unfrozen, so a write through it would
 corrupt every holder — and `produce` cannot notice, since the leaf is not a
 draft. Give such a class a method (a `toJSON`, a `with`; an accessor does not
 count, it is a property to the type system), or use the
-`[equals]`/`[hashCode]` form, before it goes into drafted state.
+`[equals]`/`[hash]` form, before it goes into drafted state.
 
 **Assigning a whole collection.** A recipe may put a value wherever a draft
 is: `d.todos = ValueList.of(a, b)` works, and the value is adopted on the way

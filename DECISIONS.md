@@ -163,11 +163,13 @@ equality handler makes `valsem/temporal` throw at registration. DESIGN.md
 
 ### D4. Protocol symbols are global and versioned; duplicate installs are different types
 
-`equals`, `hashCode`, `interned` and `toDraft` are
-`Symbol.for('valsem.<name>.v1')`; the hash seed is
+`equals`, `hash`, `interned` and `toDraft` are
+`Symbol.for('valsem.<name>.v1')`, and so is `hashCode`, the slot valsem
+caches a value's hash in, which is not exported (D68); the hash seed is
 `Symbol.for('valsem.hashSeed.v1')`. Two copies of valsem in one process
-agree on the protocol and the seed, but a `ValueSet` from one copy is a
-different constructor from the other's and compares unequal to it.
+agree on the protocol, the slot and the seed, but a `ValueSet` from one
+copy is a different constructor from the other's and compares unequal to
+it.
 
 **Why.** A `Money` class written against one copy must be recognised by a
 differently-versioned copy elsewhere in the dependency graph, or it would
@@ -591,9 +593,11 @@ the hasher is the active one, and the walk is the one it always was.
 `[hashCode]` stays, as valsem's cache of the hash under the active hasher:
 the number `intern` computes once through `[hash]` and keeps in the meta
 store, and a pool stamps on the instance; it is read only on a class that
-has `[hash]`. A `[hashCode]` a class computed itself — the declaration
-until 0.1 — is refused, with the reason, and so is a registered `hashFn` of
-one parameter, at registration. A
+has `[hash]`, and the symbol is no longer exported — registered still, so
+that two copies of valsem agree on the slot (D4), but a class never writes
+it and `deepHash` is how it is read. A `[hashCode]` a class computed
+itself — the declaration until 0.1 — is refused, with the reason, and so
+is a registered `hashFn` of one parameter, at registration. A
 hasher other than the active one remembers what it has hashed, itself:
 `Hasher` has `recall(obj)` and `remember(obj, hash)`, optional, since the
 active hasher's are never called and `configureHasher` takes a bare pair;
@@ -659,7 +663,13 @@ leaf of every value goes through the hasher valsem interns with, by
 construction. The refusal names the reason and the fix, and `register`
 refuses a `hashFn` of one parameter where it is written, not where it is
 used. Nothing published used the old form (stifinder and kilde, checked);
-the cost fell on valsem's own suite. **Rejected:** reading `[hashCode]`
+the cost fell on valsem's own suite. **Rejected:** exporting `hashCode`
+still, as the way to read a cached hash. Nothing outside valsem needs the
+slot: `deepHash(value)` returns the same number, and for a canonical object
+that is the cache read; what the export offered was a half-probe for "is
+this a value", which D41 does not give, and the one way left to write
+`[hashCode]` beside `[hash]` by accident. The protocol is `[equals]`,
+`[hash]`, `[interned]`. **Rejected:** reading `[hashCode]`
 under another hasher when `[hash]` is absent, as a best-effort answer: it
 would be the active hash, silently, exactly where a caller asked for
 something else. **Cost.** A breaking change to the extension protocol,

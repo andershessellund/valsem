@@ -408,12 +408,13 @@ the instance never changes, and with that promise valsem pools it, keys by
 it, and stores it in state. Taking the hasher as a parameter is what lets
 one method serve every hasher: the process's own, seeded, which every pool
 and collection buckets by (valsem computes that once per interned instance
-and keeps it as `[hashCode]`), and any other you hold —
+and keeps it), and any other you hold —
 `deepHash(value, createMarvin32Hasher(k0, k1))` with a key of your own is
 the same number in every process, for a fingerprint or a seeded choice that
 must replay. A `[hashCode]` a class computed itself, the declaration
 before 0.2, is refused with the reason: a number the hasher never saw is
-one no seed, and no SipHash you plugged in, protects. The
+one no seed, and no SipHash you plugged in, protects; the symbol is no
+longer exported. The
 [extending guide](https://andershessellund.github.io/valsem/guide/extending)
 has the rest: the comparable-only tier, registering types you do not own,
 canonical instances by construction with `createInternPool`, Temporal via
@@ -491,7 +492,7 @@ it costs.
 | `OrderedMap`, `OrderedSet` | the same, insertion-ordered — order is part of the value; `indexOf`, `at`, `insertedAt` in O(log n) (`DraftOrderedMap`/`DraftOrderedSet` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `InternedString`, `RawArray` | a string with its hash paid once; a large response admitted slice by slice |
-| `equals`, `hash`, `hashCode`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
+| `equals`, `hash`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
 | `toDraft`, `valsem/draft` | making types draftable — the protocol `produce` uses for everything but plain objects and arrays |
 | `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches you own |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |

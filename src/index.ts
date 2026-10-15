@@ -6,16 +6,18 @@
 // canonical instance), plus value collections (`ValueList`/`ValueMap`/
 // `ValueSet`, the insertion-ordered `OrderedMap`/`OrderedSet`, `ValueDate`/
 // `InternedString`/`RawArray`, the mutable `HashMap`/`HashSet`), `produce`
-// and `memoize`, and the extension points (`equals`/`hash`/`hashCode`/
-// `interned` symbols, `createInternPool`, `toDraft`) that let any type
-// participate.
+// and `memoize`, and the extension points (`equals`/`hash`/`interned`
+// symbols, `createInternPool`, `toDraft`) that let any type participate.
+// `hashCode`, the cache slot valsem writes a value's hash to, is a
+// registered symbol too (copies must agree on it) but not exported: a class
+// never writes it, and `deepHash` is how anyone reads it.
 //
 // Temporal value semantics live behind the `valsem/temporal` subpath; the
 // stable surface for binding authors (wire formats, storage layers) behind
 // `valsem/binding`.
 // ---------------------------------------------------------------------------
 
-export { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+export { deepEqual, equals, hash, interned } from './deep-equal.js';
 export { deepHash } from './deep-hash.js';
 export { HashMap } from './hash-map.js';
 export { HashSet } from './hash-set.js';

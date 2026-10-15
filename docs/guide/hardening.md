@@ -70,7 +70,7 @@ hashes yielded 4,000 such records, and interning them took 0.66 s against
 6 ms for as many random records. A keyed PRF as the leaf hash changes
 nothing here, because the attack never computes a leaf hash.
 
-So `deepHash`, `internHash` and `[hashCode]` values stay inside the process.
+So `deepHash` and `internHash` values stay inside the process.
 An ETag, a cache key or anything else that leaves it should be a
 cryptographic hash (SHA-256, say) of the serialised value.
 

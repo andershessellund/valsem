@@ -159,8 +159,9 @@ duplicate installs agree on it too — and kept in the hash cache (unique symbol
 valid `WeakMap` keys since ES2023; registered ones are not, which is why
 they take the other branch). Symbols work as record fields, record keys,
 `HashMap` keys and collection members. Own enumerable symbol keys are part
-of a record's content. valsem's protocol symbols (`equals`, `hashCode`,
-`interned`, `toDraft`) are honoured on class instances only; on a plain
+of a record's content. valsem's protocol symbols (`equals`, `hash`,
+`interned`, `toDraft`, and the internal `hashCode` it caches a hash in)
+are honoured on class instances only; on a plain
 record they are ordinary keys, so a record cannot forge canonicality or
 choose its own hash. A draft rejects writing them. Why: D9, D27.
 
@@ -202,8 +203,9 @@ cyclic input it recurses until the engine throws (§9).
 > new equality must ship one.
 
 Dispatch mirrors `deepEqual`: primitives; arrays; the mutable built-ins
-(throw); `[hashCode]` as property, getter or method; `[hash](hasher)` off
-the prototype, with the active hasher; the registry; plain records; any
+(throw); `[hash](hasher)` off the prototype, with the active hasher,
+served from the cached `[hashCode]` where valsem has written one; the
+registry; plain records; any
 other class (throw, naming what it lacks). Type tags are mixed into every
 hash so arrays, records and sets with similar content differ. Records hash
 **order-independently** and arrays **positionally** through accumulators
@@ -364,8 +366,9 @@ finish copies, probe, and run the sweeps owed; neither is required. The
 pool holds nothing alive. Why: D2.
 
 `pool.intern(object)` is the high-level entry: returns `object` if marked,
-otherwise looks up by its `[hashCode]` and `[equals]`, and on a miss marks
-it `[interned]`, freezes it, and registers it.
+otherwise looks up by its `[hash]` (under the active hasher, stamped as
+the internal `[hashCode]` for later reads) and `[equals]`, and on a miss
+marks it `[interned]`, freezes it, and registers it.
 
 ### 4.3 Probes
 
@@ -398,15 +401,16 @@ copy-on-write through a canonical whether or not it is frozen
 
 ### 5.1 The protocol
 
-The four value-protocol symbols, cross-realm registered as
-`Symbol.for('valsem.<name>.v1')` (D4); the fifth protocol symbol,
-`toDraft`, belongs to §7.1:
+The three value-protocol symbols, cross-realm registered as
+`Symbol.for('valsem.<name>.v1')` (D4); the fourth protocol symbol,
+`toDraft`, belongs to §7.1; the fifth registered symbol, `hashCode`, is
+valsem's own and not exported:
 
 | Symbol | Tier | Shape |
 | --- | --- | --- |
 | `equals` | **comparable**: `deepEqual` answers by content | `[equals](other): boolean` on the prototype; also the kind discriminator |
 | `hash` | **a value**: hashable, internable, a key, state | `[hash](hasher): number` on the prototype, hashing the content through the hasher it is given; declares immutability (D26, D68) |
-| `hashCode` | **valsem's cache** of the value's hash under the active hasher | `[hashCode]: number`, written by valsem: a field on its own value types, the meta store for a class `intern` pooled, a stamp on an instance `pool.intern` pooled. Read only on a class that has `[hash]`; a `[hashCode]` a class set itself, the declaration before 0.2, is refused (D26) |
+| `hashCode` (internal) | **valsem's cache** of the value's hash under the active hasher | `[hashCode]: number`, written by valsem: a field on its own value types, a stamp on an instance `pool.intern` pooled (a class `intern` pooled is cached in the meta store). Read only on a class that has `[hash]`; a `[hashCode]` a class set itself, the declaration before 0.2, is refused (D26), and the symbol is not exported (D68) |
 | `interned` | **auto-interning type**: every instance canonical by construction | `[interned]: true`; requires a private constructor (D27) |
 
 The registry form for types you cannot edit: `deepEqual.register(Type,
@@ -430,9 +434,9 @@ admitting operation with an error naming the missing hash.
 pattern: a private constructor, a static factory that builds the instance
 and returns `pool.intern(p)`; the class implements `[hash](hasher)` and
 declares `[interned]: true`. The pool computes the hash under the active
-hasher once and stamps it on the instance as `[hashCode]`, so every later
-read is a property read (a class may set `[hashCode]` itself instead, as
-before). Per-class pools need no type tag in their hashes.
+hasher once and stamps it on the instance as the internal `[hashCode]`,
+so every later read is a property read. Per-class pools need no type tag
+in their hashes.
 
 ### 5.3 Temporal
 
