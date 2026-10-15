@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/andershessellund/valsem/compare/v0.1.0...v0.1.1) (2026-10-15)
+
+
+### Performance Improvements
+
+* a canonical collection is recognised with one prototype read, so a HashMap lookup on a collection key is as fast as in 0.0.4 ([#81](https://github.com/andershessellund/valsem/issues/81)) ([d60d68c](https://github.com/andershessellund/valsem/commit/d60d68cf6da9360224c06d2cd23a4bfd420485ee))
+
 ## [0.1.0](https://github.com/andershessellund/valsem/compare/v0.0.4...v0.1.0) (2026-10-03)
 
 
