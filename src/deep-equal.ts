@@ -98,21 +98,27 @@ export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
 
 /**
- * Symbol for the companion hash code on class instances, **under the active
- * hasher**: the number `deepHash(instance)` answers, and the one every pool,
- * `HashMap` and collection buckets by.
+ * Symbol for the companion hash code on class instances: **the number valsem
+ * interns and buckets by** — what `deepHash(instance)` answers, and what
+ * every pool, `HashMap` and collection keys on. It is the hash under the
+ * *active* hasher, the process's one: Marvin32 keyed by the seed drawn per
+ * process, or what `configureHasher` installed once at startup, fixed from
+ * the first hash on. (A hasher you build for `deepHash(value, hasher)` is
+ * never that one.)
  *
  * valsem's own value types serve it from a field, so the hash of a canonical
  * collection is a property read, and a class with {@link hash} gets it for
- * nothing: `intern` and `pool.intern` compute it once through `[hash]` with
- * the active hasher and keep it. A class may also carry a `[hashCode]` of
- * its own — a precomputed `number`, a getter, or a method returning one —
- * and that alone still makes it a value, as it always has: hashable,
- * internable, a key. What it cannot do is hash under any other hasher, since
- * the number was computed under the active one: `deepHash(instance, hasher)`
- * throws for such a class, naming `[hash]` as the fix. Implement {@link hash}
- * for new classes; keep `[hashCode]` where a precomputed number is what you
- * have.
+ * nothing: `intern` computes it once through `[hash]` with the active hasher
+ * and keeps it in the meta store; `pool.intern` computes it the same way and
+ * stamps it on the instance. A class may also carry a `[hashCode]` of its
+ * own — a precomputed `number`, a getter, or a method returning one — and
+ * that alone still makes it a value, as it always has: hashable, internable,
+ * a key; valsem buckets by whatever number it is. What such a class cannot
+ * do is hash under any other hasher: its number is the bucketing hash, not a
+ * hash under the hasher asked for, so `deepHash(instance, hasher)` throws
+ * for it rather than answer wrongly, naming `[hash]` as the fix. Implement
+ * {@link hash} for new classes; keep `[hashCode]` where a precomputed number
+ * is what you have.
  */
 export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
 

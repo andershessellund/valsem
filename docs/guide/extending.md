@@ -53,9 +53,11 @@ an object would miss every equal lookup.
 parts that are values with `deepHash(part, hasher)`, the leaves with
 `hasher.string` and `hasher.number`, and combine with `mix`; never read the
 active hasher or a hash you computed earlier. Called with the **active**
-hasher, the process's own, it gives the hash every pool and collection
-buckets by — valsem computes that once, when it interns an instance, and
-keeps it as the instance's `[hashCode]`. Called with a hasher of the
+hasher — the process's one, seeded per process or installed once by
+`configureHasher`, the hasher valsem interns with — it gives the hash every
+pool and collection buckets by; valsem computes that once, when it interns
+an instance, and keeps it as the instance's `[hashCode]`. Called with a
+hasher of the
 caller's, through `deepHash(value, hasher)`, it gives the hash under that
 one: a `createMarvin32Hasher(k0, k1)` built on constants hashes the same
 value the same in every process, which is what a reproducible fingerprint,
@@ -66,7 +68,8 @@ any; see [hardening](/guide/hardening#a-hasher-of-your-own).
 
 **The older form still works.** A class may carry a precomputed
 `[hashCode]` — a number, a getter, or a method — instead of `[hash]`, as
-before this protocol existed; it is a value under the active hasher, and
+before this protocol existed; valsem buckets by whatever number that is,
+so it is a value in this process, and
 that is where it stops: `deepHash(instance, hasher)` throws for it, naming
 `[hash]` as the fix. Write `[hash]` for new classes.
 
