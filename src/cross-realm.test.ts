@@ -96,12 +96,12 @@ describe('the [interned] marker check reads "plain" as this realm\'s (D67)', () 
   });
 });
 
-describe('a registered hash handler is normalised like [hashCode]', () => {
+describe('a registered hash handler is normalised like [hash]', () => {
   it('any number it returns becomes a uint32', () => {
     class K {
       constructor(readonly n: number) {}
     }
-    deepEqual.register(K, (a, b) => a.n === b.n, () => -8.5);
+    deepEqual.register(K, (a, b) => a.n === b.n, (_k, hasher) => (void hasher, -8.5)); // ignores the hasher on purpose: a constant, read as a uint32
     const h = deepHash(new K(1));
     expect(Number.isInteger(h) && h >= 0 && h <= 0xffffffff).toBe(true);
     expect(h).toBe(-8.5 >>> 0);

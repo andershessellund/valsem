@@ -7,9 +7,11 @@
 // untouched structure, and iteration order is content-determined.
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { INSPECT, inspectAs, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, noInitial } from './shared.js';
 import { intern, internHash } from './intern.js';
+import { _hashWith, _pairTerm } from './deep-hash.js';
+import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
 import { toDraft, type DraftState } from './draft-core.js';
 import { createSetDraft, type SetState } from './draft-set.js';
 import {
@@ -28,6 +30,7 @@ import {
   trieIsSubset,
   trieIsDisjoint,
   trieDiff,
+  trieSum,
   NOT_FOUND,
   type HNode,
 } from './hamt.js';
@@ -36,6 +39,8 @@ import {
 const INTERNAL = Symbol('valsem.value-set');
 
 const CFG = createTrieConfig(1);
+/** The type tag of a set's hash under a hasher other than the active one, and the constant each member's term is mixed with. */
+const TAG = 0x5653;
 
 /**
  * The `ReadonlySet` contract minus the set algebra, whose lib signatures
@@ -96,6 +101,13 @@ export class ValueSet<T> implements ReadonlySetReads<T> {
   /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /** The hash under `hasher`: the order-independent sum of the members' terms, folded per trie node and remembered in the hasher's cache (see `ValueMap`). */
+  [hashSym](hasher: Hasher): number {
+    if (_isActive(hasher)) return this.#hash;
+    const under = _remembering(hasher);
+    const acc = trieSum(this.#root, CFG.stride, under, (slots, i) => _pairTerm(TAG, _hashWith(slots[i], under)));
+    return mix(mix(TAG, this.#root.n), acc);
   }
   /** The canonical-type marker: every instance is canonical by construction. */
   get [internedSym](): true {

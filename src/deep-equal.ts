@@ -21,19 +21,23 @@
 // ---------------------------------------------------------------------------
 
 import { DRAFT_STATE } from './shared.js';
+import type { Hasher } from './hasher.js';
 
 // ---------------------------------------------------------------------------
 // Protocol symbols
 //
-// `equals`, `hashCode` and `interned` are the PROTOCOL third-party types
+// `equals`, `hash` and `interned` are the PROTOCOL third-party types
 // implement to become values, so they live in the global symbol registry
-// (`Symbol.for`): a `Money` class written against one copy of valsem must be
-// recognised by a differently-versioned copy elsewhere in the dependency
-// graph, or it would silently fall to reference semantics. The keys are
-// VERSIONED, like the hash seed's: a copy only ever reads the protocol it
-// understands, and a future incompatible protocol change bumps the suffix so
-// an older copy sees those instances as plain unregistered classes. Internal
-// symbols (draft state, sentinels) are ordinary `Symbol()`s — per copy.
+// (`Symbol.for`): a `Money` class written against one copy of valsem must
+// be recognised by a differently-versioned copy elsewhere in the dependency
+// graph, or it would silently fall to reference semantics. `hashCode`, the
+// slot valsem caches a value's hash in, is registered for the same reason
+// (one copy stamps it, another reads it) but is not part of the protocol a
+// class implements, and is not exported. The keys are VERSIONED, like the
+// hash seed's: a copy only ever reads the protocol it understands, and a
+// future incompatible protocol change bumps the suffix so an older copy
+// sees those instances as plain unregistered classes. Internal symbols
+// (draft state, sentinels) are ordinary `Symbol()`s — per copy.
 // ---------------------------------------------------------------------------
 
 /**
@@ -58,13 +62,13 @@ import { DRAFT_STATE } from './shared.js';
 export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
 
 /**
- * Symbol for the companion hash code on class instances — and the
- * declaration that makes a class a **value**.
+ * Symbol for the companion hash of a class instance, as a method of the
+ * hasher — and the declaration that makes a class a **value**.
  *
  * `[equals]` alone makes a class *comparable*: `deepEqual` answers by
  * content, which is fine even for a mutable object (the answer is about the
  * two objects as they are right now). A hash is only useful if it never
- * changes, so carrying `[hashCode]` declares that instances are **immutable
+ * changes, so carrying `[hash]` declares that instances are **immutable
  * after construction** — and with that, the class is a value everywhere:
  * `deepHash` hashes it, `intern` pools equal instances into one canonical
  * `===` instance, and it can be a `HashMap` key, a collection member, a
@@ -72,10 +76,53 @@ export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
  * true: a pooled instance is shared by every holder, so one mutation
  * corrupts all of them and invalidates the hash cached against it.
  *
- * May be a **property** (a precomputed `number`, or a getter — preferred:
- * O(1) read) or a **method** returning `number`. Must be implemented
- * alongside {@link equals}, maintaining the companion invariant:
- * `a[equals](b) === true → hash(a) === hash(b)`.
+ * `[hash](hasher)` is a **method on the prototype**: given a {@link Hasher},
+ * return the instance's uint32 hash under it, hashing the content through
+ * that hasher and nothing else — `deepHash(child, hasher)` for the parts
+ * that are values, `hasher.string`/`hasher.number` for the leaves, `mix` to
+ * combine. Written that way, the one method serves every hasher: the active
+ * one, whose hash valsem caches when the instance is interned, and any
+ * other a caller holds,
+ * through `deepHash(value, hasher)`. Implement it alongside {@link equals},
+ * maintaining the companion invariant: `a[equals](b) === true → hash(a) ===
+ * hash(b)`, under every hasher.
+ *
+ * ```ts
+ * class Money {
+ *   constructor(readonly amount: number, readonly currency: string) {}
+ *   [equals](other: unknown): boolean { … }
+ *   [hash](hasher: Hasher): number {
+ *     return deepHash([this.amount, this.currency], hasher);
+ *   }
+ * }
+ * ```
+ */
+export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
+
+/**
+ * Symbol for **valsem's cache of a value's hash**: the number valsem
+ * interns and buckets by — what `deepHash(instance)` answers, and what
+ * every pool, `HashMap` and collection keys on. It is the hash under the
+ * *active* hasher, the process's one: Marvin32 keyed by the seed drawn per
+ * process, or what `configureHasher` installed once at startup, fixed from
+ * the first hash on. (A hasher you build for `deepHash(value, hasher)` is
+ * never that one.)
+ *
+ * Registered (`Symbol.for`) like the protocol symbols, since two copies of
+ * valsem in one process must agree on the slot, but not exported from the
+ * package (it stays in this module's declarations, which the value types'
+ * own declarations name): valsem writes it, a class does not, and
+ * `deepHash` is how it is read. valsem's own value types serve it
+ * from a field, so the hash of a canonical collection is a property read;
+ * for a class with {@link hash}, `intern` computes it once through `[hash]`
+ * with the active hasher and keeps it in the meta store, and `pool.intern`
+ * computes it the same way and stamps it on the instance. It is read only
+ * on a class that has {@link hash}: a `[hashCode]` a class set itself was
+ * the declaration before 0.2, and is refused now, with the reason — a
+ * number computed any other way is one the hasher valsem interns with
+ * never saw, so a seeded hash, or a SipHash plugged in for a deployment
+ * that ingests untrusted data, did not cover the class, and nothing said
+ * so.
  */
 export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
 
@@ -113,7 +160,12 @@ export const interned: unique symbol = Symbol.for('valsem.interned.v1') as any;
 // ---------------------------------------------------------------------------
 
 const equalsMethods = new Map<Function, (a: any, b: any) => boolean>();
-const hashCodeMethods = new Map<Function, (a: any) => number>();
+// A registered hash is called with the hasher the hash is wanted under: the
+// active one, mostly, and any other through `deepHash(value, hasher)`. It
+// must hash through that hasher, so `register` refuses one declared with a
+// single parameter — the form from before hashers were a parameter, which
+// answered under the active hasher whatever it was given.
+const hashCodeMethods = new Map<Function, (a: any, hasher: Hasher) => number>();
 
 // Injected by the intern module (which imports this one — same pattern as
 // deepHash's precomputed-hash hook). This IS the interner's hash cache:
@@ -338,12 +390,21 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     // Same constructor ⟹ same prototype ⟹ the same [equals].
     if (plainB || _ctorOf(a) !== _ctorOf(b)) return false;
     // Hash pre-filter: the companion invariant (equal ⟹ same hash) means two
-    // distinct precomputed [hashCode]s prove inequality without running a
-    // potentially O(n) [equals].
+    // distinct cached hashes prove inequality without running a potentially
+    // O(n) [equals]. [hashCode] is valsem's cache of [hash], and is read as
+    // that only on a class that has [hash]: on any other it is a number of
+    // the class's own, which proves nothing.
     const ha = (a as Record<symbol, unknown>)[hashCode];
     const hb = (b as Record<symbol, unknown>)[hashCode];
     // Read as deepHash reads them (`>>> 0`): -1 and 0xffffffff are one hash.
-    if (typeof ha === 'number' && typeof hb === 'number' && ha >>> 0 !== hb >>> 0) return false;
+    if (
+      typeof ha === 'number' &&
+      typeof hb === 'number' &&
+      typeof (protoA as Record<symbol, unknown>)[hash] === 'function' &&
+      ha >>> 0 !== hb >>> 0
+    ) {
+      return false;
+    }
     return (eqA as (this: unknown, o: unknown) => boolean).call(a, b) === true;
   }
 
@@ -437,7 +498,14 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  * mutable built-ins (`Date`, `RegExp`, `Map`, `Set`, the TypedArrays) can be
  * registered with an equality only; a hash for them is refused.
  *
- * The companion invariant applies: `equalsFn(a, b)` ⟹ `hashFn(a) === hashFn(b)`.
+ * `hashFn` is the registry's form of {@link hash}: it is called as
+ * `hashFn(value, hasher)` and must hash the content through the hasher it
+ * is given, so that the hasher valsem interns with — seeded, or the one
+ * `configureHasher` installed — covers the type, and so does any other
+ * through `deepHash(value, hasher)`. One declared with a single parameter
+ * is refused at registration.
+ *
+ * The companion invariant applies: `equalsFn(a, b)` ⟹ `hashFn(a, h) === hashFn(b, h)`.
  *
  * **A value's semantics are fixed.** Once a type is registered with a hash,
  * registering it again throws (repeating the identical pair is a no-op):
@@ -450,11 +518,11 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  *
  * @example
  * ```ts
- * // A value: comparable, hashable, internable.
+ * // A value: comparable, hashable, internable — under any hasher.
  * deepEqual.register(
  *   Money,
  *   (a, b) => a.amount === b.amount && a.currency === b.currency,
- *   (m) => deepHash([m.amount, m.currency]),
+ *   (m, hasher) => deepHash([m.amount, m.currency], hasher),
  * );
  *
  * // Comparable only — deepEqual by content; deepHash and intern still refuse it.
@@ -464,7 +532,7 @@ export function deepEqual(a: unknown, b: unknown): boolean {
 deepEqual.register = function register<T>(
   type: Function & { readonly prototype: T },
   equalsFn: (a: T, b: T) => boolean,
-  hashFn?: (a: T) => number,
+  hashFn?: (a: T, hasher: Hasher) => number,
 ): void {
   if (hashFn !== undefined) {
     const reason = _mutableBuiltinReason(type);
@@ -473,6 +541,16 @@ deepEqual.register = function register<T>(
         `deepEqual.register: ${type.name} cannot be registered with a hash — a hash declares ` +
           `that instances never change, and ${reason}. Register an equality alone to compare ` +
           `${type.name} instances by content.`,
+      );
+    }
+    // Declared arity is the one thing a function says about itself before
+    // it runs. (A rest or a defaulted parameter does not count towards
+    // `length`; spell the hasher parameter out.)
+    if (hashFn.length < 2) {
+      throw new TypeError(
+        `deepEqual.register: the hashFn for ${type.name} takes one parameter, and a hash must go through ` +
+          `the hasher valsem interns with: write it as (value, hasher) => …, hashing the content with ` +
+          `deepHash(part, hasher), hasher.string and hasher.number.`,
       );
     }
   }
@@ -501,6 +579,16 @@ export function _protocolEquals(obj: object): ((this: unknown, o: unknown) => bo
 }
 
 /**
+ * @internal The `[hash]` protocol method of `obj`'s TYPE — read off the
+ * prototype, never an own property — or `undefined`.
+ */
+export function _protocolHash(obj: object): ((this: unknown, hasher: Hasher) => number) | undefined {
+  const proto = Object.getPrototypeOf(obj) as Record<symbol, unknown> | null;
+  const h = proto === null ? undefined : proto[hash];
+  return typeof h === 'function' ? (h as (this: unknown, hasher: Hasher) => number) : undefined;
+}
+
+/**
  * @internal Why a class instance is not a value — or `undefined` when it has
  * both an equality and a hash, by symbol or by registration. `deepHash` and
  * `intern` both throw with this text, so one type tells one story wherever a
@@ -511,22 +599,30 @@ export function _missingValueSemantics(obj: object): string | undefined {
   const ctor = _ctorOf(obj);
   const name = ctor?.name || 'an anonymous class';
   // A collection draft is a class without a hash too, and "implement [equals]
-  // and [hashCode]" is the wrong advice for it. Inside a recipe a draft never
+  // and [hash]" is the wrong advice for it. Inside a recipe a draft never
   // gets here: it stands for the value it holds (`_undraft`). So this one has
   // outlived its recipe.
   if ((obj as Record<symbol, unknown>)[DRAFT_STATE] !== undefined) {
     return `this ${name} is a draft, and this draft escaped its produce() call: drafts are only valid inside the recipe`;
   }
   const eq = _protocolEquals(obj);
-  const hc = (obj as Record<symbol, unknown>)[hashCode];
   const hasEquals = eq !== undefined || (ctor !== undefined && equalsMethods.has(ctor));
-  const hasHash =
-    typeof hc === 'number' || typeof hc === 'function' || (ctor !== undefined && hashCodeMethods.has(ctor));
+  const hasHash = _protocolHash(obj) !== undefined || (ctor !== undefined && hashCodeMethods.has(ctor));
   if (hasEquals && hasHash) return undefined;
+  // A [hashCode] of the class's own was the declaration before 0.2: a number
+  // computed any way at all, which the hasher valsem interns with never saw.
+  if (!hasHash && hashCode in obj) {
+    return (
+      `${name} carries a [hashCode] but no [hash]: since valsem 0.2 a class hashes through ` +
+      `[hash](hasher), so that the hasher valsem interns with — seeded, or the one configureHasher ` +
+      `installed — covers it. Replace the precomputed [hashCode] with [hash](hasher) { return ` +
+      `deepHash([…the content…], hasher); }; [hashCode] is valsem's cache of that hash, not yours to set`
+    );
+  }
   if (hasEquals) {
     return (
       `${name} compares by content but is not a value: it has an equality but no hash, and ` +
-      `a hash declares that the content never changes. Add [hashCode] (or a hashFn to ` +
+      `a hash declares that the content never changes. Add [hash](hasher) (or a hashFn to ` +
       `deepEqual.register) if instances are immutable after construction`
     );
   }
@@ -538,8 +634,8 @@ export function _missingValueSemantics(obj: object): string | undefined {
     return `Temporal.${name} is not registered as a value. Add Temporal support with a side-effect import: import 'valsem/temporal'`;
   }
   return (
-    `class instance '${name}' has no [hashCode] or registered hash handler, and no equality: ` +
-    `it is not a value. Implement [equals] and [hashCode], or deepEqual.register(${name}, equalsFn, hashFn)`
+    `class instance '${name}' has no [hash] or registered hash handler, and no equality: ` +
+    `it is not a value. Implement [equals] and [hash](hasher), or deepEqual.register(${name}, equalsFn, hashFn)`
   );
 }
 

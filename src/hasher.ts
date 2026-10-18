@@ -15,20 +15,68 @@
 // For deployments that ingest untrusted data and worry about seed recovery via
 // timing, `configureHasher` swaps in a stronger keyed PRF (e.g. SipHash) built
 // over `getHashSeed()`.
+//
+// Hashing is parametric in the hasher: `deepHash(value, hasher)` hashes under
+// any Hasher, not only the active one, through the same combiners and the
+// `[hash](hasher)` protocol method of every value class. Nothing baked into a
+// canonical object or a consed node is under such a hasher, so a hasher used
+// that way remembers, itself, the hash under it of what cannot change
+// (`recall`/`remember`): how it remembers is its own business, and the
+// hashers made here keep a WeakMap.
 // ---------------------------------------------------------------------------
 
 /**
- * A pluggable pair of seeded leaf-hash primitives (string / number → uint32).
+ * A pluggable pair of seeded leaf-hash primitives (string / number → uint32),
+ * and, for a hasher used with `deepHash(value, hasher)`, a memory of what it
+ * has hashed.
  *
- * Implementations MUST be seeded (so collisions are not offline-predictable)
- * and MUST treat `-0` as `+0` so the companion invariant
- * `deepEqual(a, b) ⟹ deepHash(a) === deepHash(b)` holds.
+ * Implementations MUST treat `-0` as `+0` so the companion invariant
+ * `deepEqual(a, b) ⟹ deepHash(a) === deepHash(b)` holds. The ACTIVE hasher
+ * (the default, or the one `configureHasher` installed) MUST be seeded, so
+ * that collisions are not offline-predictable: it is what every pool and
+ * collection buckets by. A hasher built on a key you chose — `createMarvin32Hasher(k0, k1)`
+ * with constants, say — gives reproducible hashes through
+ * `deepHash(value, hasher)`, and for that reason is NOT flood-resistant:
+ * never bucket untrusted data by it, and never install it as the active
+ * hasher of a process that ingests any.
+ *
+ * `recall` and `remember` are the hasher's memory, consulted by
+ * `deepHash(value, hasher)` and never by the active walk, whose hashes are
+ * baked into the values: nothing baked in is under any other hasher, so
+ * such a hasher remembers, itself, the hash under it of every object that
+ * cannot change — canonical plain data, value-type instances, the
+ * collections' consed nodes — and shared structure is hashed once per
+ * hasher (a `ValueList` pushed one element at a time hashes in O(1) per
+ * push under a hasher used consistently, since every node below the push is
+ * remembered). How a hasher remembers is its own business; the ones
+ * `createMarvin32Hasher` makes keep a `WeakMap`, so a dropped value takes
+ * its entry and a dropped hasher its memory. A hasher given to
+ * `configureHasher` alone may leave both out; one given to `deepHash` must
+ * have them, and the call says so if not.
  */
 export interface Hasher {
   /** Hash a string to a 32-bit value. */
   readonly string: (s: string) => number;
   /** Hash a JS number to a 32-bit value (`-0` treated as `+0`). */
   readonly number: (n: number) => number;
+  /** The hash under this hasher of an object that never changes, if this hasher has hashed it before. */
+  readonly recall?: (obj: object) => number | undefined;
+  /** Remember `hash` as the hash of `obj`, which never changes, under this hasher. */
+  readonly remember?: (obj: object, hash: number) => void;
+}
+
+/** @internal A hasher with its memory: what `deepHash(value, hasher)` walks with, once it has checked. */
+export type Remembering = Hasher & Required<Pick<Hasher, 'recall' | 'remember'>>;
+
+/** @internal `hasher` with its memory, or a `TypeError` naming what it lacks. */
+export function _remembering(hasher: Hasher): Remembering {
+  if (typeof hasher.recall !== 'function' || typeof hasher.remember !== 'function') {
+    throw new TypeError(
+      'deepHash(value, hasher): the hasher must remember what it hashes (recall and remember); ' +
+        'createMarvin32Hasher(k0, k1) makes one that does',
+    );
+  }
+  return hasher as Remembering;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,8 +129,13 @@ const f64 = new Float64Array(1);
 const u32 = new Uint32Array(f64.buffer);
 
 /**
- * Build a seeded {@link Hasher} using **Marvin32** over UTF-16 code-unit pairs
- * for strings and a seeded avalanche for numbers. This is valsem's default.
+ * Build a {@link Hasher} using **Marvin32** over UTF-16 code-unit pairs for
+ * strings and a keyed avalanche for numbers, under the 64-bit key given. This
+ * is valsem's default, keyed by the process seed; built with a key of your
+ * own it is a hasher for `deepHash(value, hasher)`: the same value hashes the
+ * same under the same key in every process, which is what a reproducible
+ * fingerprint or a seeded, replayable choice needs. A hasher whose key is not
+ * secret is not flood-resistant: never bucket untrusted data by it.
  *
  * @param k0 - Low 32 bits of the 64-bit key.
  * @param k1 - High 32 bits of the 64-bit key.
@@ -124,7 +177,17 @@ export function createMarvin32Hasher(k0: number, k1: number): Hasher {
     return (h ^ (h >>> 16)) >>> 0;
   };
 
-  return { string, number };
+  // What this hasher has hashed, under it: the objects that cannot change,
+  // weakly, so that a value dropped elsewhere is dropped here too.
+  const memory = new WeakMap<object, number>();
+  return {
+    string,
+    number,
+    recall: (obj) => memory.get(obj),
+    remember: (obj, hash) => {
+      memory.set(obj, hash);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -132,30 +195,49 @@ export function createMarvin32Hasher(k0: number, k1: number): Hasher {
 // ---------------------------------------------------------------------------
 
 let configured = false;
-let hashed = false; // has any leaf been hashed yet? (configureHasher's ordering guard)
-let active: Hasher = createMarvin32Hasher(SEED[0]!, SEED[1]!);
+/** @internal Has any leaf been hashed yet? (configureHasher's ordering guard.) A live binding, read by the walk. */
+export let _hashed = false;
+/** @internal The active hasher, as an object. A live binding, read by the walk; `_activeHasher()` is the armed read. */
+export let _active: Hasher = createMarvin32Hasher(SEED[0]!, SEED[1]!);
 
 // The exported leaf functions start as one-shot trampolines: the first call
 // records that hashing has begun (so a later configureHasher is rejected),
 // rebinds both live bindings to the active hasher's functions, and delegates.
 // Every subsequent call goes straight to the hasher — the ordering guard
 // costs nothing on the hot path.
-function arm(): void {
-  hashed = true;
-  hashString = active.string;
-  hashNumber = active.number;
+/** @internal Hashing has begun: rebind the leaf trampolines and refuse `configureHasher` from here on. Called by the first leaf hash, and by `deepHash`'s entry. */
+export function _arm(): void {
+  _hashed = true;
+  hashString = _active.string;
+  hashNumber = _active.number;
 }
 
 /** @internal Active string-leaf hash. Rebound by {@link configureHasher}. */
 export let hashString: (s: string) => number = (s) => {
-  arm();
+  _arm();
   return hashString(s);
 };
 /** @internal Active number-leaf hash. Rebound by {@link configureHasher}. */
 export let hashNumber: (n: number) => number = (n) => {
-  arm();
+  _arm();
   return hashNumber(n);
 };
+
+/**
+ * @internal The active hasher, as an object: what a `[hash](hasher)` method
+ * or a registered `hashFn` receives when the hash wanted is the process's
+ * own. Handing it out counts as hashing (the ordering guard is armed), since
+ * what the callee computes with it is baked into a value.
+ */
+export function _activeHasher(): Hasher {
+  if (!_hashed) _arm();
+  return _active;
+}
+
+/** @internal Is `hasher` the active one? Asked by `deepHash(value, hasher)` to take the baked-in path; asking does not arm. */
+export function _isActive(hasher: Hasher): boolean {
+  return hasher === _active;
+}
 
 /**
  * Replace the leaf hashing primitives process-wide.
@@ -186,7 +268,7 @@ export function configureHasher(hasher: Hasher): void {
   if (configured) {
     throw new Error('valsem: configureHasher() may only be called once.');
   }
-  if (hashed) {
+  if (_hashed) {
     throw new Error(
       'valsem: configureHasher() must run before any value is hashed or interned — ' +
         'a hash has already been computed in this process. Call it at startup, ' +
@@ -194,5 +276,5 @@ export function configureHasher(hasher: Hasher): void {
     );
   }
   configured = true;
-  active = hasher;
+  _active = hasher;
 }

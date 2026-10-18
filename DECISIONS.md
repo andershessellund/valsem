@@ -163,11 +163,13 @@ equality handler makes `valsem/temporal` throw at registration. DESIGN.md
 
 ### D4. Protocol symbols are global and versioned; duplicate installs are different types
 
-`equals`, `hashCode`, `interned` and `toDraft` are
-`Symbol.for('valsem.<name>.v1')`; the hash seed is
+`equals`, `hash`, `interned` and `toDraft` are
+`Symbol.for('valsem.<name>.v1')`, and so is `hashCode`, the slot valsem
+caches a value's hash in, which is not exported (D68); the hash seed is
 `Symbol.for('valsem.hashSeed.v1')`. Two copies of valsem in one process
-agree on the protocol and the seed, but a `ValueSet` from one copy is a
-different constructor from the other's and compares unequal to it.
+agree on the protocol, the slot and the seed, but a `ValueSet` from one
+copy is a different constructor from the other's and compares unequal to
+it.
 
 **Why.** A `Money` class written against one copy must be recognised by a
 differently-versioned copy elsewhere in the dependency graph, or it would
@@ -181,9 +183,11 @@ are forever. DESIGN.md §5.1.
 
 ### D26. The hash is the immutability declaration
 
-`[hashCode]` (or a registered `hashFn`) makes a class a value: hashable,
-internable, a key. An equality alone makes it comparable only, and is the
-only registration the mutable built-ins accept.
+`[hash](hasher)` — or a registered `hashFn(value, hasher)` — makes a class
+a value: hashable, internable, a key. An equality alone makes it comparable
+only, and is the only registration the mutable built-ins accept. A
+`[hashCode]` a class computes itself, the declaration until 0.1, is refused
+with the reason, and a `hashFn` of one parameter at registration (D68).
 
 **Why.** A hash is only useful if it never changes, so supplying one
 *declares* "no reachable mutation". **Rejected:** a separate
@@ -541,7 +545,12 @@ DESIGN.md §4.1, §7.3.
 The default leaf hash is Marvin32 (the DoS-resistant family .NET ships)
 seeded per process from `crypto.getRandomValues`; `configureHasher` swaps
 in a keyed PRF once, at startup, and refuses to run after the first hash.
-`globalThis.crypto` is required at import.
+`globalThis.crypto` is required at import. The seed requirement is on the
+active hasher, the one every pool and collection buckets by; a hasher
+built on a key of the caller's, for `deepHash(value, hasher)` (D68), is
+reproducible on purpose and for that reason not flood-resistant, which the
+hardening guide says plainly: never bucket untrusted data by it, never
+install it as the active hasher of a process that ingests any.
 
 **Why.** An attacker cannot precompute colliding inputs, at ~1.0–1.4× the
 cost of FNV. Hashes are baked into pooled values and consed nodes, so a
@@ -572,6 +581,140 @@ comparisons per new version, and leaves published hashes open.
 **Deferred:** a keyed PRF as the last step of every container hash, which
 would make published hashes safe at a cost on every `intern`; the hardening
 guide rules out publishing them instead.
+
+### D68. Hashing is parametric in the hasher: `[hash](hasher)`, and `deepHash(value, hasher)`
+
+A value class hashes through a method of its prototype, `[hash](hasher)`,
+which hashes the content through the `Hasher` it is given: the parts that
+are values with `deepHash(part, hasher)`, the leaves with `hasher.string`
+and `hasher.number`, combined with `mix`. `deepHash(value, hasher)` hashes
+any value under any hasher that way, with the same combiners; left out,
+the hasher is the active one, and the walk is the one it always was.
+`[hashCode]` stays, as valsem's cache of the hash under the active hasher:
+the number `intern` computes once through `[hash]` and keeps in the meta
+store, and a pool stamps on the instance; it is read only on a class that
+has `[hash]`, and the symbol is no longer exported — registered still, so
+that two copies of valsem agree on the slot (D4), but a class never writes
+it and `deepHash` is how it is read. A `[hashCode]` a class computed
+itself — the declaration until 0.1 — is refused, with the reason, and so
+is a registered `hashFn` of one parameter, at registration. A
+hasher other than the active one remembers what it has hashed, itself:
+`Hasher` has `recall(obj)` and `remember(obj, hash)`, optional, since the
+active hasher's are never called and `configureHasher` takes a bare pair;
+`deepHash(value, hasher)` refuses a hasher without them, naming
+`createMarvin32Hasher`, whose hashers keep a `WeakMap`. Remembered is only
+what cannot change: canonical plain data, value-type instances, and the
+collections' consed nodes.
+
+**Why.** A hash under a key the caller chose is the same in every process,
+which the active hash, keyed by a secret drawn per process (D28), can never
+be — and a consumer (stifinder, 2026-10) needs exactly that: a seeded,
+replayable choice made from the hash of a state, the same choice in every
+run, with the hash of a long `ValueList` staying incremental as the state
+grows. The protocol gives it without a second hash on every value: one
+method serves every hasher, the active one included, so the cost to a
+class author is a parameter. The memory is the hasher's because nothing
+baked into a value is under any hasher but the active one, so each hasher
+must remember for itself, and it remembers only the immutable, since a
+hash under any hasher is a promise about content that does not change. It
+is the hasher's own, behind two methods, so that valsem's walk and the
+collections ask and tell and never know how it is kept — a `WeakMap` in
+the hashers valsem makes, so a dropped value takes its entry and a dropped
+hasher its memory; anything else in a hasher of the caller's. The
+collections' hashes under a hasher are
+shape-free by construction — a commutative sum per trie node, a polynomial
+per list node, composable whatever the node's position — because a trie's
+branching and a list's chunk boundaries follow the active hasher's seed,
+and a hash that read them would differ between processes under one fixed
+key, which is the one thing such a key is for. Tests: `hash-under`, which
+spawns a second process and checks that a fixed key gives the same hash of
+lists, tries, ordered collections and plain data there, while the active
+hash does not; and the property law under another hasher in
+`property-values`.
+
+**Rejected:** a second cached hash slot on every value, stamped at intern
+under a fixed key. It costs every value a field and every intern a second
+walk for a feature few processes use, and it fixes one key for the process
+where a caller may want several. **Rejected:** a process-global fixed seed
+through `configureHasher`, which a test could set in its setup. It is
+global, it must precede any interning, and it gives up flood resistance for
+the whole process to make one hash reproducible. **Rejected:** a cache at
+the top level only, with children rehashed from scratch: O(n) per hash of a
+list of n, and quadratic along a chain of pushes, which is the cost D18's
+consed nodes exist to avoid; the per-node cache keeps a push at O(1) under
+a hasher used consistently (40,000 pushes with a hash after each: 44 ms).
+**Rejected:** a `WeakMap` from hasher to cache kept by valsem beside the
+hasher, the first form of this entry's PR, so that `Hasher` could stay the
+bare pair. It cost one probe per call, which was nothing, and it leaked
+the mechanism: a cache type and a lookup threaded through every
+collection's `[hash]`, each knowing the memory was a `WeakMap` and where
+to find it, for a hasher that never used one. Two optional methods give
+the hasher the memory without asking anything of a hasher that only
+buckets. **Rejected:** keeping the precomputed `[hashCode]` as a
+declaration beside `[hash]`, a value under the active hasher only, which
+this entry's PR first did for compatibility. The maintainer struck it: a
+number a class computes itself is far likelier to be insecure than one the
+built-in hasher made — `(x * 73856093) ^ (y * 19349663)` is predictable
+offline where `deepHash([x, y], hasher)` is seeded — and the reason
+`configureHasher` exists at all (D28: SipHash for a deployment that
+ingests untrusted data) is defeated by a class the plugged-in hasher never
+saw, silently. `[hash](hasher)` makes the safe thing the only thing: every
+leaf of every value goes through the hasher valsem interns with, by
+construction. The refusal names the reason and the fix, and `register`
+refuses a `hashFn` of one parameter where it is written, not where it is
+used. Nothing published used the old form (stifinder and kilde, checked);
+the cost fell on valsem's own suite. **Rejected:** exporting `hashCode`
+still, as the way to read a cached hash. Nothing outside valsem needs the
+slot: `deepHash(value)` returns the same number, and for a canonical object
+that is the cache read; what the export offered was a half-probe for "is
+this a value", which D41 does not give, and the one way left to write
+`[hashCode]` beside `[hash]` by accident. The protocol is `[equals]`,
+`[hash]`, `[interned]`. **Rejected:** reading `[hashCode]`
+under another hasher when `[hash]` is absent, as a best-effort answer: it
+would be the active hash, silently, exactly where a caller asked for
+something else. **Cost.** A breaking change to the extension protocol,
+taken before 1.0: a class implements `[hash]`, and one that carried a
+`[hashCode]` of its own is refused until it does. `deepHash` reads
+`[hashCode]` only on a class with `[hash]`, read off the prototype the
+class path already holds (a second `getPrototypeOf` there cost 10 ns on
+every hash of a canonical collection, and was found by the benchmark), and
+`deepEqual`'s pre-filter trusts it on the same condition. The walk is
+one function of the hasher, recursing through `deepHash` itself: which
+leaf function is called, where a remembered hash is looked for, whether
+`[hashCode]` is read and whether the result is remembered are each one
+comparison a level. Measured (2026-10-15, M-series laptop, Node 26), the
+one walk against `main`: `deepHash` of a primitive 6 → 9 ns and of a string
+23 → 30, the function's own shape (every call removed from the active path
+— the hasher lookup, the memory probe, the leaf indirection, a wrapper —
+left the 2.5 ns where it was); `deepHash` of a canonical collection 75–80 →
+66–70 ns and of a pool-stamped instance 85–88 → 69, since the class path
+now makes one prototype read where it made two; `intern` of a value-class
+instance on par (323–328 vs 323–328), the hash having moved from the
+constructor into `[hash]`; `pool.intern` +10 ns (94–102 → 103–115), its
+own prototype read and call; every `HashMap` and `ValueMap` get, the
+`deepEqual` pre-filter and the hash of a raw record unchanged; the
+collections' build, push and edit rows within the harness's own run-to-run
+spread, which exceeds any difference between the builds. The bundle grows:
++615 B gzipped on the `intern` entry (6.8 → 7.4 KB, +9%) and +1.1 KB on
+everything (32.2 → 33.3 KB, +3.4%), the walk's hasher parameter, the
+collections' hashes under a hasher, and the protocol's messages; bundle
+size is a priority for the library, and this is the smallest the feature
+measured at. **Rejected:** a second copy of the walk for the active hasher,
+the first form of this entry's PR, taken so that the hot path could not
+regress before it could be benchmarked. Benchmarked, it saved the 2.5 ns on
+a primitive hash and nothing on any operation built from one, and cost a
+duplicated dispatch — every change to how a class, a draft or a symbol
+hashes owed twice — and 140 B gzipped on the `intern` entry. **Rejected:** a
+separate export for the walk,
+so that `deepHash` does not reach it and a consumer who never hashes under
+a hasher does not bundle it: it recovers 370 B gzipped, and only for a
+bundle with no collection in it, since every collection's `[hash]` is a
+prototype method that reaches the walk for its children; a second name for
+one operation is not worth that. The built-in collections are slower under a non-active
+hasher than the field read they serve the active one from: a walk with a
+`WeakMap` probe per node on the first hash, one probe on the second. A
+`RawArray` and a unique symbol hash by an identity, which no key makes
+reproducible, and the docs say so. DESIGN.md §3.2, §3.3, §5.1.
 
 ### D19. Hardening rules
 

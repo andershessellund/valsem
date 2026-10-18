@@ -6,15 +6,15 @@
 // once at construction; downstream `[hashCode]` reads are O(1).
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { createInternPool } from './intern-pool.js';
-import { hashString } from './hasher.js';
+import { hashString, type Hasher } from './hasher.js';
 
 const pool = createInternPool<InternedString>();
 const INTERNAL = Symbol('valsem.interned-string');
 
 /**
- * Opaque interned-string wrapper carrying a precomputed hash.
+ * Opaque interned-string wrapper carrying its hash, computed once.
  *
  * Two `InternedString` instances with `value === value` are the same
  * object reference. The {@link value} is the canonical JavaScript
@@ -36,6 +36,10 @@ export class InternedString {
   /** Cached structural hash — the `[hashCode]` protocol, served from a private field so no own symbol property exists (spread cannot copy the markers). */
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /** The hash under `hasher`: the string through the hasher, as the active one is through the process's. */
+  [hashSym](hasher: Hasher): number {
+    return hasher.string(this.value);
   }
   /** The canonical-type marker: every instance is canonical by construction. */
   get [internedSym](): true {

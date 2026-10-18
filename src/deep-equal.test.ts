@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi } from 'vitest';
-import { deepEqual, equals, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+import type { Hasher } from './hasher.js';
 import { intern } from './intern.js';
 
 // The mutable-builtin comparisons below intentionally trigger the development
@@ -173,8 +174,8 @@ describe('deepEqual', () => {
           this.currency === other.currency
         );
       }
-      [hashCode](): number {
-        return this.amount;
+      [hash](hasher: Hasher): number {
+        return hasher.number(this.amount);
       }
     }
     expect(deepEqual(new Money(100, 'USD'), new Money(100, 'USD'))).toBe(true);
@@ -188,15 +189,15 @@ describe('deepEqual', () => {
       [equals](other: unknown): boolean {
         return other instanceof Widget && this.id === other.id;
       }
-      [hashCode](): number {
-        return this.id;
+      [hash](hasher: Hasher): number {
+        return hasher.number(this.id);
       }
     }
     // Register a handler that always returns false
     deepEqual.register(
       Widget,
       () => false,
-      (w) => w.id,
+      (w, hasher) => hasher.number(w.id),
     );
     // [equals] should still win
     expect(deepEqual(new Widget(1), new Widget(1))).toBe(true);
@@ -212,7 +213,7 @@ describe('deepEqual', () => {
     deepEqual.register(
       Point,
       (a, b) => a.x === b.x && a.y === b.y,
-      (p) => p.x * 31 + p.y,
+      (p, hasher) => hasher.number(p.x * 31 + p.y),
     );
     expect(deepEqual(new Point(1, 2), new Point(1, 2))).toBe(true);
     expect(deepEqual(new Point(1, 2), new Point(3, 4))).toBe(false);
@@ -314,16 +315,19 @@ describe('deepEqual — canonical fast path', () => {
     expect(deepEqual(ValueMap.empty(), ValueSet.empty())).toBe(false);
   });
 
-  it('distinct precomputed [hashCode]s skip [equals] entirely', () => {
+  it('distinct cached [hashCode]s skip [equals] entirely', () => {
     let equalsCalls = 0;
     class Tagged {
       declare readonly [hashCode]: number;
-      constructor(readonly tag: string, h: number) {
-        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = h;
+      constructor(readonly tag: string, readonly h: number) {
+        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = h; // as a pool stamps it
       }
       [equals](other: unknown): boolean {
         equalsCalls++;
         return other instanceof Tagged && other.tag === this.tag;
+      }
+      [hash](): number {
+        return this.h;
       }
     }
     // Companion invariant: unequal hashes prove inequality — no [equals] call.
@@ -346,11 +350,12 @@ describe('deepEqual — the [interned] type contract', () => {
     const pool = createInternPool<Pt>();
     class Pt {
       declare readonly [hashCode]: number;
-      constructor(readonly x: number) {
-        (this as Record<symbol, unknown>)[hashCode as unknown as symbol] = x >>> 0;
-      }
+      constructor(readonly x: number) {}
       [equals](other: unknown): boolean {
         return other instanceof Pt && other.x === this.x;
+      }
+      [hash](hasher: Hasher): number {
+        return hasher.number(this.x);
       }
     }
     const canonical = pool.intern(new Pt(42));
@@ -388,7 +393,7 @@ describe('mutable built-ins — tier-1 registration is contained', () => {
       deepEqual.register(
         Date,
         (a, b) => a.getTime() === b.getTime(),
-        (d) => d.getTime() >>> 0,
+        (d, hasher) => hasher.number(d.getTime()),
       ),
     ).toThrow(/Date cannot be registered with a hash/);
     deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
@@ -422,8 +427,23 @@ describe('deepEqual — a record is its own enumerable keys, from both sides', (
       get [hashCode](): number {
         return this.signed ? -1 : 0xffffffff;
       }
+      [hash](): number {
+        return this.signed ? -1 : 0xffffffff;
+      }
     }
     expect(deepEqual(new Id(1, true), new Id(1, false))).toBe(true);
     expect(intern(new Id(1, true))).toBe(intern(new Id(1, false)));
+  });
+
+  it('the pre-filter trusts [hashCode] only on a class with [hash]: a number of the class\'s own proves nothing', () => {
+    class Legacy {
+      constructor(readonly v: number) {}
+      readonly [hashCode] = Math.random(); // never equal across instances
+      [equals](o: unknown): boolean {
+        return o instanceof Legacy && o.v === this.v;
+      }
+    }
+    expect(deepEqual(new Legacy(1), new Legacy(1))).toBe(true); // [equals] ran: comparable, by its own word
+    expect(() => intern(new Legacy(1))).toThrow(/carries a \[hashCode\] but no \[hash\]/); // not a value
   });
 });

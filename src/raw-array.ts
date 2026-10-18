@@ -21,9 +21,9 @@
 // unlikely to need, but if you do, here it is".
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern } from './intern.js';
-import { hashNumber } from './hasher.js';
+import { hashNumber, type Hasher } from './hasher.js';
 import { indexArg, atIndex, elementIndex } from './shared.js';
 
 /** The token that keeps construction inside the class: `private` holds at compile time only, and `new` from JavaScript would mint an instance that claims to be canonical and is pooled nowhere. */
@@ -47,13 +47,16 @@ export class RawArray<T> {
   readonly #raw: (unknown | undefined)[];
   /** Per-slot canonical element, or NOT_YET. */
   readonly #canon: unknown[];
+  /** The identity this view hashes by, under any hasher. */
+  readonly #id: number;
   readonly #hash: number;
 
   private constructor(token: symbol, raw: unknown[]) {
     if (token !== INTERNAL) throw new TypeError('valsem: RawArray instances are created by RawArray.from()');
     this.#raw = raw;
     this.#canon = new Array<unknown>(raw.length).fill(NOT_YET);
-    this.#hash = hashNumber(++nextId) >>> 0;
+    this.#id = ++nextId;
+    this.#hash = hashNumber(this.#id) >>> 0;
     Object.freeze(this);
   }
 
@@ -115,6 +118,10 @@ export class RawArray<T> {
 
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /** The identity hash under `hasher` — an identity, so no key makes it the same in another process. */
+  [hashSym](hasher: Hasher): number {
+    return hasher.number(this.#id) >>> 0;
   }
   get [internedSym](): true {
     return true;

@@ -15,9 +15,10 @@
 // are a function of the content, so the shape stays canonical.
 // ---------------------------------------------------------------------------
 
-import { equals as equalsSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
+import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
 import { intern, internHash } from './intern.js';
-import { mix } from './hasher.js';
+import { _hashWith } from './deep-hash.js';
+import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
 import { INSPECT, inspectAs, atIndex, type InspectOptions, type Inspect, findIndexIn, mapIn, filterIn, reduceIn, newEntryIndex } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
@@ -72,6 +73,10 @@ export class OrderedSet<T> implements ReadonlySetReads<T> {
 
   get [hashCodeSym](): number {
     return this.#hash;
+  }
+  /** The hash under `hasher`, from the member list's hash under it, as the active one is from its. */
+  [hashSym](hasher: Hasher): number {
+    return _isActive(hasher) ? this.#hash : mix(SEED, _hashWith(this.#list, _remembering(hasher)));
   }
   get [internedSym](): true {
     return true;

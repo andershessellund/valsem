@@ -3,7 +3,7 @@ import { memoize } from './memoize.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueDate } from './value-date.js';
-import { hashCode } from './deep-equal.js';
+import { hash } from './deep-equal.js';
 
 describe('memoize', () => {
   it('runs once per distinct argument tuple, by value', () => {
@@ -171,7 +171,7 @@ describe('memoize', () => {
 describe('memoize — an argument that is not a value is refused before fn runs', () => {
   it('a class with a hash but no equality: fn never runs, nothing is cached', () => {
     class H {
-      get [hashCode](): number {
+      [hash](): number {
         return 7;
       }
     }
