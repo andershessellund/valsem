@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.0](https://github.com/andershessellund/valsem/compare/v0.1.0...v0.2.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* the protocol symbols are no longer registered (`Symbol.for`), and the hash seed and symbol numbering are no longer shared through `globalThis`. Two copies of valsem in one process no longer interoperate: a value of one is refused by the other with a message naming the fix, and `deepEqual` compares it by reference. One copy per application — a library declares valsem a peer dependency.
+* hashing is parametric in the hasher: a value class implements `[hash](hasher)`, one method for every hasher, and `[hashCode]` is its hash under the active one, cached by valsem
+* a value class implements `[hash](hasher)` in place of a precomputed `[hashCode]`, and a registered `hashFn` takes `(value, hasher)`. A `[hashCode]` a class computed itself, and a one-parameter `hashFn`, are refused with the reason: a number the hasher never saw is one no seed, and no SipHash plugged in with `configureHasher`, protects. `[hashCode]` is now valsem's cache of the hash, written when it interns an instance, and the `hashCode` symbol is no longer exported.
+
+### Features
+
+* `deepHash(value, hasher)` hashes under a hasher of your own, incrementally over shared structure: with a fixed key, the same hash in every process, for a fingerprint or a seeded choice that replays ([9d09cb8](https://github.com/andershessellund/valsem/commit/9d09cb8ffd54d524cf3d00a721d59490aec17b35))
+* `mix` is exported, for `[hash]` methods to fold leaf hashes with ([9d09cb8](https://github.com/andershessellund/valsem/commit/9d09cb8ffd54d524cf3d00a721d59490aec17b35))
+* a copy of valsem shares nothing: its protocol symbols, seed and pool are its own, and another copy's value is refused with the reason ([a404ec6](https://github.com/andershessellund/valsem/commit/a404ec645ef047dee366add7782fb9de8eea69d9))
+* hashing is parametric in the hasher: a value class implements `[hash](hasher)`, one method for every hasher, and `[hashCode]` is its hash under the active one, cached by valsem ([9d09cb8](https://github.com/andershessellund/valsem/commit/9d09cb8ffd54d524cf3d00a721d59490aec17b35))
+
+
+### Performance Improvements
+
+* a canonical collection is recognised with one prototype read, so a HashMap lookup on a collection key is as fast as in 0.0.4 ([#81](https://github.com/andershessellund/valsem/issues/81)) ([d60d68c](https://github.com/andershessellund/valsem/commit/d60d68cf6da9360224c06d2cd23a4bfd420485ee))
+
 ## [0.1.0](https://github.com/andershessellund/valsem/compare/v0.0.4...v0.1.0) (2026-10-03)
 
 
