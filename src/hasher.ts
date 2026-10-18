@@ -11,7 +11,7 @@
 // cannot precompute inputs that collide into the same bucket — closing the
 // hash-flooding vector — while honest workloads pay ~1.0-1.4x FNV.
 //
-// The seed lives on `globalThis` so duplicate installs in one process agree.
+// The seed is this copy's: drawn when the module loads, shared with nothing.
 // For deployments that ingest untrusted data and worry about seed recovery via
 // timing, `configureHasher` swaps in a stronger keyed PRF (e.g. SipHash) built
 // over `getHashSeed()`.
@@ -80,34 +80,29 @@ export function _remembering(hasher: Hasher): Remembering {
 }
 
 // ---------------------------------------------------------------------------
-// Process seed (128-bit), shared across duplicate installs via globalThis.
+// This copy's seed (128-bit). Nothing is shared through globalThis: a second
+// copy of valsem in the process draws a seed of its own, and its values are
+// not this copy's values (D4).
 // ---------------------------------------------------------------------------
 
-const SEED_KEY = Symbol.for('valsem.hashSeed.v1');
-
-function readSeed(): Uint32Array {
-  const g = globalThis as unknown as Record<symbol, Uint32Array | undefined>;
-  const existing = g[SEED_KEY];
-  if (existing !== undefined) return existing;
+function drawSeed(): Uint32Array {
   // Web Crypto is a platform requirement: globalThis.crypto is universal in
   // every supported runtime (Node \u2265 22, all browsers/workers/Deno/Bun), so
   // there is no existence check \u2014 an exotic environment without it fails
   // here at import, which is the honest place. (Structural type instead of
   // the DOM `Crypto` name: valsem does not compile against the DOM lib.)
-  const seed = (
+  return (
     globalThis as unknown as {
       crypto: { getRandomValues: <T extends ArrayBufferView>(array: T) => T };
     }
   ).crypto.getRandomValues(new Uint32Array(4));
-  g[SEED_KEY] = seed;
-  return seed;
 }
 
-const SEED = readSeed();
+const SEED = drawSeed();
 
 /**
- * The process hash seed (four 32-bit words). Reuse it when building a custom
- * {@link Hasher} (e.g. a SipHash key) so all hashers in the process agree.
+ * This copy's hash seed (four 32-bit words). Reuse it when building a custom
+ * {@link Hasher} (e.g. a SipHash key) so every hasher of this copy agrees.
  */
 export function getHashSeed(): Uint32Array {
   return SEED.slice();

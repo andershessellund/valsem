@@ -312,6 +312,19 @@ export function reduceIn(
  */
 export const DRAFT_STATE: unique symbol = Symbol('valsem.draftState') as any;
 
+/**
+ * Symbol under which a draftable type exposes its draft factory.
+ *
+ * Implement `[toDraft](parent)` on a class to let `produce` hand out a
+ * mutable draft of its instances. The method builds a `DraftState` with
+ * `createDraftState` and returns it: `state.draft` is what the recipe
+ * receives, and `state.finalize` turns the state back into the canonical
+ * result. `Draft<T>` infers the draft type from this method's return type.
+ * A symbol of this copy of valsem, like the other protocol symbols: a type
+ * is draftable by the copy it imported `toDraft` from (D4).
+ */
+export const toDraft: unique symbol = Symbol('valsem.toDraft') as any;
+
 let draftValue: ((draft: object) => unknown) | undefined;
 let recipes = 0;
 

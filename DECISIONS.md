@@ -85,11 +85,9 @@ floor. DESIGN.md §2.3, §3.1.
 
 A registered symbol hashes by its name; a unique one by an id assigned on
 first sight and kept in the hash cache. Own enumerable symbol keys are part
-of a record's content. The ids are numbered process-wide (a `globalThis`
-table beside the hash seed), not per module: a per-copy counter numbers
-symbols in the order each install meets them, which made plain data holding
-a unique symbol the one case where a shared seed did not give duplicate
-installs equal hashes (D4).
+of a record's content. The ids are numbered by this copy of valsem, in the
+order it meets the symbols; another copy numbers them itself, as it hashes
+with a seed of its own (D4).
 
 **Why.** Before this, `deepEqual({ [s]: 1 }, { [s]: 2 })` was `true`, the
 silent wrong answer the library exists to prevent. **Cost.** Every raw-record
@@ -161,25 +159,54 @@ equality handler makes `valsem/temporal` throw at registration. DESIGN.md
 
 ## Equality, hashing, and the pool
 
-### D4. Protocol symbols are global and versioned; duplicate installs are different types
+### D4. Protocol symbols are this copy's; a second copy of valsem is a separate library, and its values are refused with the reason
 
-`equals`, `hash`, `interned` and `toDraft` are
-`Symbol.for('valsem.<name>.v1')`, and so is `hashCode`, the slot valsem
-caches a value's hash in, which is not exported (D68); the hash seed is
-`Symbol.for('valsem.hashSeed.v1')`. Two copies of valsem in one process
-agree on the protocol, the slot and the seed, but a `ValueSet` from one
-copy is a different constructor from the other's and compares unequal to
-it.
+`equals`, `hash`, `interned` and `toDraft` are `Symbol('valsem.<name>')`,
+and so is `hashCode`, the slot valsem caches a value's hash in (D68): symbols
+of the copy of valsem that created them, registered nowhere. The hash seed
+and the numbering of unique symbols are this copy's too; nothing of valsem's
+is on `globalThis`. Two copies of valsem in one process share nothing: a
+value of one — a collection, a value class, a draftable — is not a value to
+the other, which recognises it by the description of the foreign symbols on
+its prototype (`valsem.equals` and the rest, not its own) and says so:
+`intern`, `deepHash`, the collections and `HashMap` refuse it, naming the
+other copy and the fix (one copy per application: a library declares
+valsem a peer dependency, an application deduplicates its install), and
+`deepEqual`, which is total (D24), answers by reference with the
+development warning. Plain data has no copy: it compares, hashes and
+interns in either.
 
-**Why.** A `Money` class written against one copy must be recognised by a
-differently-versioned copy elsewhere in the dependency graph, or it would
-silently fall to reference semantics; the version suffix lets an
-incompatible protocol change leave older copies seeing plain unregistered
-classes. **Rejected:** a "localization" mechanism that made foreign
-instances equal. Instances of different types are different values, and
-pretending otherwise hid real deployment mistakes. The symbols were renamed
-to the `valsem.*` namespace before first publish, because cross-realm keys
-are forever. DESIGN.md §5.1.
+**Why.** The first form registered the symbols (`Symbol.for('valsem.<name>.v1')`)
+and shared the seed and the symbol numbering through `globalThis`, so that
+a `Money` written against one copy would be a value to a differently-
+versioned copy elsewhere in the dependency graph instead of falling to
+reference semantics silently. Reconsidered on 2026-10-18, it papered over a
+packaging error — a duplicate install that a peer dependency prevents
+(stifinder's D26 does exactly that) — and it did so only between
+protocol-compatible copies (a 0.1 `[hashCode]` class and a 0.2 `[hash]`
+class refuse each other either way), at a price paid everywhere. The shared
+seed was load-bearing and nothing guarded it: with `configureHasher` run in
+one copy, the two hashed differently while still recognising each other's
+values, so copy B read A's stamped `[hashCode]` on pooled instances and
+computed `[hash]` under its own hasher on unpooled ones, and equal values
+landed in different buckets of B's tables — a silent miss. Two unrelated
+applications on one page shared one secret seed; any script could mint
+`Symbol.for('valsem.interned.v1')` and have `intern` pass its object through
+as canonical; and the keys were forever, so every incompatible protocol
+change owed a `.v2` and a compatibility argument. Separation costs none of
+that, and the one silent failure the first form feared — `deepEqual` on two
+equal foreign values answering `false` — is made loud without sharing
+anything: a symbol's description crosses the copy boundary where its
+identity does not, so this copy can tell another copy's protocol from a
+class with none, and does, once per prototype. **Rejected:** a
+"localization" mechanism that made foreign instances equal. Instances of
+different types are different values, and pretending otherwise hid real
+deployment mistakes. **Rejected:** `deepEqual` throwing for a foreign value:
+it is total (D24), and a value it does not admit is one it compares by
+reference, as it does a mutable built-in, with the same warning. **Cost.** A
+deliberately duplicated graph — two majors during a migration — cannot pass
+values between the copies; plain data still crosses, and the message says
+how. Tests: `duplicate-install`. DESIGN.md §2.6, §3.3, §5.1.
 
 ### D26. The hash is the immutability declaration
 
@@ -594,7 +621,7 @@ the hasher is the active one, and the walk is the one it always was.
 the number `intern` computes once through `[hash]` and keeps in the meta
 store, and a pool stamps on the instance; it is read only on a class that
 has `[hash]`, and the symbol is no longer exported — registered still, so
-that two copies of valsem agree on the slot (D4), but a class never writes
+it is this copy's, like the protocol symbols (D4), and a class never writes
 it and `deepHash` is how it is read. A `[hashCode]` a class computed
 itself — the declaration until 0.1 — is refused, with the reason, and so
 is a registered `hashFn` of one parameter, at registration. A
@@ -2084,8 +2111,8 @@ are one class each, with private state the library reaches into.
 draft would type as its value. It would duplicate what `draftOf` already
 does for a draft of the running recipe, minus the scope check, and make the
 lie above a typed one. **Cost.** None new. Two installed copies of valsem see
-each other's collections as different types, which is what the runtime does
-with them (D4), and a test double for a
+each other's collections as another copy's values, which the runtime refuses
+(D4), and a test double for a
 collection is built with the factories, `ValueList.of(…)`, since a value
 needs no mocking.
 
@@ -2235,9 +2262,9 @@ prototype read and a call, because a class prototype fails the identity
 checks too: about 10 ns, which made a `HashMap` lookup on a `ValueList` key
 45% slower in 0.1.0 than in 0.0.4 (reported from stifinder). Plain data
 never reached it, since its marker read finds nothing. What the check lets
-through is another realm's record carrying `Symbol.for('valsem.interned.v1')`
+through is another realm's record carrying this copy's `interned` symbol
 as an own key: no JSON or structured clone writes a symbol key, so only
-code can, and code can mark a class just as well (the same in-process
+code handed the symbol can, and code can mark a class just as well (the same in-process
 forgery as `Object.create(ValueList.prototype)`). **Cost.** That record is
 taken at its word: `intern` returns it unfrozen and `isCanonical` says
 `true`. Pinned by a test in `cross-realm.test.ts`.

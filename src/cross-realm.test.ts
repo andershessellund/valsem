@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { createContext, runInContext } from 'node:vm';
-import { deepEqual } from './deep-equal.js';
+import { deepEqual, interned } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { intern, isCanonical } from './intern.js';
 import { produce } from './produce.js';
@@ -84,7 +84,10 @@ describe('the [interned] marker check reads "plain" as this realm\'s (D67)', () 
   // that key, and code can mark a class just as well. Pinned, so that
   // tightening or loosening this is a decision, not an accident.
   it("another realm's record carrying the marker is taken at its word", () => {
-    const forged = foreign<Record<symbol, unknown>>("{ x: 1, [Symbol.for('valsem.interned.v1')]: true }");
+    // The marker is this copy's symbol, so the other realm can only carry it
+    // if handed it — as a host that shares valsem with an iframe would.
+    const marked = createContext({ INTERNED: interned });
+    const forged = runInContext('({ x: 1, [INTERNED]: true })', marked) as Record<symbol, unknown>;
     expect(isCanonical(forged)).toBe(true);
     expect(intern(forged)).toBe(forged);
   });

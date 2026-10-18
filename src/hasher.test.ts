@@ -14,11 +14,10 @@ describe('getHashSeed', () => {
     expect([...getHashSeed()]).toEqual([...b]); // …does not touch the process seed
   });
 
-  it('is the seed shared on globalThis', () => {
-    const shared = (globalThis as unknown as Record<symbol, Uint32Array>)[
-      Symbol.for('valsem.hashSeed.v1')
-    ];
-    expect([...shared!]).toEqual([...getHashSeed()]);
+  it("is this copy's alone: nothing of valsem's is on globalThis", () => {
+    // Another copy of valsem in the process draws a seed of its own (D4).
+    const ours = Object.getOwnPropertySymbols(globalThis).filter((s) => s.description?.startsWith('valsem.'));
+    expect(ours).toEqual([]);
   });
 });
 

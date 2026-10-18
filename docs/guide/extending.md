@@ -105,6 +105,18 @@ history and may be replaced, or upgraded to a value. The mutable built-ins (`Dat
 refuses a hash for them, since a hash would declare them immutable — see
 [the mutable boundary](/guide/boundary#the-contained-escape-hatch).
 
+## One copy of valsem
+
+A value class is a value to the copy of valsem it imported `equals` and
+`hash` from, and to no other. The protocol symbols are that copy's — not
+registered, not on `globalThis` — and so are its seed and its pool. If your
+dependency graph ends up with two copies, a `Money` from one is refused by
+the other wherever a value is required, with a message that names the
+other copy and the fix; `deepEqual` compares it by reference and warns in
+development. So a **library** that uses valsem declares it a peer
+dependency, and an **application** keeps one copy installed. Plain data has
+no copy and crosses freely.
+
 ## Interned value types with `createInternPool`
 
 `intern` already pools any class with `[equals]` and `[hash]`, so you do

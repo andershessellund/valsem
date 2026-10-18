@@ -151,13 +151,12 @@ may substitute either object for the other.
 ### 2.6 Symbols
 
 A registered symbol (`Symbol.for(name)`) *is* its name: hashed by the name,
-so it agrees across realms and installs. A unique symbol (`Symbol(desc)`,
-the well-known symbols) is an identity with no content: it hashes by an id
-assigned on first sight — numbered process-wide, through
-`Symbol.for('valsem.symbolIds.v1')` on `globalThis` beside the seed, so
-duplicate installs agree on it too — and kept in the hash cache (unique symbols are
-valid `WeakMap` keys since ES2023; registered ones are not, which is why
-they take the other branch). Symbols work as record fields, record keys,
+so it agrees across realms. A unique symbol (`Symbol(desc)`, the well-known
+symbols) is an identity with no content: it hashes by an id assigned on
+first sight — numbered by this copy of valsem, in the order it met them —
+and kept in the hash cache (unique symbols are valid `WeakMap` keys since
+ES2023; registered ones are not, which is why they take the other branch).
+Symbols work as record fields, record keys,
 `HashMap` keys and collection members. Own enumerable symbol keys are part
 of a record's content. valsem's protocol symbols (`equals`, `hash`,
 `interned`, `toDraft`, and the internal `hashCode` it caches a hash in)
@@ -243,9 +242,9 @@ over the IEEE-754 bits for numbers (`-0` normalised to `+0`, and every NaN
 to the one NaN literal: a NaN's sign and payload are whatever the CPU left
 there, 0/0 differs between x86-64 and arm64, and `deepEqual` does not see
 them), keyed by the
-first two words of a 128-bit seed drawn once per process from
-`crypto.getRandomValues` and stored on `globalThis` under
-`Symbol.for('valsem.hashSeed.v1')` so duplicate installs agree. `configureHasher(hasher)` replaces both
+first two words of a 128-bit seed this copy of valsem draws from
+`crypto.getRandomValues` when it loads, and shares with nothing (D4).
+`configureHasher(hasher)` replaces both
 primitives once, before any leaf has been hashed, and throws afterwards;
 `getHashSeed()` exposes the seed for a keyed PRF such as SipHash.
 `createMarvin32Hasher(k0, k1)` builds the default with a chosen key: as
@@ -401,10 +400,9 @@ copy-on-write through a canonical whether or not it is frozen
 
 ### 5.1 The protocol
 
-The three value-protocol symbols, cross-realm registered as
-`Symbol.for('valsem.<name>.v1')` (D4); the fourth protocol symbol,
-`toDraft`, belongs to §7.1; the fifth registered symbol, `hashCode`, is
-valsem's own and not exported:
+The three value-protocol symbols, each `Symbol('valsem.<name>')` of this
+copy of valsem and of no other (D4); the fourth protocol symbol, `toDraft`,
+belongs to §7.1; the fifth, `hashCode`, is valsem's own and not exported:
 
 | Symbol | Tier | Shape |
 | --- | --- | --- |

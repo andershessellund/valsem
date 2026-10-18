@@ -3,15 +3,13 @@
 //
 // What differs between processes is the seed: the active hasher's key, and
 // with it every baked-in hash, the chunking of a ValueList and the shape of
-// a trie. So this suite is two copies of valsem under two seeds — the second
-// copy drawn after the shared seed is removed from globalThis, which no
-// program does and a test may — building the same values and hashing them
-// under one key. It gets a file to itself: it reloads the module graph.
+// a trie. So this suite is two copies of valsem under two seeds — each copy
+// draws its own when it loads (D4) — building the same values and hashing
+// them under one key. It gets a file to itself: it reloads the module graph.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from 'vitest';
 
 const A = await import('./index.js');
-delete (globalThis as unknown as Record<symbol, unknown>)[Symbol.for('valsem.hashSeed.v1')];
 vi.resetModules();
 const B = await import('./index.js');
 
@@ -62,8 +60,9 @@ describe('two seeds, one key', () => {
   it('a list built by pushing and one built at once, in copies whose runs fall differently', () => {
     const fa = fixture(A);
     const fb = fixture(B);
-    // The chunking follows the seed, so the two copies' trees differ in shape…
-    const shape = (l: unknown): number => JSON.stringify((l as { _structure(): unknown })._structure()).length;
+    // The chunking follows the seed, so the two copies' trees differ in shape
+    // (compared whole: two shapes can share a length by coincidence)…
+    const shape = (l: unknown): string => JSON.stringify((l as { _structure(): unknown })._structure());
     expect(shape(fa['list'])).not.toBe(shape(fb['list']));
     // …and the hash under the key does not see it.
     const ha = A.createMarvin32Hasher(K0, K1);

@@ -16,23 +16,14 @@
 // This module is the public surface of `valsem/draft`.
 // ---------------------------------------------------------------------------
 
-import { same, inspectAs, DRAFT_STATE, _setDraftValue, _recipes, type Inspect, type InspectOptions } from './shared.js';
+import { same, inspectAs, DRAFT_STATE, toDraft, _setDraftValue, _recipes, type Inspect, type InspectOptions } from './shared.js';
 import { intern, _hashCacheHas, isCanonical, _functionError } from './intern.js';
 import { _depthError, _maxDepth } from './limits.js';
 import { interned as internedMarker, _defineRecordField, _recordKeys, _isPlainRecord, _isPlainDataHere } from './deep-equal.js';
 
-/**
- * Symbol under which a draftable type exposes its draft factory.
- *
- * Implement `[toDraft](parent)` on a class to let `produce` hand out a
- * mutable draft of its instances. The method builds a {@link DraftState}
- * with {@link createDraftState} and returns it: `state.draft` is what the
- * recipe receives, and `state.finalize` turns the state back into the
- * canonical result. `Draft<T>` infers the draft type from this method's
- * return type. A global-registry symbol, versioned like the other protocol
- * symbols, so a copy of valsem only reads the protocol it understands.
- */
-export const toDraft: unique symbol = Symbol.for('valsem.toDraft.v1') as any;
+// `toDraft` is declared in shared.ts, beside `DRAFT_STATE`, so that
+// deep-equal.ts can tell another copy's `toDraft` from this one's (D4).
+export { toDraft } from './shared.js';
 
 /** The property through which a draft object exposes its state. Part of `valsem/draft`. */
 export { DRAFT_STATE };

@@ -248,10 +248,15 @@ describe('deepEqual', () => {
 });
 
 describe('the protocol symbols are global and versioned', () => {
-  it('live in the global registry under v1 keys', () => {
-    expect(Symbol.keyFor(equals)).toBe('valsem.equals.v1');
-    expect(Symbol.keyFor(hashCode)).toBe('valsem.hashCode.v1');
-    expect(Symbol.keyFor(interned)).toBe('valsem.interned.v1');
+  it('are symbols of this copy, described but not registered', () => {
+    // Not `Symbol.for`: a second copy of valsem has symbols of its own, and
+    // its values are not this copy's (D4). The description is what lets this
+    // copy recognise the other's protocol, and say so.
+    for (const [s, name] of [[equals, 'valsem.equals'], [hashCode, 'valsem.hashCode'], [interned, 'valsem.interned']] as const) {
+      expect(Symbol.keyFor(s)).toBeUndefined();
+      expect(s.description).toBe(name);
+      expect(Symbol.for(name)).not.toBe(s);
+    }
   });
 });
 

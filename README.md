@@ -456,6 +456,14 @@ so `produce` can edit your type in place, with patches.
   For `ValueMap`/`ValueSet` the order follows the per-process hash seed, so
   the string differs between processes: never compare or key by it, and
   persist `OrderedMap`/`OrderedSet` when order must hold.
+- **One copy of valsem per application.** Two copies in one process — the
+  npm outcome when a transitive dependency pins a different range — are two
+  libraries: each has a seed, a pool and protocol symbols of its own, and a
+  value of one is not a value to the other, which says so when it meets one
+  (`intern`, `deepHash` and the collections refuse it; `deepEqual` compares
+  it by reference, with a development warning). Plain data crosses. A
+  library that uses valsem declares it a **peer dependency**; an application
+  deduplicates its install.
 - **Drafts do not escape.** A draft used after its `produce` call throws, and
   so does a draft *put into* a different `produce` call's state, however
   deeply it is wrapped; pass `current(draft)` to give its value to another
