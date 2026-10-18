@@ -20,24 +20,23 @@
 // No circular reference handling — state values should be plain data.
 // ---------------------------------------------------------------------------
 
-import { DRAFT_STATE } from './shared.js';
+import { DRAFT_STATE, toDraft } from './shared.js';
 import type { Hasher } from './hasher.js';
 
 // ---------------------------------------------------------------------------
 // Protocol symbols
 //
 // `equals`, `hash` and `interned` are the PROTOCOL third-party types
-// implement to become values, so they live in the global symbol registry
-// (`Symbol.for`): a `Money` class written against one copy of valsem must
-// be recognised by a differently-versioned copy elsewhere in the dependency
-// graph, or it would silently fall to reference semantics. `hashCode`, the
-// slot valsem caches a value's hash in, is registered for the same reason
-// (one copy stamps it, another reads it) but is not part of the protocol a
-// class implements, and is not exported. The keys are VERSIONED, like the
-// hash seed's: a copy only ever reads the protocol it understands, and a
-// future incompatible protocol change bumps the suffix so an older copy
-// sees those instances as plain unregistered classes. Internal symbols
-// (draft state, sentinels) are ordinary `Symbol()`s — per copy.
+// implement to become values. They are symbols of THIS copy of valsem,
+// `Symbol('valsem.<name>')`, not registered: a value is a value to the copy
+// it was written against, and a second copy of valsem in the process is a
+// separate library, with a seed, a pool and a protocol of its own, that
+// shares nothing with this one (D4). A duplicate install is a packaging
+// error, and this copy says so when it meets the other's value: the
+// description of the foreign symbol is how it recognises one (`isForeign`).
+// `hashCode`, the slot valsem caches a value's hash in, is this copy's
+// too, and is not exported. Internal symbols (draft state, sentinels) are
+// ordinary `Symbol()`s as well.
 // ---------------------------------------------------------------------------
 
 /**
@@ -59,7 +58,7 @@ import type { Hasher } from './hasher.js';
  * }
  * ```
  */
-export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
+export const equals: unique symbol = Symbol('valsem.equals') as any;
 
 /**
  * Symbol for the companion hash of a class instance, as a method of the
@@ -97,7 +96,7 @@ export const equals: unique symbol = Symbol.for('valsem.equals.v1') as any;
  * }
  * ```
  */
-export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
+export const hash: unique symbol = Symbol('valsem.hash') as any;
 
 /**
  * Symbol for **valsem's cache of a value's hash**: the number valsem
@@ -108,11 +107,10 @@ export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
  * the first hash on. (A hasher you build for `deepHash(value, hasher)` is
  * never that one.)
  *
- * Registered (`Symbol.for`) like the protocol symbols, since two copies of
- * valsem in one process must agree on the slot, but not exported from the
- * package (it stays in this module's declarations, which the value types'
- * own declarations name): valsem writes it, a class does not, and
- * `deepHash` is how it is read. valsem's own value types serve it
+ * This copy's, like the protocol symbols, and not exported from the package
+ * (it stays in this module's declarations, which the value types' own
+ * declarations name): valsem writes it, a class does not, and `deepHash` is
+ * how it is read. valsem's own value types serve it
  * from a field, so the hash of a canonical collection is a property read;
  * for a class with {@link hash}, `intern` computes it once through `[hash]`
  * with the active hasher and keeps it in the meta store, and `pool.intern`
@@ -124,7 +122,7 @@ export const hash: unique symbol = Symbol.for('valsem.hash.v1') as any;
  * that ingests untrusted data, did not cover the class, and nothing said
  * so.
  */
-export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
+export const hashCode: unique symbol = Symbol('valsem.hashCode') as any;
 
 /**
  * Symbol marking a value of an **auto-interning type**.
@@ -153,7 +151,7 @@ export const hashCode: unique symbol = Symbol.for('valsem.hashCode.v1') as any;
  * collection stores it as an opaque member. Dedupe your install if you need
  * one canonical instance.
  */
-export const interned: unique symbol = Symbol.for('valsem.interned.v1') as any;
+export const interned: unique symbol = Symbol('valsem.interned') as any;
 
 // ---------------------------------------------------------------------------
 // Type-handler registry
@@ -287,29 +285,65 @@ export function _resetEqualityWarnings(): void {
  * constant behind a try/catch, it folds nothing.
  *
  * With no `process` at all (an unbundled browser import) the read throws. The
- * CALLER catches that, see {@link warnMutableComparison}: a warning meant for
+ * CALLER catches that, see {@link warnReferenceComparison}: a warning meant for
  * development must not be the default for an unknown environment. Catching in
  * here would put the guard inside a `try`, where minifiers stop folding.
  */
-function warnMutableComparisonDev(ctor: Function, reason: string): void {
+function warnReferenceComparisonDev(ctor: Function, otherCopy: boolean, reason: string | undefined): void {
   if (process.env.NODE_ENV !== 'production') {
     if (warnedMutableCompare.has(ctor) || _g.console?.warn === undefined) return;
     warnedMutableCompare.add(ctor);
+    // The texts live inside the guard, so a production build folds them away.
+    const why = otherCopy ? `each is ${OTHER_COPY}` : reason;
+    const advice = otherCopy
+      ? OTHER_COPY_ADVICE
+      : `To compare them by content anyway, register handlers with deepEqual.register(${ctor.name}, …).`;
     _g.console.warn(
       `valsem: deepEqual compared two distinct ${ctor.name} instances — they compare by ` +
-        `REFERENCE, because ${reason}. To compare them by content anyway, register handlers ` +
-        `with deepEqual.register(${ctor.name}, …). (Development-only warning, once per type.)`,
+        `REFERENCE, because ${why}. ${advice} (Development-only warning, once per type.)`,
     );
   }
 }
 
-function warnMutableComparison(ctor: Function, reason: string): void {
+/** The development warning for two distinct instances compared by reference: a mutable built-in (`reason`), or another copy's value. */
+function warnReferenceComparison(ctor: Function, otherCopy: boolean, reason?: string): void {
   try {
-    warnMutableComparisonDev(ctor, reason);
+    warnReferenceComparisonDev(ctor, otherCopy, reason);
   } catch {
     // No `process` to read: not a development build.
   }
 }
+
+// ---------------------------------------------------------------------------
+// Another copy's values
+//
+// Two copies of valsem in one process are two libraries: each has a seed, a
+// pool and protocol symbols of its own, and a value of one is not a value of
+// the other (D4). What this copy can do is say so. A value class, and every
+// built-in value type, carries its protocol as symbol-keyed methods on its
+// prototype, and a symbol's description survives the copy boundary where its
+// identity does not: a prototype with an own symbol described `valsem.equals`
+// that is not THIS copy's `equals` belongs to another copy. Asked once per
+// prototype, since it enumerates the prototype's symbols.
+// ---------------------------------------------------------------------------
+
+const otherCopyProtos = new WeakMap<object, boolean>();
+
+/** @internal Does `proto`, a class prototype, carry the protocol of another copy of valsem? Every symbol of valsem's is described `valsem.…`. */
+export function _fromAnotherCopy(proto: object): boolean {
+  let answer = otherCopyProtos.get(proto);
+  if (answer === undefined) {
+    answer = Object.getOwnPropertySymbols(proto).some(
+      (s) => s !== equals && s !== hash && s !== hashCode && s !== interned && s !== toDraft && s.description?.startsWith('valsem.') === true,
+    );
+    otherCopyProtos.set(proto, answer);
+  }
+  return answer;
+}
+
+const OTHER_COPY = 'a value of another copy of valsem, whose protocol this copy does not read';
+const OTHER_COPY_ADVICE =
+  'One copy of valsem per application: a library declares it a peer dependency, an application deduplicates its install. Plain data crosses copies; values do not.';
 
 // ---------------------------------------------------------------------------
 // deepEqual
@@ -438,7 +472,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     const ctor = _ctorOf(a);
     if (ctor !== undefined && ctor === _ctorOf(b)) {
       const reason = MUTABLE_BUILTINS.get(ctor);
-      if (reason !== undefined) warnMutableComparison(ctor, reason);
+      if (reason !== undefined) warnReferenceComparison(ctor, false, reason);
+      else if (_fromAnotherCopy(protoA)) warnReferenceComparison(ctor, true);
     }
     return false;
   }
@@ -609,6 +644,12 @@ export function _missingValueSemantics(obj: object): string | undefined {
   const hasEquals = eq !== undefined || (ctor !== undefined && equalsMethods.has(ctor));
   const hasHash = _protocolHash(obj) !== undefined || (ctor !== undefined && hashCodeMethods.has(ctor));
   if (hasEquals && hasHash) return undefined;
+  // A value of another copy of valsem: its protocol is that copy's symbols,
+  // which this copy does not read — a packaging error, named as one.
+  const proto = Object.getPrototypeOf(obj) as object | null;
+  if (proto !== null && _fromAnotherCopy(proto)) {
+    return `${name} is ${OTHER_COPY}. ${OTHER_COPY_ADVICE}`;
+  }
   // A [hashCode] of the class's own was the declaration before 0.2: a number
   // computed any way at all, which the hasher valsem interns with never saw.
   if (!hasHash && hashCode in obj) {

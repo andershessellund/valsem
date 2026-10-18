@@ -38,7 +38,8 @@ features as their browser.
 
 Most values never contain one. Registered symbols (`Symbol.for('name')`) hash
 by their name and need nothing special. A **unique** symbol has no content to
-hash, so valsem gives it an identity number and remembers it in a `WeakMap`
+hash, so valsem gives it an identity number (its own numbering, per copy of
+valsem) and remembers it in a `WeakMap`
 keyed by the symbol, which is the newest feature on this page and the only
 reason for the second column. On an engine without it, everything else
 works, and a value that holds a unique symbol, as a field or as a record key,

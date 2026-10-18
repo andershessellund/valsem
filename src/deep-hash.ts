@@ -130,35 +130,20 @@ function scramble(h: number): number {
 // Symbols
 //
 // A registered symbol (`Symbol.for(name)`) IS its name — one per name in the
-// whole process, so the name's hash is its hash, stable across installs and
-// realms. A unique symbol (`Symbol(desc)`, and the well-known ones) is an
-// identity with no content: it gets a per-symbol hash on first sight, kept
-// in the shared hash cache (unique symbols are valid weak keys since ES2023;
+// whole process, so the name's hash is its hash, stable across realms. A
+// unique symbol (`Symbol(desc)`, and the well-known ones) is an identity
+// with no content: it gets a per-symbol hash on first sight, kept in the
+// shared hash cache (unique symbols are valid weak keys since ES2023;
 // registered ones are not, which is exactly why they take the other branch).
-// The identity number is mixed through the seeded hasher like every other leaf.
-//
-// The numbering is PROCESS-wide, shared through globalThis beside the hash
-// seed: a module-local counter would number symbols in the order each
-// installed copy happened to meet them, so plain data holding a unique
-// symbol would hash differently across duplicate installs — the one leaf
-// for which "one seed ⟹ hashes agree across copies" would not hold.
+// The identity number is mixed through the seeded hasher like every other
+// leaf. The numbering is this copy's, in the order this copy met the
+// symbols: another copy of valsem numbers them itself, as it hashes with a
+// seed of its own (D4).
 // ---------------------------------------------------------------------------
 
-interface SymbolIds {
-  count: number;
-  readonly ids: WeakMap<symbol, number>;
-}
+const symbolIds = { count: 0, ids: new WeakMap<symbol, number>() };
 
-const SYMBOL_IDS_KEY = Symbol.for('valsem.symbolIds.v1');
-
-function readSymbolIds(): SymbolIds {
-  const g = globalThis as unknown as Record<symbol, SymbolIds | undefined>;
-  return (g[SYMBOL_IDS_KEY] ??= { count: 0, ids: new WeakMap() });
-}
-
-const symbolIds = readSymbolIds();
-
-/** @internal The process-wide identity number of a UNIQUE symbol (assigned on first sight). */
+/** @internal This copy's identity number of a UNIQUE symbol (assigned on first sight). */
 export function _symbolId(s: symbol): number {
   let id = symbolIds.ids.get(s);
   if (id === undefined) symbolIds.ids.set(s, (id = ++symbolIds.count));

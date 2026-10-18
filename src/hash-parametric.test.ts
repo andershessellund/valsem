@@ -47,8 +47,9 @@ describe('the [hash] protocol', () => {
     }
   }
 
-  it('is a global, versioned symbol like the others', () => {
-    expect(hash).toBe(Symbol.for('valsem.hash.v1'));
+  it('is a symbol of this copy like the others, described and not registered', () => {
+    expect(Symbol.keyFor(hash)).toBeUndefined();
+    expect(hash.description).toBe('valsem.hash');
     expect(hash).not.toBe(hashCode);
   });
 

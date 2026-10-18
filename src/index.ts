@@ -8,9 +8,10 @@
 // `InternedString`/`RawArray`, the mutable `HashMap`/`HashSet`), `produce`
 // and `memoize`, and the extension points (`equals`/`hash`/`interned`
 // symbols, `createInternPool`, `toDraft`) that let any type participate.
-// `hashCode`, the cache slot valsem writes a value's hash to, is a
-// registered symbol too (copies must agree on it) but not exported: a class
-// never writes it, and `deepHash` is how anyone reads it.
+// `hashCode`, the cache slot valsem writes a value's hash to, is a symbol
+// of this copy too but not exported: a class never writes it, and `deepHash`
+// is how anyone reads it. A second copy of valsem in the process is a
+// separate library, whose values this one refuses with the reason (D4).
 //
 // Temporal value semantics live behind the `valsem/temporal` subpath; the
 // stable surface for binding authors (wire formats, storage layers) behind
