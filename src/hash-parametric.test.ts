@@ -284,14 +284,14 @@ describe('plain data under another hasher', () => {
   });
 
   it('canonical and raw agree; a draft hashes as its value', () => {
-    const raw = { a: [1, { b: 's' }], c: InternedString.for('x') };
+    const raw = { a: [1, { b: 's' }], c: InternedString.from('x') };
     const c = intern(raw);
     expect(deepHash(c, h1)).toBe(deepHash(raw, h1));
     expect(deepHash(c, h1)).toBe(deepHash(c, h1));
     produce(c, (d) => {
       expect(deepHash(d, h1)).toBe(deepHash(c, h1));
       d.a.push(2);
-      expect(deepHash(d, h1)).toBe(deepHash({ a: [1, { b: 's' }, 2], c: InternedString.for('x') }, h1));
+      expect(deepHash(d, h1)).toBe(deepHash({ a: [1, { b: 's' }, 2], c: InternedString.from('x') }, h1));
     });
   });
 
@@ -375,7 +375,7 @@ describe('reproducibility', () => {
         ['b', 2],
         ['a', 1],
       ]),
-      InternedString.for('s'),
+      InternedString.from('s'),
     ];
     for (const v of values) {
       expect(deepHash(v, twin)).toBe(deepHash(v, h1));

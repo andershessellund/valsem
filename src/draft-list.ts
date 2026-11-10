@@ -288,17 +288,17 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return lazyHandOut(s, spliceList(s, at, rc, values)) as (Draft<T> | (T & undefined))[];
   }
 
-  /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.inserted` places it. */
-  insert(index: number, value: T): this {
+  /** Insert `value` before `index`, an integer in `[0, length]` (else a `RangeError`), as `ValueList.insertedAt` places it. */
+  insertAt(index: number, value: T): this {
     const s = this.#state;
-    spliceList(s, insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insert'), 0, [value]);
+    spliceList(s, insertionIndex(index, s.work.length + s.tail.length, 'DraftList.insertAt'), 0, [value]);
     return this;
   }
 
   /** Remove the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`). Returns it, drafted as `get` hands it out. */
-  remove(index: number): Draft<T> | (T & undefined) {
+  removeAt(index: number): Draft<T> | (T & undefined) {
     const s = this.#state;
-    return handOut(s, spliceList(s, elementIndex(index, s.work.length + s.tail.length, 'DraftList.remove'), 1, [])[0]) as Draft<T> | (T & undefined);
+    return handOut(s, spliceList(s, elementIndex(index, s.work.length + s.tail.length, 'DraftList.removeAt'), 1, [])[0]) as Draft<T> | (T & undefined);
   }
 
   /** Remove and return the first element (drafted, as `get` hands it out), `undefined` when empty, as `Array.prototype.shift`. */
@@ -361,16 +361,16 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return (snapshotOf(this) as ValueList<T>).unshifted(...values);
   }
 
-  /** The list as it is right now with `value` inserted before `index` (a place in it, D45): a value, as `ValueList.inserted`. To edit, `insert`. */
-  inserted(index: number, value: T): ValueList<T> {
-    insertionIndex(index, this.length, 'DraftList.inserted');
-    return (snapshotOf(this) as ValueList<T>).inserted(index, value);
+  /** The list as it is right now with `value` inserted before `index` (a place in it, D45): a value, as `ValueList.insertedAt`. To edit, `insert`. */
+  insertedAt(index: number, value: T): ValueList<T> {
+    insertionIndex(index, this.length, 'DraftList.insertedAt');
+    return (snapshotOf(this) as ValueList<T>).insertedAt(index, value);
   }
 
-  /** The list as it is right now without the element at `index` (D45): a value, as `ValueList.removed`. To edit, `remove`. */
-  removed(index: number): ValueList<T> {
-    elementIndex(index, this.length, 'DraftList.removed');
-    return (snapshotOf(this) as ValueList<T>).removed(index);
+  /** The list as it is right now without the element at `index` (D45): a value, as `ValueList.removedAt`. To edit, `remove`. */
+  removedAt(index: number): ValueList<T> {
+    elementIndex(index, this.length, 'DraftList.removedAt');
+    return (snapshotOf(this) as ValueList<T>).removedAt(index);
   }
 
   /** The list as it is right now with `deleteCount` elements at `start` replaced by `items`, as `ValueList.toSpliced` (its checks too): a value. To edit, `splice`. */

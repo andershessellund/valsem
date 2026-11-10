@@ -58,7 +58,7 @@ describe('DraftList iteration', () => {
       for (const x of d) {
         seen.push(x);
         if (x === 1) d.push(4);
-        if (x === 2) d.remove(2); // the 3
+        if (x === 2) d.removeAt(2); // the 3
       }
       expect(seen).toEqual([1, 2, 4]);
     });

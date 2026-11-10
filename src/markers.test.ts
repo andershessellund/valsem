@@ -65,10 +65,10 @@ describe.each(VALUE_TYPES.map((t) => [t.name, t] as const))('%s [equals], called
 
 describe('InternedString — JSON parity', () => {
   it('stringifies as the text, like a string', () => {
-    const s = InternedString.for('hello');
+    const s = InternedString.from('hello');
     expect(JSON.stringify({ s })).toBe('{"s":"hello"}');
     expect(String(s)).toBe('hello');
     expect(`${s}`).toBe('hello');
-    expect(InternedString.for(JSON.parse(JSON.stringify({ s })).s)).toBe(s);
+    expect(InternedString.from(JSON.parse(JSON.stringify({ s })).s)).toBe(s);
   });
 });

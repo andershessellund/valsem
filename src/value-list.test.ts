@@ -287,12 +287,12 @@ describe('ValueList — canonical form (content-chunked tree)', () => {
       expect(l.toArray()).toEqual(expected);
       expect(l).toBe(ValueList.from(expected));
     };
-    check(list.inserted(0, { id: -1 }), [{ id: -1 }, ...base]);
-    check(list.inserted(1000, { id: -1 }), [...base.slice(0, 1000), { id: -1 }, ...base.slice(1000)]);
-    check(list.inserted(2000, { id: -1 }), [...base, { id: -1 }]);
-    check(list.removed(0), base.slice(1));
-    check(list.removed(1234), [...base.slice(0, 1234), ...base.slice(1235)]);
-    check(list.removed(1999), base.slice(0, 1999));
+    check(list.insertedAt(0, { id: -1 }), [{ id: -1 }, ...base]);
+    check(list.insertedAt(1000, { id: -1 }), [...base.slice(0, 1000), { id: -1 }, ...base.slice(1000)]);
+    check(list.insertedAt(2000, { id: -1 }), [...base, { id: -1 }]);
+    check(list.removedAt(0), base.slice(1));
+    check(list.removedAt(1234), [...base.slice(0, 1234), ...base.slice(1235)]);
+    check(list.removedAt(1999), base.slice(0, 1999));
     check(list.with(777, { id: -7 }), base.map((x, i) => (i === 777 ? { id: -7 } : x)));
     check(list.popped(), base.slice(0, -1));
     check(list.toSpliced(500, 300, ...arrOf(10, 9)), [...base.slice(0, 500), ...arrOf(10, 9), ...base.slice(800)]);
@@ -335,8 +335,8 @@ describe('ValueList — property: every operation agrees with an array mirror an
             case 'shift': mirror = mirror.slice(1); list = list.shifted(); break;
             case 'unshift': mirror = [o.v, ...mirror]; list = list.unshifted(o.v); break;
             case 'set': if (n === 0) break; { const i = o.i % n; mirror = mirror.map((x, k) => (k === i ? o.v : x)); list = list.with(i, o.v); } break;
-            case 'insert': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), o.v, ...mirror.slice(i)]; list = list.inserted(i, o.v); } break;
-            case 'remove': if (n === 0) break; { const i = o.i % n; mirror = [...mirror.slice(0, i), ...mirror.slice(i + 1)]; list = list.removed(i); } break;
+            case 'insert': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), o.v, ...mirror.slice(i)]; list = list.insertedAt(i, o.v); } break;
+            case 'remove': if (n === 0) break; { const i = o.i % n; mirror = [...mirror.slice(0, i), ...mirror.slice(i + 1)]; list = list.removedAt(i); } break;
             case 'splice': { const i = o.i % (n + 1); mirror = [...mirror.slice(0, i), ...o.items, ...mirror.slice(i + o.del)]; list = list.toSpliced(i, o.del, ...o.items); } break;
             case 'slice': { const i = o.i % (n + 1); const j = o.j % (n + 1); mirror = mirror.slice(i, j); list = list.slice(i, j); } break;
             case 'concat': mirror = [...mirror, ...o.items]; list = list.concat(ValueList.from(o.items)); break;
@@ -397,7 +397,7 @@ describe('ValueList.diff', () => {
     const b = a.with(1234, { id: -1 });
     const h = ValueList.diff(a, b);
     expect(h).toEqual([{ aStart: 1234, aEnd: 1235, bStart: 1234, bEnd: 1235 }]);
-    const c = a.inserted(10, { id: -2 }).removed(4000);
+    const c = a.insertedAt(10, { id: -2 }).removedAt(4000);
     const hc = ValueList.diff(a, c);
     expect(hc).toEqual([
       { aStart: 10, aEnd: 10, bStart: 10, bEnd: 11 },

@@ -169,6 +169,6 @@ export const COLLECTIONS: readonly CollectionEntry[] = [
 export const VALUE_TYPES: readonly ValueTypeEntry[] = [
   ...COLLECTIONS,
   { name: 'ValueDate', type: ValueDate, sample: () => ValueDate.from(0), byContent: true },
-  { name: 'InternedString', type: InternedString, sample: () => InternedString.for('text'), byContent: true },
+  { name: 'InternedString', type: InternedString, sample: () => InternedString.from('text'), byContent: true },
   { name: 'RawArray', type: RawArray, sample: () => RawArray.from([{ id: 1 }, { id: 2 }]), byContent: false },
 ];

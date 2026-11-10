@@ -135,9 +135,9 @@ describe('the published declarations, as a consumer compiles them', () => {
       // @ts-expect-error
       list.splice(0, 1);
       // @ts-expect-error
-      list.insert(0, 2);
+      list.insertAt(0, 2);
       // @ts-expect-error
-      list.remove(0);
+      list.removeAt(0);
       // @ts-expect-error
       list.setMany([[0, 2]]);
       // @ts-expect-error
@@ -167,7 +167,7 @@ describe('the published declarations, as a consumer compiles them', () => {
       // @ts-expect-error
       omap.insertAt(0, 'b', 2);
       // And the copying names compile, chained, since each returns the value.
-      list.pushed(2).popped().with(0, 3).toSpliced(0, 1).inserted(0, 4).removed(0).shifted().unshifted(5);
+      list.pushed(2).popped().with(0, 3).toSpliced(0, 1).insertedAt(0, 4).removedAt(0).shifted().unshifted(5);
       map.with('b', 2).deleted('a');
       set.added(2).deleted(1);
       oset.added(2).deleted(1).insertedAt(0, 3);

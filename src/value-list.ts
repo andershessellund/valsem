@@ -764,12 +764,12 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /** The list with `value` (interned on entry) inserted before `index`, an integer in `[0, length]` (else a `RangeError`); O(log n) expected. */
-  inserted(index: number, value: T): ValueList<T> {
-    return this.toSpliced(insertionIndex(index, this.length, 'ValueList.inserted'), 0, value);
+  insertedAt(index: number, value: T): ValueList<T> {
+    return this.toSpliced(insertionIndex(index, this.length, 'ValueList.insertedAt'), 0, value);
   }
   /** The list without the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`); O(log n) expected. */
-  removed(index: number): ValueList<T> {
-    return this.toSpliced(elementIndex(index, this.length, 'ValueList.removed'), 1);
+  removedAt(index: number): ValueList<T> {
+    return this.toSpliced(elementIndex(index, this.length, 'ValueList.removedAt'), 1);
   }
   /**
    * Elements `[start, end)`, the part of that range that exists:

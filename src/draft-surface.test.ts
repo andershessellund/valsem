@@ -41,7 +41,7 @@ describe('a draft has its value\u2019s methods', () => {
 
 describe('a value has no mutator\u2019s name (D59)', () => {
   // What mutates on `Array`, `Map` (Node 26's `getOrInsert` pair included) and `Set`, and the drafts' own verbs.
-  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'getOrInsert', 'getOrInsertComputed', 'insert', 'remove', 'insertAt', 'setMany'];
+  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'getOrInsert', 'getOrInsertComputed', 'insert', 'remove', 'insertAt', 'removeAt', 'setMany'];
   it.each(VALUE_TYPES.map((c) => [c.name, c.type] as const))('%s', (_, Value) => {
     expect(members(Value.prototype).filter((name) => MUTATORS.includes(name))).toEqual([]);
   });
@@ -52,8 +52,8 @@ describe('DraftList: insert, remove, shift, unshift, forEach', () => {
 
   it('edit as their names say, and their patches apply both ways', () => {
     const [next, patches, inverse] = produceWithPatches(base, (d) => {
-      expect(d.l.insert(1, 'x')).toBe(d.l);
-      expect(d.l.remove(0)).toBe('a');
+      expect(d.l.insertAt(1, 'x')).toBe(d.l);
+      expect(d.l.removeAt(0)).toBe('a');
       expect(d.l.shift()).toBe('x');
       expect(d.l.unshift('p', 'q')).toBe(4);
       const seen: [string, number][] = [];
@@ -69,15 +69,15 @@ describe('DraftList: insert, remove, shift, unshift, forEach', () => {
 
   it('name a place that exists, like the value\u2019s', () => {
     produce(base, (d) => {
-      for (const i of [4, -1, 1.5, NaN]) expect(() => d.l.insert(i, 'x')).toThrow(RangeError);
-      for (const i of [3, -1, 1.5, NaN]) expect(() => d.l.remove(i)).toThrow(RangeError);
-      expect(() => d.l.remove(-1)).toThrow('DraftList.remove: index -1 out of range [0, 3)');
+      for (const i of [4, -1, 1.5, NaN]) expect(() => d.l.insertAt(i, 'x')).toThrow(RangeError);
+      for (const i of [3, -1, 1.5, NaN]) expect(() => d.l.removeAt(i)).toThrow(RangeError);
+      expect(() => d.l.removeAt(-1)).toThrow('DraftList.removeAt: index -1 out of range [0, 3)');
     });
     expect(produce(intern({ l: ValueList.empty<string>() }), (d) => void expect(d.l.shift()).toBeUndefined()).l.length).toBe(0);
   });
 
   it('nets out to the base', () => {
-    expect(produce(base, (d) => void d.l.insert(1, 'x').remove(1))).toBe(base);
+    expect(produce(base, (d) => void d.l.insertAt(1, 'x').removeAt(1))).toBe(base);
     expect(produce(base, (d) => { d.l.unshift('z'); d.l.shift(); })).toBe(base);
   });
 });
@@ -132,8 +132,8 @@ describe('what does not edit answers about the value the draft would be right no
       expect(d.l.popped()).toBe(now.popped());
       expect(d.l.shifted()).toBe(now.shifted());
       expect(d.l.unshifted(0)).toBe(now.unshifted(0));
-      expect(d.l.inserted(1, 7)).toBe(now.inserted(1, 7));
-      expect(d.l.removed(1)).toBe(now.removed(1));
+      expect(d.l.insertedAt(1, 7)).toBe(now.insertedAt(1, 7));
+      expect(d.l.removedAt(1)).toBe(now.removedAt(1));
       expect(d.l.toSpliced(1, 2, 8)).toBe(now.toSpliced(1, 2, 8));
       expect(d.l.toSpliced(1)).toBe(now.toSpliced(1));
       expect(current(d.l)).toBe(now); // none of it edited
@@ -145,8 +145,8 @@ describe('what does not edit answers about the value the draft would be right no
   it('a what-if checks its position in the draft\u2019s name, before the snapshot is built', () => {
     produce(intern({ l: ValueList.of(1, 2, 3) }), (d) => {
       expect(() => d.l.with(3, 0)).toThrow('DraftList.with: index 3 out of range [0, 3)');
-      expect(() => d.l.removed(-1)).toThrow('DraftList.removed: index -1 out of range [0, 3)');
-      expect(() => d.l.inserted(4, 0)).toThrow('DraftList.inserted: index 4 out of range [0, 3]');
+      expect(() => d.l.removedAt(-1)).toThrow('DraftList.removedAt: index -1 out of range [0, 3)');
+      expect(() => d.l.insertedAt(4, 0)).toThrow('DraftList.insertedAt: index 4 out of range [0, 3]');
       expect(() => d.l.toSpliced(4)).toThrow('DraftList.toSpliced: start 4 out of range [0, 3]');
       expect(() => (d.l as unknown as Record<string, Loose>).toSpliced!(0, undefined, 9)).toThrow('DraftList.toSpliced: deleteCount must be an integer, got undefined');
       expect(() => (d.l as unknown as Record<string, Loose>).toSpliced!(0, undefined)).toThrow('DraftList.toSpliced: deleteCount must be an integer, got undefined');

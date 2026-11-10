@@ -31,7 +31,7 @@ function fixture(v: Copy): Record<string, unknown> {
     orderedMap: v.OrderedMap.from(rows.map((r) => [r.name, r.id] as const)),
     orderedSet: v.OrderedSet.from(rows.map((r) => r.name)),
     date: v.ValueDate.from('2026-10-15T00:00:00Z'),
-    string: v.InternedString.for('interned'),
+    string: v.InternedString.from('interned'),
     symbol: { [Symbol.for('valsem.repro')]: 1 },
     nested: v.intern({ lists: [v.ValueList.of(1, 2), v.ValueSet.from(['a'])], when: v.ValueDate.from(0) }),
   };

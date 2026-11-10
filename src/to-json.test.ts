@@ -58,7 +58,7 @@ describe('a state tree stringifies whole', () => {
     const m = OrderedMap.from([
       ['list', ValueList.of<unknown>(1, ValueList.of(2, 3))],
       ['when', ValueDate.from(0)],
-      ['name', InternedString.for('n')],
+      ['name', InternedString.from('n')],
     ] as [string, unknown][]);
     expect(roundTrip(m)).toEqual([
       ['list', [1, [2, 3]]],

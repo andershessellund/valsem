@@ -35,9 +35,9 @@ list with three changed records, which shares nothing by lineage with the origin
     op('push', await timeSettled((i) => vl.pushed({ id: -i }), 3000));
     op('pop', await timeSettled(() => vl.popped(), 3000));
     op('set, middle', await timeSettled((i) => vl.with(N >> 1, { id: -i }), 3000));
-    op('insert at 0', await timeSettled((i) => vl.inserted(0, { id: -i }), 3000));
-    op('insert, middle', await timeSettled((i) => vl.inserted(N >> 1, { id: -i }), 3000));
-    op('remove at 0', await timeSettled(() => vl.removed(0), 3000));
+    op('insert at 0', await timeSettled((i) => vl.insertedAt(0, { id: -i }), 3000));
+    op('insert, middle', await timeSettled((i) => vl.insertedAt(N >> 1, { id: -i }), 3000));
+    op('remove at 0', await timeSettled(() => vl.removedAt(0), 3000));
     op('slice, middle half', await timeSettled(() => vl.slice(N >> 2, 3 * (N >> 2)), 3000));
     const half = ValueList.from(items.slice(0, N >> 1)), half2 = ValueList.from(items.slice(N >> 1));
     op('concat, two halves', await timeSettled(() => half.concat(half2), 3000));
@@ -49,7 +49,7 @@ list with three changed records, which shares nothing by lineage with the origin
       rows.push(row(`diff: ${c} point edit${c > 1 ? 's' : ''} (${hunks} hunks)`, { ValueList: await timeSettled(() => ValueList.diff(vl, edited), 2000), 'pointer scan': await timeSettled(() => scan(vl, edited), 20) }));
     }
     {
-      const ins = vl.inserted(N >> 2, { id: -1 }).removed(3 * (N >> 2));
+      const ins = vl.insertedAt(N >> 2, { id: -1 }).removedAt(3 * (N >> 2));
       rows.push(row(`diff: insert + remove (${ValueList.diff(vl, ins).length} hunks)`, { ValueList: await timeSettled(() => ValueList.diff(vl, ins), 2000), 'pointer scan': await timeSettled(() => scan(vl, ins), 20) }));
     }
     {

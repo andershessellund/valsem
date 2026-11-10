@@ -26,8 +26,8 @@ describe('ValueList: the copying edit gives what the draft’s verb leaves behin
     ['popped / pop', list.popped(), produce(list, (d) => void d.pop())],
     ['shifted / shift', list.shifted(), produce(list, (d) => void d.shift())],
     ['unshifted / unshift', list.unshifted('y', 'z'), produce(list, (d) => void d.unshift('y', 'z'))],
-    ['inserted / insert', list.inserted(1, 'x'), produce(list, (d) => void d.insert(1, 'x'))],
-    ['removed / remove', list.removed(1), produce(list, (d) => void d.remove(1))],
+    ['inserted / insert', list.insertedAt(1, 'x'), produce(list, (d) => void d.insertAt(1, 'x'))],
+    ['removed / remove', list.removedAt(1), produce(list, (d) => void d.removeAt(1))],
     ['toSpliced / splice', list.toSpliced(1, 1, 'x', 'y'), produce(list, (d) => void d.splice(1, 1, 'x', 'y'))],
     ['toSpliced(start) / splice(start)', list.toSpliced(1), produce(list, (d) => void d.splice(1))],
   ])('%s', (_, byValue, byDraft) => {
@@ -51,8 +51,8 @@ describe('ValueList: the copying edit gives what the draft’s verb leaves behin
 
   it('checks its positions in the value’s name (D45)', () => {
     expect(() => list.with(3, 'x')).toThrow('ValueList.with: index 3 out of range [0, 3)');
-    expect(() => list.removed(-1)).toThrow('ValueList.removed: index -1 out of range [0, 3)');
-    expect(() => list.inserted(4, 'x')).toThrow('ValueList.inserted: index 4 out of range [0, 3]');
+    expect(() => list.removedAt(-1)).toThrow('ValueList.removedAt: index -1 out of range [0, 3)');
+    expect(() => list.insertedAt(4, 'x')).toThrow('ValueList.insertedAt: index 4 out of range [0, 3]');
     expect(() => list.toSpliced(-1, 1)).toThrow('ValueList.toSpliced: start -1 out of range [0, 3]');
     const loose = list as unknown as Record<string, Loose>; // the overloads refuse an `undefined` count at compile time
     expect(() => loose.toSpliced!(0, undefined, 'x')).toThrow('ValueList.toSpliced: deleteCount must be an integer, got undefined');

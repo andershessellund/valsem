@@ -180,7 +180,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const h = internHash(k);
     if (trieGet(CFG, this.#root, h, k) === NOT_FOUND) return this;
     const { keyed, index } = keyedRemove(CFG, this.#keyed, k, h, 'OrderedMap');
-    return OrderedMap.#of<K, V>(keyed, this.#vals.removed(index));
+    return OrderedMap.#of<K, V>(keyed, this.#vals.removedAt(index));
   }
 
   /**
@@ -193,7 +193,7 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     const v = intern(value);
     const h = internHash(k);
     newEntryIndex(index, this.#keys.length, () => trieGet(CFG, this.#root, h, k) !== NOT_FOUND, 'OrderedMap.insertedAt', 'key', 'remove');
-    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, index, k, h, [v]), this.#vals.inserted(index, v));
+    return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, index, k, h, [v]), this.#vals.insertedAt(index, v));
   }
 
   /** Iterate the keys in order. */
