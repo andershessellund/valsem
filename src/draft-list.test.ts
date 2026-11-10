@@ -157,13 +157,14 @@ describe('DraftList — what a removal verb hands back, and the list at scale', 
     expect(performance.now() - t).toBeLessThan(2000); // quadratic, this took ~20 s
   });
 
-  it("an empty list's concat takes a ValueList, or a draft standing for its value, and nothing else", () => {
+  it("an empty list's concat takes a ValueList, or a draft standing for its value", () => {
     produce(intern({ a: ValueList.empty<number>(), b: ValueList.of(1) }), (d) => {
       const r = d.a.concat(d.b as unknown as ValueList<number>);
       expect(isDraft(r)).toBe(false);
       expect(r).toBe(ValueList.of(1));
       d.b.push(2);
       expect(d.a.concat(d.b as unknown as ValueList<number>)).toBe(ValueList.of(1, 2)); // the value it is right now
+      expect(d.b.concat([3, 4])).toBe(ValueList.of(1, 2, 3, 4)); // and any iterable of elements (D70)
     });
   });
 });

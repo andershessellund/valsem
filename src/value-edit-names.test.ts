@@ -69,6 +69,9 @@ describe('the keyed collections', () => {
     expect(m.deleted('a')).toBe(produce(m, (d) => void d.delete('a')));
     expect(m.with('a', 1)).toBe(m);
     expect(m.deleted('zz')).toBe(m);
+    expect(m.updated('a', (n) => (n ?? 0) + 1)).toBe(produce(m, (d) => void d.update('a', (n) => (n ?? 0) + 1)));
+    expect(m.updated('zz', (n) => n ?? 7)).toBe(m.with('zz', 7)); // an absent key: fn is given undefined, and its result is added
+    expect(m.updated('a', (n) => n!)).toBe(m);
   });
 
   it('ValueSet: added and deleted', () => {
@@ -95,6 +98,10 @@ describe('the keyed collections', () => {
     expect(m.with('a', 9)).toBe(produce(m, (d) => void d.set('a', 9)));
     expect(m.deleted('a')).toBe(produce(m, (d) => void d.delete('a')));
     expect(m.insertedAt(1, 'x', 0)).toBe(produce(m, (d) => void d.insertAt(1, 'x', 0)));
+    expect(m.updated('a', (n) => (n ?? 0) + 1)).toBe(produce(m, (d) => void d.update('a', (n) => (n ?? 0) + 1)));
+    expect([...m.updated('a', () => 9).keys()]).toEqual(['a', 'b']); // a present key keeps its position
+    expect([...m.updated('z', (n) => n ?? 0).keys()]).toEqual(['a', 'b', 'z']); // an absent one is appended
+    expect(m.updated('a', (n) => n!)).toBe(m);
     expect(m.with('a', 1)).toBe(m);
     expect(() => m.insertedAt(0, 'a', 0)).toThrow('OrderedMap.insertedAt: the key is already present — a key has one position; remove it first to move it');
     expect(() => m.insertedAt(3, 'z', 0)).toThrow('OrderedMap.insertedAt: index 3 out of range [0, 2]');

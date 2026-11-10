@@ -15,12 +15,13 @@
 // where it would do nothing.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { castDraft, produce, produceWithPatches } from './produce.js';
+import { castDraft, isDraft, produce, produceWithPatches } from './produce.js';
 import { current } from './current.js';
 import { intern } from './intern.js';
 import { ValueList } from './value-list.js';
 import { ValueSet } from './value-set.js';
 import { ValueMap } from './value-map.js';
+import type { DraftMap } from './draft-map.js';
 import { OrderedMap } from './ordered-map.js';
 import { OrderedSet } from './ordered-set.js';
 import { expectPatchRoundTrip } from './patches.test-helpers.js';
@@ -41,7 +42,7 @@ describe('a draft has its value\u2019s methods', () => {
 
 describe('a value has no mutator\u2019s name (D59)', () => {
   // What mutates on `Array`, `Map` (Node 26's `getOrInsert` pair included) and `Set`, and the drafts' own verbs.
-  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'getOrInsert', 'getOrInsertComputed', 'insert', 'remove', 'insertAt', 'removeAt', 'setMany'];
+  const MUTATORS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin', 'set', 'add', 'delete', 'clear', 'getOrInsert', 'getOrInsertComputed', 'insert', 'remove', 'insertAt', 'removeAt', 'update', 'setMany'];
   it.each(VALUE_TYPES.map((c) => [c.name, c.type] as const))('%s', (_, Value) => {
     expect(members(Value.prototype).filter((name) => MUTATORS.includes(name))).toEqual([]);
   });
@@ -318,5 +319,62 @@ describe('DraftList.splice with a start and nothing else removes to the end', ()
     });
     expect(next).toBe(ValueList.of(1));
     expectPatchRoundTrip(base, next, patches, inverse);
+  });
+});
+
+describe('the map drafts: update, and the functional reads on what the draft holds right now (D70)', () => {
+  const cases = [
+    ['DraftMap', ValueMap.from<string, { n: number }>([['a', { n: 1 }], ['b', { n: 2 }]])],
+    ['DraftOrderedMap', OrderedMap.from<string, { n: number }>([['a', { n: 1 }], ['b', { n: 2 }]])],
+  ] as const;
+
+  it.each(cases)('%s.update sets fn(get(key)): the entry drafted, undefined for an absent key', (_, base) => {
+    const next = produce(intern({ m: base }), (d) => {
+      expect(d.m.update('a', (v) => ({ n: v!.n + 10 }))).toBe(d.m);
+      d.m.update('z', (v) => {
+        expect(v).toBeUndefined();
+        return { n: 0 };
+      });
+      d.m.update('b', (v) => {
+        expect(isDraft(v)).toBe(true);
+        v!.n = 20; // an edit through the draft it was given...
+        return v!; // ...and handing that draft back changes nothing more
+      });
+    });
+    expect(next.m.get('a')).toBe(intern({ n: 11 }));
+    expect(next.m.get('b')).toBe(intern({ n: 20 }));
+    expect(next.m.get('z')).toBe(intern({ n: 0 }));
+    expect(next.m.size).toBe(3);
+  });
+
+  it.each(cases)('%s.update that changes nothing leaves the base', (_, base) => {
+    const state = intern({ m: base });
+    expect(produce(state, (d) => void d.m.update('a', (v) => v!))).toBe(state);
+    expect(produce(state, (d) => void d.m.update('a', () => ({ n: 1 })))).toBe(state);
+  });
+
+  it.each(cases)('%s: the reads see values with the pending edits in them, and give back values', (_, base) => {
+    produce(intern({ m: base }), (d) => {
+      d.m.set('c', { n: 3 });
+      d.m.get('a')!.n = 100;
+      // The two drafts spell these alike; one type for both, since a union of overloads is not callable.
+      const m = d.m as unknown as DraftMap<string, { n: number }>;
+      const now = current(d.m) as unknown as ValueMap<string, { n: number }>;
+      const kept = m.filter((v, k, self) => {
+        expect(isDraft(v)).toBe(false);
+        expect(self).toBe(d.m);
+        return k !== 'b';
+      });
+      expect(isDraft(kept)).toBe(false);
+      expect(kept).toBe(now.filter((_v, k) => k !== 'b'));
+      expect(m.mapValues((v) => v.n)).toBe(now.mapValues((v) => v.n));
+      expect(m.some((v) => v.n === 100)).toBe(true);
+      expect(m.every((v) => v.n > 1)).toBe(true);
+      expect(m.reduce((acc, v) => acc + v.n, 0)).toBe(105);
+      expect(m.updated('a', (v) => ({ n: v!.n + 1 }))).toBe(now.updated('a', (v) => ({ n: v!.n + 1 })));
+      expect(d.m.get('a')!.n).toBe(100); // a what-if: nothing edited
+      const loose = d.m as unknown as { reduce(fn: () => number): number };
+      expect(() => loose.reduce(() => 0)).toThrow(/reduce: an initial value is required/);
+    });
   });
 });

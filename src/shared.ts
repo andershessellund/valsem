@@ -281,6 +281,13 @@ export function noInitial(operation: string): TypeError {
   );
 }
 
+/** The error for a `reduce` on a map given no initial value: an entry is a pair, so no entry is a first accumulator (D70). */
+export function noInitialEntry(operation: string): TypeError {
+  return new TypeError(
+    `${operation}: an initial value is required — a map's entries are pairs, so there is no first value to fold from`,
+  );
+}
+
 export function reduceIn(
   items: Iterable<unknown>,
   self: unknown,

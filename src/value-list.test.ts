@@ -466,11 +466,22 @@ describe('ValueList.from — anything iterable or array-like', () => {
   });
 });
 
-describe('ValueList.concat and diff take ValueLists', () => {
-  it('a raw array is refused whatever the receiver: an empty one used to return the argument as it came', () => {
-    expect(() => ValueList.empty<number>().concat([1, 2] as unknown as ValueList<number>)).toThrow(/ValueList\.concat: expected a ValueList, got a raw array/);
-    expect(() => ValueList.of(1).concat([1, 2] as unknown as ValueList<number>)).toThrow(TypeError);
-    expect(() => ValueList.diff([1] as unknown as ValueList<number>, ValueList.of(1))).toThrow(/ValueList\.diff: expected a ValueList/);
+describe('ValueList.concat takes a list or any iterable of elements; diff takes ValueLists', () => {
+  it('an iterable becomes a list first, whatever the receiver: an empty one used to return the argument as it came (D70)', () => {
+    expect(ValueList.empty<number>().concat([1, 2])).toBe(ValueList.of(1, 2));
+    expect(ValueList.of(1).concat([2, 3])).toBe(ValueList.of(1, 2, 3));
+    expect(ValueList.of(1).concat(new Set([2, 3]))).toBe(ValueList.of(1, 2, 3));
+    expect(ValueList.of(1).concat((function* () { yield 2; })())).toBe(ValueList.of(1, 2));
+    expect(ValueList.of(1).concat([])).toBe(ValueList.of(1));
+    expect(ValueList.of<unknown>({ a: 1 }).concat([{ b: 2 }]).get(1)).toBe(intern({ b: 2 })); // elements are interned on entry
     expect(ValueList.empty<number>().concat(ValueList.of(1))).toBe(ValueList.of(1));
+  });
+
+  it('what is not iterable is refused, and so is a string, whose characters nobody meant', () => {
+    for (const bad of [null, undefined, 7, 'ab', { length: 1, 0: 'x' }]) {
+      expect(() => ValueList.of<unknown>(1).concat(bad as unknown as unknown[])).toThrow(/ValueList\.concat: expected a ValueList or an iterable of elements/);
+      expect(() => ValueList.empty<unknown>().concat(bad as unknown as unknown[])).toThrow(TypeError);
+    }
+    expect(() => ValueList.diff([1] as unknown as ValueList<number>, ValueList.of(1))).toThrow(/ValueList\.diff: expected a ValueList/);
   });
 });

@@ -174,3 +174,47 @@ describe('ValueMap.from reads entries as new Map does', () => {
     expect(() => ValueMap.from(['ab'] as unknown as [string, string][])).toThrow(/is not an entry object/);
   });
 });
+
+describe('ValueMap — the functional reads (D70)', () => {
+  const m = ValueMap.from<string, number>([['a', 1], ['b', 2], ['c', 3]]);
+
+  it('filter keeps the entries fn accepts, and is this when it keeps them all', () => {
+    expect(m.filter((v) => v > 1)).toBe(ValueMap.from([['b', 2], ['c', 3]]));
+    expect(m.filter((_, k) => k !== 'b')).toBe(ValueMap.from([['a', 1], ['c', 3]]));
+    expect(m.filter(() => true)).toBe(m);
+    expect(m.filter(() => false)).toBe(ValueMap.empty());
+  });
+
+  it('mapValues keeps the keys and is this when nothing changes', () => {
+    expect(m.mapValues((v, k) => k + v)).toBe(ValueMap.from([['a', 'a1'], ['b', 'b2'], ['c', 'c3']]));
+    expect(m.mapValues((v) => v)).toBe(m);
+    expect(m.mapValues((v) => ({ n: v })).get('a')).toBe(m.mapValues((v) => ({ n: v })).get('a')); // results are interned on entry
+  });
+
+  it('some, every and reduce see (value, key, map)', () => {
+    expect(m.some((v, k, self) => self === m && k === 'c' && v === 3)).toBe(true);
+    expect(m.some((v) => v > 3)).toBe(false);
+    expect(m.every((v) => v > 0)).toBe(true);
+    expect(m.every((v) => v > 1)).toBe(false);
+    expect(ValueMap.empty<string, number>().every(() => false)).toBe(true);
+    expect(m.reduce((acc, v, k, self) => acc + v + (self === m ? k.length : 0), 0)).toBe(9);
+    expect(ValueMap.empty<string, number>().reduce((acc) => acc, 'seed')).toBe('seed');
+  });
+
+  it('reduce requires its initial value: an entry is a pair, so there is no first value to fold from', () => {
+    const loose = m as unknown as { reduce(fn: (a: number, b: number) => number): number };
+    expect(() => loose.reduce((a, b) => a + b)).toThrow(/ValueMap\.reduce: an initial value is required/);
+    expect(() => loose.reduce((a, b) => a + b)).toThrow(TypeError);
+  });
+
+  it('thisArg is passed to the callbacks that take one', () => {
+    const ctx = { min: 2 };
+    function atLeast(this: { min: number }, v: number): boolean {
+      return v >= this.min;
+    }
+    expect(m.filter(atLeast, ctx).size).toBe(2);
+    expect(m.some(atLeast, ctx)).toBe(true);
+    expect(m.every(atLeast, ctx)).toBe(false);
+    expect(m.mapValues(atLeast, ctx).get('a')).toBe(false);
+  });
+});

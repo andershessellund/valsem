@@ -367,7 +367,7 @@ describe('forged canonicality, beyond records', () => {
     expect(() => new Date_(1000)).toThrow(/ValueDate\.from/);
     expect(() => Reflect.construct(Date_, [new Date(0)])).toThrow(TypeError);
     const Str = InternedString as unknown as new (...args: unknown[]) => unknown;
-    expect(() => new Str('x', 1)).toThrow(/InternedString\.for/);
+    expect(() => new Str('x', 1)).toThrow(/InternedString\.from/);
     // The collections too: `new ValueList()` is the natural spelling, by analogy with `new Map()`, and gave an instance that reported canonical and threw on first use.
     for (const [Type, name] of [[ValueList, 'ValueList'], [ValueMap, 'ValueMap'], [ValueSet, 'ValueSet'], [OrderedMap, 'OrderedMap'], [OrderedSet, 'OrderedSet'], [RawArray, 'RawArray']] as const) {
       const Ctor = Type as unknown as new (...args: unknown[]) => unknown;

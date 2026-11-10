@@ -147,6 +147,8 @@ describe('the published declarations, as a consumer compiles them', () => {
       map.set('b', 2);
       // @ts-expect-error
       map.delete('a');
+      // @ts-expect-error
+      map.update('a', (n) => (n ?? 0) + 1);
       const set = ValueSet.of(1);
       // @ts-expect-error
       set.add(2);
@@ -166,12 +168,15 @@ describe('the published declarations, as a consumer compiles them', () => {
       omap.delete('a');
       // @ts-expect-error
       omap.insertAt(0, 'b', 2);
+      // @ts-expect-error
+      omap.update('a', (n) => (n ?? 0) + 1);
       // And the copying names compile, chained, since each returns the value.
       list.pushed(2).popped().with(0, 3).toSpliced(0, 1).insertedAt(0, 4).removedAt(0).shifted().unshifted(5);
-      map.with('b', 2).deleted('a');
+      map.with('b', 2).deleted('a').updated('b', (n) => (n ?? 0) + 1).filter((n) => n > 1).mapValues(String);
+      list.concat([6, 7]).concat(new Set([8]));
       set.added(2).deleted(1);
       oset.added(2).deleted(1).insertedAt(0, 3);
-      omap.with('b', 2).deleted('a').insertedAt(0, 'c', 3);
+      omap.with('b', 2).deleted('a').insertedAt(0, 'c', 3).updated('c', (n) => (n ?? 0) + 1).filter((n) => n > 1).mapValues(String);
       `,
     );
     expect(diagnostics).toEqual([]);

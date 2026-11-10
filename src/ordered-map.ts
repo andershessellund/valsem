@@ -15,7 +15,7 @@ import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned
 import { intern, internHash } from './intern.js';
 import { _hashWith } from './deep-hash.js';
 import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
-import { same, atIndex, entryOf, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex } from './shared.js';
+import { same, atIndex, entryOf, INSPECT, inspectAs, type InspectOptions, type Inspect, newEntryIndex, noInitialEntry } from './shared.js';
 import { createInternPool } from './intern-pool.js';
 import { ValueList, _ANCHOR_NONE } from './value-list.js';
 import { createTrieConfig, trieGet, trieInsert, NOT_FOUND, type HNode } from './hamt.js';
@@ -174,6 +174,15 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
     return OrderedMap.#of<K, V>(keyedInsert(CFG, this.#keyed, this.#keys.length, k, h, [v]), this.#vals.pushed(v));
   }
 
+  /**
+   * The map with `key` → `fn(value)`, where `value` is what `get(key)` returns:
+   * `undefined` for an absent key, which `fn`'s result then appends. A present
+   * key keeps its position. `this` if the result equals what is there (D70).
+   */
+  updated(key: K, fn: (value: V | undefined) => V): OrderedMap<K, V> {
+    return this.with(key, fn(this.get(key)));
+  }
+
   /** The map without a structurally equal `key`; `this` if absent. */
   deleted(key: K): OrderedMap<K, V> {
     const k = intern(key);
@@ -215,6 +224,51 @@ export class OrderedMap<K, V> implements ReadonlyMap<K, V> {
   forEach(fn: (value: V, key: K, map: OrderedMap<K, V>) => void, thisArg?: unknown): void {
     const vals = this.#vals;
     this.#keys.forEach((k, i) => fn.call(thisArg, vals.get(i) as V, k, this));
+  }
+
+  // The functional reads (D70). A callback gets what `forEach` passes:
+  // `(value, key, map)`.
+
+  /** The map of the entries `fn` accepts, in order; `this` when it accepts them all. */
+  filter<S extends V>(fn: (value: V, key: K, map: OrderedMap<K, V>) => value is S, thisArg?: unknown): OrderedMap<K, S>;
+  filter(fn: (value: V, key: K, map: OrderedMap<K, V>) => unknown, thisArg?: unknown): OrderedMap<K, V>;
+  filter(fn: (value: V, key: K, map: OrderedMap<K, V>) => unknown, thisArg?: unknown): OrderedMap<K, V> {
+    const kept: [K, V][] = [];
+    for (const [k, v] of this) if (fn.call(thisArg, v, k, this)) kept.push([k, v]);
+    return kept.length === this.size ? this : OrderedMap.from(kept);
+  }
+
+  /**
+   * The map with the same keys, in the same order, and `fn`'s result as each value: `this` when
+   * every result equals the value it replaces. Named for what it maps, since
+   * `map` over a map has no one meaning (D70).
+   */
+  mapValues<U>(fn: (value: V, key: K, map: OrderedMap<K, V>) => U, thisArg?: unknown): OrderedMap<K, U> {
+    const out: [K, U][] = [];
+    for (const [k, v] of this) out.push([k, fn.call(thisArg, v, k, this)]);
+    return OrderedMap.from(out);
+  }
+
+  /** A fold over the entries, from `initial`, which is required: an entry is a pair, so there is no first value to fold from (D70). */
+  reduce<U>(fn: (acc: U, value: V, key: K, map: OrderedMap<K, V>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitialEntry('OrderedMap.reduce');
+    const fn = args[0] as (acc: unknown, value: V, key: K, map: OrderedMap<K, V>) => unknown;
+    let acc = args[1];
+    for (const [k, v] of this) acc = fn(acc, v, k, this);
+    return acc;
+  }
+
+  /** Whether `fn` accepts any entry. */
+  some(fn: (value: V, key: K, map: OrderedMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    for (const [k, v] of this) if (fn.call(thisArg, v, k, this)) return true;
+    return false;
+  }
+
+  /** Whether `fn` accepts every entry. */
+  every(fn: (value: V, key: K, map: OrderedMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    for (const [k, v] of this) if (!fn.call(thisArg, v, k, this)) return false;
+    return true;
   }
 
   /**

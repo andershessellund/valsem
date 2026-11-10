@@ -40,7 +40,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, noInitialEntry } from './shared.js';
 import type { ValueMap } from './value-map.js';
 import type { Draft } from './produce.js';
 
@@ -198,6 +198,53 @@ export class DraftMap<K, V> {
   /** The map as it is right now without a structurally equal `key`: a `ValueMap`, as `ValueMap.deleted`. To edit, `delete`. */
   deleted(key: K): ValueMap<K, V> {
     return (snapshotOf(this) as ValueMap<K, V>).deleted(key);
+  }
+
+  /**
+   * Set `key` to `fn(value)`, where `value` is what `get(key)` hands out: the
+   * entry drafted if it can be, `undefined` for an absent key. Returning the
+   * draft it was given changes nothing; so does a result equal to what is there.
+   */
+  update(key: K, fn: (value: Draft<V> | undefined) => V | Draft<V>): this {
+    return this.set(key, fn(this.get(key) as Draft<V> | undefined) as V);
+  }
+
+  /** The map as it is right now with `key` → `fn(value)`: ValueMap, as `ValueMap.updated`; `fn` sees the value, nothing drafted. To edit, `update`. */
+  updated(key: K, fn: (value: V | undefined) => V): ValueMap<K, V> {
+    return (snapshotOf(this) as ValueMap<K, V>).updated(key, fn);
+  }
+
+  // The functional reads do not draft (D54, D70): a callback sees the values
+  // the map holds right now, and `filter` and `mapValues` give back a value.
+
+  /** The `ValueMap` of the entries `fn` accepts, as `ValueMap.filter`. */
+  filter<S extends V>(fn: (value: V, key: K, map: DraftMap<K, V>) => value is S, thisArg?: unknown): ValueMap<K, S>;
+  filter(fn: (value: V, key: K, map: DraftMap<K, V>) => unknown, thisArg?: unknown): ValueMap<K, V>;
+  filter(fn: (value: V, key: K, map: DraftMap<K, V>) => unknown, thisArg?: unknown): ValueMap<K, V> {
+    return (snapshotOf(this) as ValueMap<K, V>).filter((v, k) => fn.call(thisArg, v, k, this));
+  }
+
+  /** The `ValueMap` with `fn`'s result as each value, as `ValueMap.mapValues`. */
+  mapValues<U>(fn: (value: V, key: K, map: DraftMap<K, V>) => U, thisArg?: unknown): ValueMap<K, U> {
+    return (snapshotOf(this) as ValueMap<K, V>).mapValues((v, k) => fn.call(thisArg, v, k, this) as U);
+  }
+
+  /** A fold over the entries as they are right now, from `initial`, which is required, as `ValueMap.reduce`. */
+  reduce<U>(fn: (acc: U, value: V, key: K, map: DraftMap<K, V>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitialEntry('DraftMap.reduce');
+    const fn = args[0] as (acc: unknown, value: V, key: K, map: DraftMap<K, V>) => unknown;
+    return (snapshotOf(this) as ValueMap<K, V>).reduce((acc: unknown, v, k) => fn(acc, v, k, this), args[1]);
+  }
+
+  /** Whether `fn` accepts any entry, as `ValueMap.some`. */
+  some(fn: (value: V, key: K, map: DraftMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    return (snapshotOf(this) as ValueMap<K, V>).some((v, k) => fn.call(thisArg, v, k, this));
+  }
+
+  /** Whether `fn` accepts every entry, as `ValueMap.every`. */
+  every(fn: (value: V, key: K, map: DraftMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    return (snapshotOf(this) as ValueMap<K, V>).every((v, k) => fn.call(thisArg, v, k, this));
   }
 
   /**

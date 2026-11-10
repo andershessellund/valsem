@@ -398,6 +398,22 @@ function leafClosed(items: readonly unknown[]): boolean {
  * (D57); anything else — a raw array, the argument an empty receiver used to
  * hand back as it came — is a `TypeError`.
  */
+/**
+ * What `concat` appends: a `ValueList` (or a draft standing for one) as it
+ * is, whose tree the result then shares; any other iterable object through
+ * `ValueList.from`. A primitive is refused, a string included: it is
+ * iterable, and a list of its characters is not what anyone meant.
+ */
+function listOrItems<T>(x: unknown, operation: string): ValueList<T> {
+  if (x instanceof ValueList) return x;
+  if (x !== null && typeof x === 'object') {
+    const v = _undraft(x);
+    if (v instanceof ValueList) return v as ValueList<T>;
+    if (typeof (v as Partial<Iterable<T>>)[Symbol.iterator] === 'function') return ValueList.from(v as Iterable<T>);
+  }
+  throw new TypeError(`${operation}: expected a ValueList or an iterable of elements, got ${x === null ? 'null' : typeof x === 'object' ? 'an object that is not iterable' : `a ${typeof x}`}`);
+}
+
 function listArg<T>(x: unknown, operation: string): ValueList<T> {
   if (x instanceof ValueList) return x;
   const v = x !== null && typeof x === 'object' ? _undraft(x) : x;
@@ -787,9 +803,14 @@ export class ValueList<T> implements Iterable<T> {
     if (start >= end) return ValueList.empty<T>();
     return this.toSpliced(end, n - end).toSpliced(0, start);
   }
-  /** This list followed by `other`, a `ValueList` (a draft stands for its value); O(log n) expected — the two trees meet at one re-chunked seam. */
-  concat(other: ValueList<T>): ValueList<T> {
-    const o = listArg<T>(other, 'ValueList.concat'); // checked whatever the receiver: an empty one returned the argument as it came
+  /**
+   * This list followed by `other`: a `ValueList` (a draft stands for its
+   * value), in O(log n) expected — the two trees meet at one re-chunked
+   * seam — or any other iterable of elements, as the set algebra takes one,
+   * which is built into a list first (D70).
+   */
+  concat(other: ValueList<T> | Iterable<T>): ValueList<T> {
+    const o = listOrItems<T>(other, 'ValueList.concat'); // checked whatever the receiver: an empty one returned the argument as it came
     if (this.length === 0) return o;
     if (o.length === 0) return this;
     const root = this.#full()!;

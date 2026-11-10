@@ -324,7 +324,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   }
 
   /** The list as it is right now, followed by `other`, as `ValueList.concat`: a value, not a draft. */
-  concat(other: ValueList<T>): ValueList<T> {
+  concat(other: ValueList<T> | Iterable<T>): ValueList<T> {
     return (snapshotOf(this) as ValueList<T>).concat(other);
   }
 
