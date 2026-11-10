@@ -10,7 +10,7 @@
 // object would miss every equal lookup silently.
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from 'vitest';
-import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned, registerType } from './deep-equal.js';
 import type { Hasher } from './hasher.js';
 import { deepHash } from './deep-hash.js';
 import { intern, internHash, isCanonical, fastEqual } from './intern.js';
@@ -275,14 +275,14 @@ describe('a non-callable [equals] is no protocol', () => {
   });
 });
 
-describe('deepEqual.register with a hash is the same tier', () => {
+describe('registerType with a hash is the same tier', () => {
   class Vec {
     constructor(
       readonly x: number,
       readonly y: number,
     ) {}
   }
-  deepEqual.register(Vec, (a, b) => a.x === b.x && a.y === b.y, (v, hasher) => deepHash([v.x, v.y], hasher));
+  registerType(Vec, (a, b) => a.x === b.x && a.y === b.y, (v, hasher) => deepHash([v.x, v.y], hasher));
 
   it('interns, keys, and memoizes by content', () => {
     const v = intern(new Vec(1, 2));
@@ -306,7 +306,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
         return new P(v);
       }
     }
-    deepEqual.register(P, (a, b) => a.v === b.v, (p, hasher) => hasher.number(p.v));
+    registerType(P, (a, b) => a.v === b.v, (p, hasher) => hasher.number(p.v));
     expect(intern(P.of(1))).toBe(intern(P.of(1)));
 
     abstract class Shape {
@@ -320,7 +320,7 @@ describe('deepEqual.register with a hash is the same tier', () => {
         return this.side ** 2;
       }
     }
-    deepEqual.register(Square, (a, b) => a.side === b.side, (s, hasher) => hasher.number(s.side));
+    registerType(Square, (a, b) => a.side === b.side, (s, hasher) => hasher.number(s.side));
     expect(deepEqual(new Square(2), new Square(2))).toBe(true);
     // The registry keys on the exact constructor: a subclass is its own type.
     expect(() => intern(new (class Cube extends Square {})(2))).toThrow(/Cube/);
@@ -335,17 +335,17 @@ describe('deepEqual.register with a hash is the same tier', () => {
     }
     const eq = (a: R, b: R): boolean => a.x === b.x && a.y === b.y;
     const hash = (r: R, hasher: Hasher): number => deepHash([r.x, r.y], hasher);
-    deepEqual.register(R, eq, hash);
+    registerType(R, eq, hash);
     const a = intern(new R(1, 1));
     const b = intern(new R(1, 2));
 
     // The reviewed incoherence: a coarser pair would make the raw instances
     // equal while their canonicals (distinct by identity) stay unequal.
-    expect(() => deepEqual.register(R, (p, q) => p.x === q.x, (r, hasher) => deepHash(r.x, hasher))).toThrow(
+    expect(() => registerType(R, (p, q) => p.x === q.x, (r, hasher) => deepHash(r.x, hasher))).toThrow(
       /already registered as a value/,
     );
-    expect(() => deepEqual.register(R, eq)).toThrow(/already registered as a value/); // no dropping
-    expect(() => deepEqual.register(R, eq, (r, hasher) => deepHash([r.x, r.y], hasher))).toThrow(/already registered/);
+    expect(() => registerType(R, eq)).toThrow(/already registered as a value/); // no dropping
+    expect(() => registerType(R, eq, (r, hasher) => deepHash([r.x, r.y], hasher))).toThrow(/already registered/);
 
     // Nothing changed: raw and canonical still agree.
     expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(false);
@@ -359,9 +359,9 @@ describe('deepEqual.register with a hash is the same tier', () => {
     }
     const eq = (a: R, b: R): boolean => a.v === b.v;
     const hash = (r: R, hasher: Hasher): number => hasher.number(r.v);
-    deepEqual.register(R, eq, hash);
+    registerType(R, eq, hash);
     const a = intern(new R(1));
-    expect(() => deepEqual.register(R, eq, hash)).not.toThrow();
+    expect(() => registerType(R, eq, hash)).not.toThrow();
     expect(intern(new R(1))).toBe(a);
   });
 
@@ -372,12 +372,12 @@ describe('deepEqual.register with a hash is the same tier', () => {
         readonly y: number,
       ) {}
     }
-    deepEqual.register(R, (a, b) => a.x === b.x);
+    registerType(R, (a, b) => a.x === b.x);
     expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(true);
-    deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y); // nothing was ever pooled
+    registerType(R, (a, b) => a.x === b.x && a.y === b.y); // nothing was ever pooled
     expect(deepEqual(new R(1, 1), new R(1, 2))).toBe(false);
     expect(() => deepHash(new R(1, 1))).toThrow(/has an equality but no hash/);
-    deepEqual.register(R, (a, b) => a.x === b.x && a.y === b.y, (r, hasher) => deepHash([r.x, r.y], hasher));
+    registerType(R, (a, b) => a.x === b.x && a.y === b.y, (r, hasher) => deepHash([r.x, r.y], hasher));
     expect(intern(new R(1, 1))).toBe(intern(new R(1, 1)));
   });
 });
@@ -392,7 +392,7 @@ describe('an equality alone is comparable, not a value', () => {
   class Reg {
     constructor(public v: number) {}
   }
-  deepEqual.register(Reg, (a, b) => a.v === b.v);
+  registerType(Reg, (a, b) => a.v === b.v);
 
   it('deepEqual answers by content', () => {
     expect(deepEqual(new Mut(1), new Mut(1))).toBe(true);
@@ -447,7 +447,7 @@ describe('anything less is rejected, never passed through', () => {
     expect(() => intern({ f: new Foo() })).toThrow(neither);
     expect(() => deepHash(new Foo())).toThrow(neither);
     expect(() => new HashMap().set(new Foo(), 1)).toThrow(neither);
-    expect(() => intern(new Foo())).toThrow(/deepEqual\.register\(Foo, equalsFn, hashFn\)/);
+    expect(() => intern(new Foo())).toThrow(/registerType\(Foo, equalsFn, hashFn\)/);
     expect(deepEqual(new Foo(), new Foo())).toBe(false); // reference semantics, no throw
   });
 
@@ -471,7 +471,7 @@ describe('anything less is rejected, never passed through', () => {
 describe('the mutable built-ins', () => {
   it('cannot be registered with a hash — a hash would declare them immutable', () => {
     for (const T of [Map, Set, RegExp, Uint8Array]) {
-      expect(() => deepEqual.register(T as never, () => true, () => 1)).toThrow(
+      expect(() => registerType(T as never, () => true, () => 1)).toThrow(
         /cannot be registered with a hash/,
       );
     }
@@ -479,11 +479,11 @@ describe('the mutable built-ins', () => {
 
   it('a subclass of a mutable built-in is refused like its base', () => {
     class Stamp extends Date {}
-    expect(() => deepEqual.register(Stamp, () => true, () => 1)).toThrow(/Stamp cannot be registered with a hash/);
+    expect(() => registerType(Stamp, () => true, () => 1)).toThrow(/Stamp cannot be registered with a hash/);
     expect(() => intern(new Stamp(5))).toThrow(/Stamp cannot be interned.*setTime/);
     expect(() => deepHash(new Stamp(5))).toThrow(/setTime/);
     expect(() => intern({ at: new Stamp(5) })).toThrow(/setTime/);
-    deepEqual.register(Stamp, (a, b) => a.getTime() === b.getTime()); // comparable is fine
+    registerType(Stamp, (a, b) => a.getTime() === b.getTime()); // comparable is fine
     expect(deepEqual(new Stamp(5), new Stamp(5))).toBe(true);
     // …and carrying the symbol protocol does not smuggle it past deepHash either.
     class Stamped extends Date {
@@ -500,7 +500,7 @@ describe('the mutable built-ins', () => {
   });
 
   it('an equality alone makes them comparable; hashing and interning still refuse', () => {
-    deepEqual.register(RegExp, (a, b) => a.source === b.source && a.flags === b.flags);
+    registerType(RegExp, (a, b) => a.source === b.source && a.flags === b.flags);
     expect(deepEqual(/a/g, /a/g)).toBe(true);
     expect(deepEqual(/a/g, /a/i)).toBe(false);
     expect(() => deepHash(/a/g)).toThrow(/source, flags/);
@@ -558,8 +558,8 @@ describe('the protocol, at its edges', () => {
     const Anonymous = (() => class { readonly v = 1; })();
     const eq = (): boolean => true;
     const hash = (_v: unknown, hasher: Hasher): number => (void hasher, 1);
-    deepEqual.register(Anonymous, eq, hash);
-    deepEqual.register(Anonymous, eq, hash); // the same pair again: idempotent
-    expect(() => deepEqual.register(Anonymous, eq, (_v, h) => (void h, 2))).toThrow(/this type is already registered as a value/);
+    registerType(Anonymous, eq, hash);
+    registerType(Anonymous, eq, hash); // the same pair again: idempotent
+    expect(() => registerType(Anonymous, eq, (_v, h) => (void h, 2))).toThrow(/this type is already registered as a value/);
   });
 });

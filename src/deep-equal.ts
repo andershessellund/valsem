@@ -297,7 +297,7 @@ function warnReferenceComparisonDev(ctor: Function, otherCopy: boolean, reason: 
     const why = otherCopy ? `each is ${OTHER_COPY}` : reason;
     const advice = otherCopy
       ? OTHER_COPY_ADVICE
-      : `To compare them by content anyway, register handlers with deepEqual.register(${ctor.name}, …).`;
+      : `To compare them by content anyway, register handlers with registerType(${ctor.name}, …).`;
     _g.console.warn(
       `valsem: deepEqual compared two distinct ${ctor.name} instances — they compare by ` +
         `REFERENCE, because ${why}. ${advice} (Development-only warning, once per type.)`,
@@ -353,7 +353,7 @@ const OTHER_COPY_ADVICE =
  * Deep structural equality with polymorphic dispatch.
  *
  * Supports primitives, plain objects, arrays, and any class implementing
- * `[equals]` or registered via `deepEqual.register()`.
+ * `[equals]` or registered via `registerType()`.
  *
  * Class instances without `[equals]` or a registered handler use
  * reference semantics (only equal if `Object.is` returns `true`). That includes
@@ -554,17 +554,17 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  * @example
  * ```ts
  * // A value: comparable, hashable, internable — under any hasher.
- * deepEqual.register(
+ * registerType(
  *   Money,
  *   (a, b) => a.amount === b.amount && a.currency === b.currency,
  *   (m, hasher) => deepHash([m.amount, m.currency], hasher),
  * );
  *
  * // Comparable only — deepEqual by content; deepHash and intern still refuse it.
- * deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
+ * registerType(Date, (a, b) => a.getTime() === b.getTime());
  * ```
  */
-deepEqual.register = function register<T>(
+export function registerType<T>(
   type: Function & { readonly prototype: T },
   equalsFn: (a: T, b: T) => boolean,
   hashFn?: (a: T, hasher: Hasher) => number,
@@ -573,7 +573,7 @@ deepEqual.register = function register<T>(
     const reason = _mutableBuiltinReason(type);
     if (reason !== undefined) {
       throw new TypeError(
-        `deepEqual.register: ${type.name} cannot be registered with a hash — a hash declares ` +
+        `registerType: ${type.name} cannot be registered with a hash — a hash declares ` +
           `that instances never change, and ${reason}. Register an equality alone to compare ` +
           `${type.name} instances by content.`,
       );
@@ -583,7 +583,7 @@ deepEqual.register = function register<T>(
     // `length`; spell the hasher parameter out.)
     if (hashFn.length < 2) {
       throw new TypeError(
-        `deepEqual.register: the hashFn for ${type.name} takes one parameter, and a hash must go through ` +
+        `registerType: the hashFn for ${type.name} takes one parameter, and a hash must go through ` +
           `the hasher valsem interns with: write it as (value, hasher) => …, hashing the content with ` +
           `deepHash(part, hasher), hasher.string and hasher.number.`,
       );
@@ -593,7 +593,7 @@ deepEqual.register = function register<T>(
   if (priorHash !== undefined) {
     if (equalsMethods.get(type) === equalsFn && priorHash === hashFn) return; // idempotent
     throw new TypeError(
-      `deepEqual.register: ${type.name || 'this type'} is already registered as a value, and a ` +
+      `registerType: ${type.name || 'this type'} is already registered as a value, and a ` +
         "value's equality and hash are fixed — canonical instances were hashed and pooled by " +
         'them, so replacing them would make equality depend on when a value was interned. ' +
         'Register each type once, next to its class.',
@@ -601,7 +601,7 @@ deepEqual.register = function register<T>(
   }
   equalsMethods.set(type, equalsFn);
   if (hashFn !== undefined) hashCodeMethods.set(type, hashFn);
-};
+}
 
 /**
  * @internal The `[equals]` protocol method of `obj`'s TYPE — read off the
@@ -664,11 +664,11 @@ export function _missingValueSemantics(obj: object): string | undefined {
     return (
       `${name} compares by content but is not a value: it has an equality but no hash, and ` +
       `a hash declares that the content never changes. Add [hash](hasher) (or a hashFn to ` +
-      `deepEqual.register) if instances are immutable after construction`
+      `registerType) if instances are immutable after construction`
     );
   }
   if (hasHash) {
-    return `${name} has a hash but no equality to pool by. Add [equals] (or register with deepEqual.register)`;
+    return `${name} has a hash but no equality to pool by. Add [equals] (or register with registerType)`;
   }
   // A Temporal value is a value — behind an import. The hint deepHash gives.
   if (ctor !== undefined && _isTemporalType(name, ctor)) {
@@ -676,7 +676,8 @@ export function _missingValueSemantics(obj: object): string | undefined {
   }
   return (
     `class instance '${name}' has no [hash] or registered hash handler, and no equality: ` +
-    `it is not a value. Implement [equals] and [hash](hasher), or deepEqual.register(${name}, equalsFn, hashFn)`
+    `it is not a value. Implement [equals] and [hash](hasher), or registerType(${name}, equalsFn, hashFn), ` +
+    `all from 'valsem/extend'`
   );
 }
 

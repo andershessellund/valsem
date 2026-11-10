@@ -387,7 +387,8 @@ Any class becomes a value by implementing `[equals]` and `[hash]`: given a
 hasher, hash the content through it (equal values must hash equal):
 
 ```ts
-import { deepEqual, equals, hash, deepHash, intern, HashMap, type Hasher } from 'valsem';
+import { deepEqual, deepHash, intern, HashMap } from 'valsem';
+import { equals, hash, type Hasher } from 'valsem/extend';
 
 class Money {
   constructor(readonly amount: number, readonly currency: string) {}

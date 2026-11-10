@@ -9,7 +9,7 @@
 // (two seeds, one key, one hash) in hash-reproducible.test.ts.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned, registerType } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { intern, isCanonical } from './intern.js';
 import { HashMap } from './hash-map.js';
@@ -190,7 +190,7 @@ describe('the [hash] protocol', () => {
         readonly y: number,
       ) {}
     }
-    deepEqual.register(
+    registerType(
       Vec,
       (a, b) => a.x === b.x && a.y === b.y,
       (v, hasher) => deepHash([v.x, v.y], hasher),
@@ -204,7 +204,7 @@ describe('the [hash] protocol', () => {
     }
     // The form before 0.2, refused where it is written, not where it is used.
     expect(() =>
-      deepEqual.register(
+      registerType(
         Old,
         (a, b) => a.id === b.id,
         (o) => deepHash(o.id),

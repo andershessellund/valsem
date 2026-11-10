@@ -15,9 +15,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Loaded with copy A (the static import runs first, into the graph A then joins).
 import { COLLECTIONS } from './roster.test-helpers.js';
 
-const A = await import('./index.js');
+// Each copy's definition surface (valsem/extend) is loaded with it, into the same graph.
+const A = { ...(await import('./index.js')), ...(await import('./extend.js')) };
 vi.resetModules();
-const B = await import('./index.js');
+const B = { ...(await import('./index.js')), ...(await import('./extend.js')) };
 
 const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 beforeEach(() => warn.mockClear());

@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi } from 'vitest';
-import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned, registerType } from './deep-equal.js';
 import type { Hasher } from './hasher.js';
 import { intern } from './intern.js';
 
@@ -194,7 +194,7 @@ describe('deepEqual', () => {
       }
     }
     // Register a handler that always returns false
-    deepEqual.register(
+    registerType(
       Widget,
       () => false,
       (w, hasher) => hasher.number(w.id),
@@ -203,14 +203,14 @@ describe('deepEqual', () => {
     expect(deepEqual(new Widget(1), new Widget(1))).toBe(true);
   });
 
-  it('registered type via deepEqual.register → delegates to registered function', () => {
+  it('registered type via registerType → delegates to registered function', () => {
     class Point {
       constructor(
         readonly x: number,
         readonly y: number,
       ) {}
     }
-    deepEqual.register(
+    registerType(
       Point,
       (a, b) => a.x === b.x && a.y === b.y,
       (p, hasher) => hasher.number(p.x * 31 + p.y),
@@ -395,13 +395,13 @@ describe('mutable built-ins — tier-1 registration is contained', () => {
   // above rely on running before it.
   it('registering an equality for Date enables comparison but never hashing or interning', async () => {
     expect(() =>
-      deepEqual.register(
+      registerType(
         Date,
         (a, b) => a.getTime() === b.getTime(),
         (d, hasher) => hasher.number(d.getTime()),
       ),
     ).toThrow(/Date cannot be registered with a hash/);
-    deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
+    registerType(Date, (a, b) => a.getTime() === b.getTime());
     expect(deepEqual(new Date(5), new Date(5))).toBe(true);
     expect(deepEqual(new Date(5), new Date(6))).toBe(false);
     const { deepHash } = await import('./deep-hash.js');

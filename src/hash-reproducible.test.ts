@@ -9,9 +9,9 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect, vi } from 'vitest';
 
-const A = await import('./index.js');
+const A = { ...(await import('./index.js')), getHashSeed: (await import('./extend.js')).getHashSeed };
 vi.resetModules();
-const B = await import('./index.js');
+const B = { ...(await import('./index.js')), getHashSeed: (await import('./extend.js')).getHashSeed };
 
 type Copy = typeof A;
 
