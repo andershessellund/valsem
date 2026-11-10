@@ -34,7 +34,7 @@ import {
   type PatchRecorder,
   inspectDraft,
 } from './draft-core.js';
-import { INSPECT, type Inspect, type InspectOptions, atIndex, newEntryIndex } from './shared.js';
+import { INSPECT, type Inspect, type InspectOptions, atIndex, newEntryIndex, noInitialEntry } from './shared.js';
 import type { OrderedMap } from './ordered-map.js';
 import type { ValueList } from './value-list.js';
 import type { Draft } from './produce.js';
@@ -246,6 +246,53 @@ export class DraftOrderedMap<K, V> {
     const k = intern(key);
     newEntryIndex(index, s.work.size, () => s.work.has(k), 'DraftOrderedMap.insertedAt', 'key', 'delete');
     return (snapshotOf(this) as OrderedMap<K, V>).insertedAt(index, k as K, value);
+  }
+
+  /**
+   * Set `key` to `fn(value)`, where `value` is what `get(key)` hands out: the
+   * entry drafted if it can be, `undefined` for an absent key. Returning the
+   * draft it was given changes nothing; so does a result equal to what is there.
+   */
+  update(key: K, fn: (value: Draft<V> | undefined) => V | Draft<V>): this {
+    return this.set(key, fn(this.get(key) as Draft<V> | undefined) as V);
+  }
+
+  /** The map as it is right now with `key` → `fn(value)`: OrderedMap, as `OrderedMap.updated`; `fn` sees the value, nothing drafted. To edit, `update`. */
+  updated(key: K, fn: (value: V | undefined) => V): OrderedMap<K, V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).updated(key, fn);
+  }
+
+  // The functional reads do not draft (D54, D70): a callback sees the values
+  // the map holds right now, and `filter` and `mapValues` give back a value.
+
+  /** The `OrderedMap` of the entries `fn` accepts, as `OrderedMap.filter`. */
+  filter<S extends V>(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => value is S, thisArg?: unknown): OrderedMap<K, S>;
+  filter(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => unknown, thisArg?: unknown): OrderedMap<K, V>;
+  filter(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => unknown, thisArg?: unknown): OrderedMap<K, V> {
+    return (snapshotOf(this) as OrderedMap<K, V>).filter((v, k) => fn.call(thisArg, v, k, this));
+  }
+
+  /** The `OrderedMap` with `fn`'s result as each value, as `OrderedMap.mapValues`. */
+  mapValues<U>(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => U, thisArg?: unknown): OrderedMap<K, U> {
+    return (snapshotOf(this) as OrderedMap<K, V>).mapValues((v, k) => fn.call(thisArg, v, k, this) as U);
+  }
+
+  /** A fold over the entries as they are right now, from `initial`, which is required, as `OrderedMap.reduce`. */
+  reduce<U>(fn: (acc: U, value: V, key: K, map: DraftOrderedMap<K, V>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitialEntry('DraftOrderedMap.reduce');
+    const fn = args[0] as (acc: unknown, value: V, key: K, map: DraftOrderedMap<K, V>) => unknown;
+    return (snapshotOf(this) as OrderedMap<K, V>).reduce((acc: unknown, v, k) => fn(acc, v, k, this), args[1]);
+  }
+
+  /** Whether `fn` accepts any entry, as `OrderedMap.some`. */
+  some(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    return (snapshotOf(this) as OrderedMap<K, V>).some((v, k) => fn.call(thisArg, v, k, this));
+  }
+
+  /** Whether `fn` accepts every entry, as `OrderedMap.every`. */
+  every(fn: (value: V, key: K, map: DraftOrderedMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    return (snapshotOf(this) as OrderedMap<K, V>).every((v, k) => fn.call(thisArg, v, k, this));
   }
 
   /**

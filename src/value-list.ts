@@ -398,6 +398,22 @@ function leafClosed(items: readonly unknown[]): boolean {
  * (D57); anything else — a raw array, the argument an empty receiver used to
  * hand back as it came — is a `TypeError`.
  */
+/**
+ * What `concat` appends: a `ValueList` (or a draft standing for one) as it
+ * is, whose tree the result then shares; any other iterable object through
+ * `ValueList.from`. A primitive is refused, a string included: it is
+ * iterable, and a list of its characters is not what anyone meant.
+ */
+function listOrItems<T>(x: unknown, operation: string): ValueList<T> {
+  if (x instanceof ValueList) return x;
+  if (x !== null && typeof x === 'object') {
+    const v = _undraft(x);
+    if (v instanceof ValueList) return v as ValueList<T>;
+    if (typeof (v as Partial<Iterable<T>>)[Symbol.iterator] === 'function') return ValueList.from(v as Iterable<T>);
+  }
+  throw new TypeError(`${operation}: expected a ValueList or an iterable of elements, got ${x === null ? 'null' : typeof x === 'object' ? 'an object that is not iterable' : `a ${typeof x}`}`);
+}
+
 function listArg<T>(x: unknown, operation: string): ValueList<T> {
   if (x instanceof ValueList) return x;
   const v = x !== null && typeof x === 'object' ? _undraft(x) : x;
@@ -411,7 +427,7 @@ function listArg<T>(x: unknown, operation: string): ValueList<T> {
  * Persistent (immutable) list whose instances are canonical: equal content
  * is the same object, however built. Elements are interned on entry.
  * Every edit is a copying one, and is named for its result (D59): `with`,
- * `pushed`, `popped`, `shifted`, `unshifted`, `inserted`, `removed` and
+ * `pushed`, `popped`, `shifted`, `unshifted`, `insertedAt`, `removedAt` and
  * `toSpliced`, beside `slice` and `concat`, all O(log n) expected. The
  * imperative verbs (`set`, `push`, `splice`, …) belong to the draft, which
  * edits in place. `ValueList.diff(a, b)` finds the changed regions between
@@ -630,7 +646,7 @@ export class ValueList<T> implements Iterable<T> {
   /**
    * The list with `deleteCount` elements at `start` replaced by `items`
    * (interned on entry) — the general edit, as `Array.prototype.toSpliced`;
-   * O(log n) expected. `inserted`, `removed`, `shifted`, `unshifted` and
+   * O(log n) expected. `insertedAt`, `removedAt`, `shifted`, `unshifted` and
    * `slice` are all this. `start` is where the edit lands, so it must be a
    * place in the list: an integer in `[0, length]`, not counted from the end,
    * or a `RangeError`. `deleteCount` is how much, and means "up to": an
@@ -764,12 +780,12 @@ export class ValueList<T> implements Iterable<T> {
   }
 
   /** The list with `value` (interned on entry) inserted before `index`, an integer in `[0, length]` (else a `RangeError`); O(log n) expected. */
-  inserted(index: number, value: T): ValueList<T> {
-    return this.toSpliced(insertionIndex(index, this.length, 'ValueList.inserted'), 0, value);
+  insertedAt(index: number, value: T): ValueList<T> {
+    return this.toSpliced(insertionIndex(index, this.length, 'ValueList.insertedAt'), 0, value);
   }
   /** The list without the element at `index`, which must name one: an integer in `[0, length)` (else a `RangeError`); O(log n) expected. */
-  removed(index: number): ValueList<T> {
-    return this.toSpliced(elementIndex(index, this.length, 'ValueList.removed'), 1);
+  removedAt(index: number): ValueList<T> {
+    return this.toSpliced(elementIndex(index, this.length, 'ValueList.removedAt'), 1);
   }
   /**
    * Elements `[start, end)`, the part of that range that exists:
@@ -787,9 +803,14 @@ export class ValueList<T> implements Iterable<T> {
     if (start >= end) return ValueList.empty<T>();
     return this.toSpliced(end, n - end).toSpliced(0, start);
   }
-  /** This list followed by `other`, a `ValueList` (a draft stands for its value); O(log n) expected — the two trees meet at one re-chunked seam. */
-  concat(other: ValueList<T>): ValueList<T> {
-    const o = listArg<T>(other, 'ValueList.concat'); // checked whatever the receiver: an empty one returned the argument as it came
+  /**
+   * This list followed by `other`: a `ValueList` (a draft stands for its
+   * value), in O(log n) expected — the two trees meet at one re-chunked
+   * seam — or any other iterable of elements, as the set algebra takes one,
+   * which is built into a list first (D70).
+   */
+  concat(other: ValueList<T> | Iterable<T>): ValueList<T> {
+    const o = listOrItems<T>(other, 'ValueList.concat'); // checked whatever the receiver: an empty one returned the argument as it came
     if (this.length === 0) return o;
     if (o.length === 0) return this;
     const root = this.#full()!;

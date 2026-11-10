@@ -9,7 +9,7 @@
 // (two seeds, one key, one hash) in hash-reproducible.test.ts.
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
-import { deepEqual, equals, hash, hashCode, interned } from './deep-equal.js';
+import { deepEqual, equals, hash, hashCode, interned, registerType } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { intern, isCanonical } from './intern.js';
 import { HashMap } from './hash-map.js';
@@ -190,7 +190,7 @@ describe('the [hash] protocol', () => {
         readonly y: number,
       ) {}
     }
-    deepEqual.register(
+    registerType(
       Vec,
       (a, b) => a.x === b.x && a.y === b.y,
       (v, hasher) => deepHash([v.x, v.y], hasher),
@@ -204,7 +204,7 @@ describe('the [hash] protocol', () => {
     }
     // The form before 0.2, refused where it is written, not where it is used.
     expect(() =>
-      deepEqual.register(
+      registerType(
         Old,
         (a, b) => a.id === b.id,
         (o) => deepHash(o.id),
@@ -284,14 +284,14 @@ describe('plain data under another hasher', () => {
   });
 
   it('canonical and raw agree; a draft hashes as its value', () => {
-    const raw = { a: [1, { b: 's' }], c: InternedString.for('x') };
+    const raw = { a: [1, { b: 's' }], c: InternedString.from('x') };
     const c = intern(raw);
     expect(deepHash(c, h1)).toBe(deepHash(raw, h1));
     expect(deepHash(c, h1)).toBe(deepHash(c, h1));
     produce(c, (d) => {
       expect(deepHash(d, h1)).toBe(deepHash(c, h1));
       d.a.push(2);
-      expect(deepHash(d, h1)).toBe(deepHash({ a: [1, { b: 's' }, 2], c: InternedString.for('x') }, h1));
+      expect(deepHash(d, h1)).toBe(deepHash({ a: [1, { b: 's' }, 2], c: InternedString.from('x') }, h1));
     });
   });
 
@@ -375,7 +375,7 @@ describe('reproducibility', () => {
         ['b', 2],
         ['a', 1],
       ]),
-      InternedString.for('s'),
+      InternedString.from('s'),
     ];
     for (const v of values) {
       expect(deepHash(v, twin)).toBe(deepHash(v, h1));

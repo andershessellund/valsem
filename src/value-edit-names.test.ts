@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // D59: a value's edits are named for their result, the draft's for what they
 // do. The value has `with`, `pushed`, `popped`, `shifted`, `unshifted`,
-// `inserted`, `removed`, `toSpliced`, `added`, `deleted` and `insertedAt`;
-// the draft has `set`, `push`, `pop`, `shift`, `unshift`, `insert`, `remove`,
+// `insertedAt`, `removedAt`, `toSpliced`, `added`, `deleted` and `insertedAt`;
+// the draft has `set`, `push`, `pop`, `shift`, `unshift`, `insertAt`, `removeAt`,
 // `splice`, `add`, `delete` and `insertAt`. Each pair is one edit: the
 // value's method gives what the draft's verb leaves behind. That is the law
 // here, pair by pair.
@@ -26,8 +26,8 @@ describe('ValueList: the copying edit gives what the draft’s verb leaves behin
     ['popped / pop', list.popped(), produce(list, (d) => void d.pop())],
     ['shifted / shift', list.shifted(), produce(list, (d) => void d.shift())],
     ['unshifted / unshift', list.unshifted('y', 'z'), produce(list, (d) => void d.unshift('y', 'z'))],
-    ['inserted / insert', list.inserted(1, 'x'), produce(list, (d) => void d.insert(1, 'x'))],
-    ['removed / remove', list.removed(1), produce(list, (d) => void d.remove(1))],
+    ['insertedAt / insertAt', list.insertedAt(1, 'x'), produce(list, (d) => void d.insertAt(1, 'x'))],
+    ['removedAt / removeAt', list.removedAt(1), produce(list, (d) => void d.removeAt(1))],
     ['toSpliced / splice', list.toSpliced(1, 1, 'x', 'y'), produce(list, (d) => void d.splice(1, 1, 'x', 'y'))],
     ['toSpliced(start) / splice(start)', list.toSpliced(1), produce(list, (d) => void d.splice(1))],
   ])('%s', (_, byValue, byDraft) => {
@@ -51,8 +51,8 @@ describe('ValueList: the copying edit gives what the draft’s verb leaves behin
 
   it('checks its positions in the value’s name (D45)', () => {
     expect(() => list.with(3, 'x')).toThrow('ValueList.with: index 3 out of range [0, 3)');
-    expect(() => list.removed(-1)).toThrow('ValueList.removed: index -1 out of range [0, 3)');
-    expect(() => list.inserted(4, 'x')).toThrow('ValueList.inserted: index 4 out of range [0, 3]');
+    expect(() => list.removedAt(-1)).toThrow('ValueList.removedAt: index -1 out of range [0, 3)');
+    expect(() => list.insertedAt(4, 'x')).toThrow('ValueList.insertedAt: index 4 out of range [0, 3]');
     expect(() => list.toSpliced(-1, 1)).toThrow('ValueList.toSpliced: start -1 out of range [0, 3]');
     const loose = list as unknown as Record<string, Loose>; // the overloads refuse an `undefined` count at compile time
     expect(() => loose.toSpliced!(0, undefined, 'x')).toThrow('ValueList.toSpliced: deleteCount must be an integer, got undefined');
@@ -69,6 +69,9 @@ describe('the keyed collections', () => {
     expect(m.deleted('a')).toBe(produce(m, (d) => void d.delete('a')));
     expect(m.with('a', 1)).toBe(m);
     expect(m.deleted('zz')).toBe(m);
+    expect(m.updated('a', (n) => (n ?? 0) + 1)).toBe(produce(m, (d) => void d.update('a', (n) => (n ?? 0) + 1)));
+    expect(m.updated('zz', (n) => n ?? 7)).toBe(m.with('zz', 7)); // an absent key: fn is given undefined, and its result is added
+    expect(m.updated('a', (n) => n!)).toBe(m);
   });
 
   it('ValueSet: added and deleted', () => {
@@ -95,6 +98,10 @@ describe('the keyed collections', () => {
     expect(m.with('a', 9)).toBe(produce(m, (d) => void d.set('a', 9)));
     expect(m.deleted('a')).toBe(produce(m, (d) => void d.delete('a')));
     expect(m.insertedAt(1, 'x', 0)).toBe(produce(m, (d) => void d.insertAt(1, 'x', 0)));
+    expect(m.updated('a', (n) => (n ?? 0) + 1)).toBe(produce(m, (d) => void d.update('a', (n) => (n ?? 0) + 1)));
+    expect([...m.updated('a', () => 9).keys()]).toEqual(['a', 'b']); // a present key keeps its position
+    expect([...m.updated('z', (n) => n ?? 0).keys()]).toEqual(['a', 'b', 'z']); // an absent one is appended
+    expect(m.updated('a', (n) => n!)).toBe(m);
     expect(m.with('a', 1)).toBe(m);
     expect(() => m.insertedAt(0, 'a', 0)).toThrow('OrderedMap.insertedAt: the key is already present — a key has one position; remove it first to move it');
     expect(() => m.insertedAt(3, 'z', 0)).toThrow('OrderedMap.insertedAt: index 3 out of range [0, 2]');

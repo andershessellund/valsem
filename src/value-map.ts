@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { equals as equalsSym, hash as hashSym, hashCode as hashCodeSym, interned as internedSym } from './deep-equal.js';
-import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect } from './shared.js';
+import { INSPECT, inspectAs, entryOf, type InspectOptions, type Inspect, noInitialEntry } from './shared.js';
 import { intern, internHash } from './intern.js';
 import { _hashWith, _pairTerm } from './deep-hash.js';
 import { mix, _isActive, _remembering, type Hasher } from './hasher.js';
@@ -155,6 +155,55 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     trieForEach(CFG, this.#root, (slots, i) => fn.call(thisArg, slots[i + 1] as V, slots[i] as K, this));
   }
 
+  // The functional reads (D70). A callback gets what `forEach` passes:
+  // `(value, key, map)`.
+
+  /** The map of the entries `fn` accepts; `this` when it accepts them all. */
+  filter<S extends V>(fn: (value: V, key: K, map: ValueMap<K, V>) => value is S, thisArg?: unknown): ValueMap<K, S>;
+  filter(fn: (value: V, key: K, map: ValueMap<K, V>) => unknown, thisArg?: unknown): ValueMap<K, V>;
+  filter(fn: (value: V, key: K, map: ValueMap<K, V>) => unknown, thisArg?: unknown): ValueMap<K, V> {
+    const kept: [K, V][] = [];
+    trieForEach(CFG, this.#root, (slots, i) => {
+      if (fn.call(thisArg, slots[i + 1] as V, slots[i] as K, this)) kept.push([slots[i] as K, slots[i + 1] as V]);
+    });
+    return kept.length === this.size ? this : ValueMap.from(kept);
+  }
+
+  /**
+   * The map with the same keys and `fn`'s result as each value: `this` when
+   * every result equals the value it replaces. Named for what it maps, since
+   * `map` over a map has no one meaning (D70).
+   */
+  mapValues<U>(fn: (value: V, key: K, map: ValueMap<K, V>) => U, thisArg?: unknown): ValueMap<K, U> {
+    const out: [K, U][] = [];
+    trieForEach(CFG, this.#root, (slots, i) => out.push([slots[i] as K, fn.call(thisArg, slots[i + 1] as V, slots[i] as K, this)]));
+    return ValueMap.from(out);
+  }
+
+  /** A fold over the entries, from `initial`, which is required: an entry is a pair, so there is no first value to fold from (D70). */
+  reduce<U>(fn: (acc: U, value: V, key: K, map: ValueMap<K, V>) => U, initial: U): U;
+  reduce(...args: unknown[]): unknown {
+    if (args.length < 2) throw noInitialEntry('ValueMap.reduce');
+    const fn = args[0] as (acc: unknown, value: V, key: K, map: ValueMap<K, V>) => unknown;
+    let acc = args[1];
+    trieForEach(CFG, this.#root, (slots, i) => {
+      acc = fn(acc, slots[i + 1] as V, slots[i] as K, this);
+    });
+    return acc;
+  }
+
+  /** Whether `fn` accepts any entry. */
+  some(fn: (value: V, key: K, map: ValueMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    for (const [k, v] of this) if (fn.call(thisArg, v, k, this)) return true;
+    return false;
+  }
+
+  /** Whether `fn` accepts every entry. */
+  every(fn: (value: V, key: K, map: ValueMap<K, V>) => unknown, thisArg?: unknown): boolean {
+    for (const [k, v] of this) if (!fn.call(thisArg, v, k, this)) return false;
+    return true;
+  }
+
   /**
    * What `JSON.stringify` sees: the entries, as a fresh array of
    * `[key, value]` pairs. Keys are values, not strings, so there is no
@@ -203,6 +252,15 @@ export class ValueMap<K, V> implements ReadonlyMap<K, V> {
     const r = trieInsert(CFG, this.#root, 0, internHash(key), [key, value]);
     if (r === null) return this;
     return ValueMap.#for<K, V>(r.node);
+  }
+
+  /**
+   * The map with `key` → `fn(value)`, where `value` is what `get(key)` returns:
+   * `undefined` for an absent key, which `fn`'s result then adds. `this` if
+   * the result equals what is there (D70).
+   */
+  updated(key: K, fn: (value: V | undefined) => V): ValueMap<K, V> {
+    return this.with(key, fn(this.get(key)));
   }
 
   /** The map without a structurally equal `key`; `this` if none is present. */

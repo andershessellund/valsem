@@ -1,7 +1,10 @@
 # Making your own types values
 
-Three well-known symbols let any class opt into value semantics. Import them
-and implement whichever tier you mean:
+Three symbols let any class opt into value semantics. They live in
+`valsem/extend`, with the rest of what only a type's *definition* needs
+(`registerType`, `createInternPool`, `mix`, `getHashSeed`), so the main
+entry point holds what an application calls. Import them and implement
+whichever tier you mean:
 
 | Symbol       | Makes the class                                                 | Shape                                       |
 | ------------ | --------------------------------------------------------------- | ------------------------------------------- |
@@ -10,7 +13,8 @@ and implement whichever tier you mean:
 | `interned`   | an **auto-interning type** — every instance canonical by construction | `[interned]: true`                    |
 
 ```ts
-import { deepEqual, equals, hash, deepHash, intern, type Hasher } from 'valsem';
+import { deepEqual, deepHash, intern } from 'valsem';
+import { equals, hash, type Hasher } from 'valsem/extend';
 
 class Money {
   constructor(readonly amount: number, readonly currency: string) {}
@@ -76,14 +80,15 @@ data, did not cover the class — and nothing said so. Replace it with
 the field: the hash valsem computes is its own to cache, and the symbol
 it caches it under is no longer exported.
 
-For third-party types you cannot edit, register handlers globally — the same
-two tiers, so the hash is optional:
+For third-party types you cannot edit, register handlers globally with
+`registerType` — the same two tiers, so the hash is optional:
 
 ```ts
-import { deepEqual, deepHash } from 'valsem';
+import { deepHash } from 'valsem';
+import { registerType } from 'valsem/extend';
 
 // A value: comparable, hashable, internable — under any hasher.
-deepEqual.register(
+registerType(
   Money,
   (a, b) => a.amount === b.amount && a.currency === b.currency,
   (m, hasher) => deepHash([m.amount, m.currency], hasher),
@@ -92,7 +97,7 @@ deepEqual.register(
 // registration, for the same reason a precomputed [hashCode] is.
 
 // Comparable only — deepEqual by content; deepHash and intern still refuse it.
-deepEqual.register(Legacy, (a, b) => a.id === b.id);
+registerType(Legacy, (a, b) => a.id === b.id);
 ```
 
 **A value's registration is fixed.** Once a type is registered with a hash,
@@ -101,7 +106,7 @@ canonical instances were hashed and pooled by the first pair, so a
 replacement would make equality depend on when a value was interned. Register
 each type once, next to its class. A comparable-only registration has no such
 history and may be replaced, or upgraded to a value. The mutable built-ins (`Date`,
-`RegExp`, `Map`, `Set`, the TypedArrays) accept an equality only; `register`
+`RegExp`, `Map`, `Set`, the TypedArrays) accept an equality only; `registerType`
 refuses a hash for them, since a hash would declare them immutable — see
 [the mutable boundary](/guide/boundary#the-contained-escape-hatch).
 
@@ -127,7 +132,7 @@ per-class `InternPool`, route construction through it, and mark the type
 `[interned]` so every walk recognises its instances as canonical in O(1):
 
 ```ts
-import { createInternPool, equals, hash, interned, mix, type Hasher } from 'valsem';
+import { createInternPool, equals, hash, interned, mix, type Hasher } from 'valsem/extend';
 
 const pool = createInternPool<Point>();
 

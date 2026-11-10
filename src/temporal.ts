@@ -22,7 +22,7 @@
 // it, and Temporal does not need it.
 // ---------------------------------------------------------------------------
 
-import { deepEqual } from './deep-equal.js';
+import { registerType } from './deep-equal.js';
 import type { Hasher } from './hasher.js';
 
 /** The Temporal types this module knows about, in registration order. */
@@ -145,7 +145,7 @@ export function registerTemporal(): void {
     // Registering a hash declares immutability, which Temporal values have:
     // accessors only, no mutators — so `intern` pools them as canonical
     // `===` instances.
-    deepEqual.register(ctor as unknown as Function & { prototype: TemporalValue }, equalsFn, hashFn);
+    registerType(ctor as unknown as Function & { prototype: TemporalValue }, equalsFn, hashFn);
   }
 
   registered = true;

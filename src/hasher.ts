@@ -251,9 +251,14 @@ export function _isActive(hasher: Hasher): boolean {
  * equal values interned afterwards would land in different buckets — two
  * canonical instances for one value).
  *
+ * Process-wide, so the application's to call, once, at startup: a library
+ * that uses valsem shares the copy with code it has not read, and never
+ * calls this (D16).
+ *
  * @example
  * ```ts
- * import { configureHasher, getHashSeed, type Hasher } from 'valsem';
+ * import { configureHasher, type Hasher } from 'valsem';
+ * import { getHashSeed } from 'valsem/extend';
  * const key = getHashSeed();
  * const sip: Hasher = { string: (s) => sipHash(key, s), number: (n) => sipHashNum(key, n) };
  * configureHasher(sip); // before any intern()/deepHash()

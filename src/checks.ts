@@ -24,6 +24,10 @@ let freezing = true;
  * only" — `fastEqual` then trusts its arguments. The checks are cheap (a property read and a cache probe), so
  * the reason to skip them is principle, not speed: a skipped check turns a
  * caught mistake into a silent wrong answer at that call site.
+ *
+ * Process-wide, so the application's to call, once, at startup: a library
+ * that uses valsem shares the copy with code it has not read, and never
+ * calls this (D16).
  */
 export function skipChecks(): void {
   checks = false;
@@ -40,6 +44,10 @@ export function skipChecks(): void {
  * production if canonical arrays sit on a hot path. Collections and value
  * types keep freezing their own instances (they are objects, it costs
  * nothing, and it protects their cached hash).
+ *
+ * Process-wide, so the application's to call, once, at startup: a library
+ * that uses valsem shares the copy with code it has not read, and never
+ * calls this (D16).
  */
 export function skipFreezing(): void {
   freezing = false;

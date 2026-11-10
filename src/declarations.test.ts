@@ -56,8 +56,8 @@ describe('the published declarations, as a consumer compiles them', () => {
     const diagnostics = compileConsumer(
       declarations,
       `
-      import { ValueList, DraftOrderedMap, toDraft } from '/published/index.js';
-      import { DRAFT_STATE } from '/published/draft.js';
+      import { ValueList, DraftOrderedMap } from '/published/index.js';
+      import { DRAFT_STATE, toDraft } from '/published/draft.js';
       // @ts-expect-error ListState.overlay is internal
       export type ListOverlay = ReturnType<ValueList<number>[typeof toDraft]>['overlay'];
       // @ts-expect-error OrderedMapState.ops is internal
@@ -93,18 +93,20 @@ describe('the published declarations, as a consumer compiles them', () => {
   // `stripInternal` keeps what is tagged `@internal` out of the declarations. A
   // tag on something they still need (a re-export, a helper type a public type
   // is spelled with) breaks every consumer's build and none of ours, so all
-  // four entry points are compiled here, not only the one the suites above use.
-  it('all four entry points compile without what was stripped', () => {
+  // five entry points are compiled here, not only the one the suites above use.
+  it('all five entry points compile without what was stripped', () => {
     const diagnostics = compileConsumer(
       declarations,
       `
       import * as valsem from '/published/index.js';
       import { registerTemporal } from '/published/temporal.js';
       import { defineRecordField, mutableBuiltinReason } from '/published/binding.js';
+      import { equals, hash, interned, registerType, createInternPool, mix, getHashSeed, type InternPool, type Hasher } from '/published/extend.js';
       import { DRAFT_STATE, stateOf, createDraftState, snapshotOf, type DraftState, type Scope } from '/published/draft.js';
 
-      export const all = [valsem, registerTemporal, defineRecordField, mutableBuiltinReason, DRAFT_STATE, stateOf, createDraftState, snapshotOf];
-      export type Kit = [DraftState, Scope, valsem.Draft<{ a: number[] }>, valsem.Undraft<unknown>];
+      export const all = [valsem, registerTemporal, defineRecordField, mutableBuiltinReason, DRAFT_STATE, stateOf, createDraftState, snapshotOf,
+        equals, hash, interned, registerType, createInternPool, mix, getHashSeed];
+      export type Kit = [DraftState, Scope, InternPool<object>, Hasher, valsem.Draft<{ a: number[] }>, valsem.Undraft<unknown>];
       export const curried = valsem.produce((d: { n: number }) => void d.n++);
       `,
     );
@@ -133,9 +135,9 @@ describe('the published declarations, as a consumer compiles them', () => {
       // @ts-expect-error
       list.splice(0, 1);
       // @ts-expect-error
-      list.insert(0, 2);
+      list.insertAt(0, 2);
       // @ts-expect-error
-      list.remove(0);
+      list.removeAt(0);
       // @ts-expect-error
       list.setMany([[0, 2]]);
       // @ts-expect-error
@@ -145,6 +147,8 @@ describe('the published declarations, as a consumer compiles them', () => {
       map.set('b', 2);
       // @ts-expect-error
       map.delete('a');
+      // @ts-expect-error
+      map.update('a', (n) => (n ?? 0) + 1);
       const set = ValueSet.of(1);
       // @ts-expect-error
       set.add(2);
@@ -164,12 +168,15 @@ describe('the published declarations, as a consumer compiles them', () => {
       omap.delete('a');
       // @ts-expect-error
       omap.insertAt(0, 'b', 2);
+      // @ts-expect-error
+      omap.update('a', (n) => (n ?? 0) + 1);
       // And the copying names compile, chained, since each returns the value.
-      list.pushed(2).popped().with(0, 3).toSpliced(0, 1).inserted(0, 4).removed(0).shifted().unshifted(5);
-      map.with('b', 2).deleted('a');
+      list.pushed(2).popped().with(0, 3).toSpliced(0, 1).insertedAt(0, 4).removedAt(0).shifted().unshifted(5);
+      map.with('b', 2).deleted('a').updated('b', (n) => (n ?? 0) + 1).filter((n) => n > 1).mapValues(String);
+      list.concat([6, 7]).concat(new Set([8]));
       set.added(2).deleted(1);
       oset.added(2).deleted(1).insertedAt(0, 3);
-      omap.with('b', 2).deleted('a').insertedAt(0, 'c', 3);
+      omap.with('b', 2).deleted('a').insertedAt(0, 'c', 3).updated('c', (n) => (n ?? 0) + 1).filter((n) => n > 1).mapValues(String);
       `,
     );
     expect(diagnostics).toEqual([]);

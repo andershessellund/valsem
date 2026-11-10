@@ -36,6 +36,10 @@
       "types": "./dist/binding.d.ts",
       "default": "./dist/binding.js"
     },
+    "./extend": {
+      "types": "./dist/extend.d.ts",
+      "default": "./dist/extend.js"
+    },
     "./draft": {
       "types": "./dist/draft.d.ts",
       "default": "./dist/draft.js"

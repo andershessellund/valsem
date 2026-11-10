@@ -303,3 +303,52 @@ describe('OrderedMap.from reads entries as new Map does', () => {
     expect(() => OrderedMap.from(['ab'] as unknown as [string, string][])).toThrow(/is not an entry object/);
   });
 });
+
+describe('OrderedMap — the functional reads (D70)', () => {
+  const m = OrderedMap.from<string, number>([['a', 1], ['b', 2], ['c', 3]]);
+
+  it('filter keeps the entries fn accepts, and is this when it keeps them all', () => {
+    expect(m.filter((v) => v > 1)).toBe(OrderedMap.from([['b', 2], ['c', 3]]));
+    expect(m.filter((_, k) => k !== 'b')).toBe(OrderedMap.from([['a', 1], ['c', 3]]));
+    expect(m.filter(() => true)).toBe(m);
+    expect(m.filter(() => false)).toBe(OrderedMap.empty());
+  });
+
+  it('mapValues keeps the keys, in order, and is this when nothing changes', () => {
+    expect(m.mapValues((v, k) => k + v)).toBe(OrderedMap.from([['a', 'a1'], ['b', 'b2'], ['c', 'c3']]));
+    expect(m.mapValues((v) => v)).toBe(m);
+    expect(m.mapValues((v) => ({ n: v })).get('a')).toBe(m.mapValues((v) => ({ n: v })).get('a')); // results are interned on entry
+  });
+
+  it('some, every and reduce see (value, key, map)', () => {
+    expect(m.some((v, k, self) => self === m && k === 'c' && v === 3)).toBe(true);
+    expect(m.some((v) => v > 3)).toBe(false);
+    expect(m.every((v) => v > 0)).toBe(true);
+    expect(m.every((v) => v > 1)).toBe(false);
+    expect(OrderedMap.empty<string, number>().every(() => false)).toBe(true);
+    expect(m.reduce((acc, v, k, self) => acc + v + (self === m ? k.length : 0), 0)).toBe(9);
+    expect(OrderedMap.empty<string, number>().reduce((acc) => acc, 'seed')).toBe('seed');
+  });
+
+  it('reduce requires its initial value: an entry is a pair, so there is no first value to fold from', () => {
+    const loose = m as unknown as { reduce(fn: (a: number, b: number) => number): number };
+    expect(() => loose.reduce((a, b) => a + b)).toThrow(/OrderedMap\.reduce: an initial value is required/);
+    expect(() => loose.reduce((a, b) => a + b)).toThrow(TypeError);
+  });
+
+  it('thisArg is passed to the callbacks that take one', () => {
+    const ctx = { min: 2 };
+    function atLeast(this: { min: number }, v: number): boolean {
+      return v >= this.min;
+    }
+    expect(m.filter(atLeast, ctx).size).toBe(2);
+    expect(m.some(atLeast, ctx)).toBe(true);
+    expect(m.every(atLeast, ctx)).toBe(false);
+    expect(m.mapValues(atLeast, ctx).get('a')).toBe(false);
+  });
+
+  it('filter and mapValues keep the order', () => {
+    expect([...m.filter((v) => v !== 2).keys()]).toEqual(['a', 'c']);
+    expect([...m.mapValues((v) => -v)]).toEqual([['a', -1], ['b', -2], ['c', -3]]);
+  });
+});

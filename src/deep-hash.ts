@@ -265,7 +265,7 @@ function unhashableMessage(obj: object): string {
  *
  * Handles: primitives (including `NaN`, `+0`/`-0`, `bigint`), plain objects
  * (key-order-independent), arrays, and any class implementing `[hash]` or
- * registered via `deepEqual.register()`.
+ * registered via `registerType()`.
  *
  * Symbols are values: a registered symbol hashes by its name, a unique one
  * by an identity assigned on first sight. Symbol-keyed record entries count

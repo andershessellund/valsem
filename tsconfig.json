@@ -28,7 +28,7 @@
     // the `_`-prefixed test hooks and cross-module plumbing, which CONTRIBUTING
     // already says are not API. A tag on something the declarations still
     // need (a re-export, a helper type a public type is spelled with) breaks
-    // every consumer's build, not ours: `declarations.test.ts` compiles all four
+    // every consumer's build, not ours: `declarations.test.ts` compiles all five
     // entry points against the emitted declarations to catch exactly that.
     "stripInternal": true,
     "declarationMap": true,

@@ -8,9 +8,9 @@
 // review, finding 6). The fix coerced as Array does, ToIntegerOrInfinity.
 // Second (D45): positional arguments are CHECKED, by what they name.
 //
-//   - an ELEMENT (`get`, `with`, `removed`; `set`, `remove` on the draft): an
+//   - an ELEMENT (`get`, `with`, `removedAt`; `set`, `removeAt` on the draft): an
 //     integer in [0, length), or a RangeError. No element, no answer;
-//   - an INSERTION POINT (`inserted`, `insertedAt`, `toSpliced`'s start): an integer
+//   - an INSERTION POINT (`insertedAt`, `toSpliced`'s start): an integer
 //     in [0, length], not counted from the end, or a RangeError. An edit
 //     lands in canonical state, so the place must exist, and -1 (an
 //     `indexOf` miss) must not mean "the last one";
@@ -190,15 +190,15 @@ describe('ValueList: an edit names a place that exists', () => {
 
   it('insert takes [0, length]; remove takes an element', () => {
     const list = ValueList.from(range(5));
-    expect([...list.inserted(0, 9)]).toEqual([9, 0, 1, 2, 3, 4]);
-    expect([...list.inserted(5, 9)]).toEqual([0, 1, 2, 3, 4, 9]);
-    expect([...list.removed(0)]).toEqual([1, 2, 3, 4]);
-    expect([...list.removed(4)]).toEqual([0, 1, 2, 3]);
-    for (const bad of [6, 99, -1, Infinity]) expect(() => list.inserted(bad, 9)).toThrow(RangeError);
-    for (const bad of [5, 99, -1, Infinity]) expect(() => list.removed(bad)).toThrow(RangeError);
+    expect([...list.insertedAt(0, 9)]).toEqual([9, 0, 1, 2, 3, 4]);
+    expect([...list.insertedAt(5, 9)]).toEqual([0, 1, 2, 3, 4, 9]);
+    expect([...list.removedAt(0)]).toEqual([1, 2, 3, 4]);
+    expect([...list.removedAt(4)]).toEqual([0, 1, 2, 3]);
+    for (const bad of [6, 99, -1, Infinity]) expect(() => list.insertedAt(bad, 9)).toThrow(RangeError);
+    for (const bad of [5, 99, -1, Infinity]) expect(() => list.removedAt(bad)).toThrow(RangeError);
     // The bug this is for: an indexOf miss is -1, which used to count from
     // the end and delete the last element.
-    expect(() => list.removed(list.toArray().indexOf(42))).toThrow('ValueList.removed: index -1 out of range [0, 5)');
+    expect(() => list.removedAt(list.toArray().indexOf(42))).toThrow('ValueList.removedAt: index -1 out of range [0, 5)');
     expect(() => list.toSpliced(list.toArray().indexOf(42), 1)).toThrow('ValueList.toSpliced: start -1 out of range [0, 5]');
   });
 
@@ -211,8 +211,8 @@ describe('ValueList: an edit names a place that exists', () => {
           () => list.toSpliced!(bad, 1),
           () => list.toSpliced!(0, bad),
           () => list.toSpliced!(0, bad, [9]),
-          () => list.inserted!(bad, 9),
-          () => list.removed!(bad),
+          () => list.insertedAt!(bad, 9),
+          () => list.removedAt!(bad),
           () => list.with!(bad, 9),
           () => list._setMany!([[bad, 9]]),
         ]) {
@@ -226,8 +226,8 @@ describe('ValueList: an edit names a place that exists', () => {
   it('a start is required: toSpliced() cuts nowhere', () => {
     const list = ValueList.from(range(5)) as unknown as Record<string, Loose>;
     expect(() => list.toSpliced!()).toThrow(/ValueList\.toSpliced: start must be an integer, got undefined/);
-    expect(() => list.inserted!()).toThrow(/ValueList\.inserted: index must be an integer, got undefined/);
-    expect(() => list.removed!()).toThrow(/ValueList\.removed: index must be an integer, got undefined/);
+    expect(() => list.insertedAt!()).toThrow(/ValueList\.insertedAt: index must be an integer, got undefined/);
+    expect(() => list.removedAt!()).toThrow(/ValueList\.removedAt: index must be an integer, got undefined/);
   });
 });
 

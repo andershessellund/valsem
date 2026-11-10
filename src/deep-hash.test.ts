@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { deepHash } from './deep-hash.js';
-import { deepEqual, equals, hash } from './deep-equal.js';
+import { deepEqual, equals, hash, registerType } from './deep-equal.js';
 import type { Hasher } from './hasher.js';
 import { intern } from './intern.js';
 import { Temporal } from './temporal.test-helpers.js';
@@ -203,7 +203,7 @@ describe('deepHash', () => {
         readonly y: number,
       ) {}
     }
-    deepEqual.register(
+    registerType(
       Vec2,
       (a, b) => a.x === b.x && a.y === b.y,
       (v, hasher) => hasher.number(v.x * 31 + v.y),
@@ -229,7 +229,7 @@ describe('deepHash', () => {
         return other instanceof Token && this.value === other.value;
       }
     }
-    deepEqual.register(
+    registerType(
       Token,
       () => false,
       (_t, hasher) => (void hasher, 999),

@@ -53,11 +53,14 @@ m1.get('sp');                      // 5
 Every edit on a value is a copying one, and its name says so: it is named
 for its **result**. `with(i, v)` and `with(k, v)` are the list or map with
 that entry, `Array.prototype.with`'s name for the copying `set`; the keyed
-additions and removals are `added(v)`, `deleted(k)`, `deleted(v)` and
-`removed(i)`; and the sequence edits are the past participle of the verb the
-draft uses — `pushed`, `popped`, `shifted`, `unshifted`, `inserted`,
-`insertedAt` — with `toSpliced`, `toSorted` and `toReversed` spelled as
-`Array` spells its copies. The imperative verbs belong to what mutates: the drafts inside
+additions and removals are `added(v)`, `deleted(k)` and `deleted(v)`; a map's
+`updated(k, fn)` is `with(k, fn(get(k)))`; and the sequence edits are the
+past participle of the verb the draft uses — `pushed`, `popped`, `shifted`,
+`unshifted`, `insertedAt`, `removedAt` — with `toSpliced`, `toSorted` and
+`toReversed` spelled as `Array` spells its copies. An edit that takes a
+position and is not one of `Array`'s names ends in `At`, on the list and on
+the ordered collections alike, so `list.removedAt(3)` cannot be read as
+"without the element 3", which is what `deleted(3)` means on a set. The imperative verbs belong to what mutates: the drafts inside
 `produce` (`push`, `set`, `add`, `delete`, `splice`, …) and
 `HashMap`/`HashSet`. So a value has no method named `push`, `list.push(x)` is
 a type error rather than a silent no-op, and `list.pushed(x);` as a statement
@@ -71,17 +74,18 @@ them live ([the produce guide](./produce) has the details).
 | The draft edits in place | The value returns the result |
 | --- | --- |
 | `set(i, v)`, `set(k, v)`, `add(v)` | `with(i, v)`, `with(k, v)`, `added(v)` |
-| `delete(k)`, `delete(v)`, `remove(i)` | `deleted(k)`, `deleted(v)`, `removed(i)` |
+| `delete(k)`, `delete(v)`, `removeAt(i)` | `deleted(k)`, `deleted(v)`, `removedAt(i)` |
+| `update(k, fn)`, on the map drafts | `updated(k, fn)` |
 | `push(…v)`, `pop()` | `pushed(…v)`, `popped()` — the element is `last()` |
 | `unshift(…v)`, `shift()` | `unshifted(…v)`, `shifted()` — the element is `first()` |
-| `insert(i, v)`, `insertAt(i, …)` | `inserted(i, v)`, `insertedAt(i, …)` |
+| `insertAt(i, v)`, `insertAt(i, …)` | `insertedAt(i, v)`, `insertedAt(i, …)` |
 | `splice(…)` | `toSpliced(…)` |
 | `clear()`, on the map and set drafts | `ValueMap.empty()`, `ValueSet.empty()`, … |
 
 **A position is checked.** What happens to an index depends on what it
 names, and what fails throws a `RangeError` before anything is touched:
 
-- **An element** (`get`, `with`, `removed`) must exist: an integer in
+- **An element** (`get`, `with`, `removedAt`) must exist: an integer in
   `[0, length)`. `list.get(i)` is what `arr[i]` is to an array, with its type
   made true: it returns a `T`, not a `T | undefined`, because a missing
   element throws instead of coming back as an `undefined` typed `T`. A loop
@@ -93,7 +97,7 @@ names, and what fails throws a `RangeError` before anything is touched:
   `undefined`. It is the read to probe with. The ordered collections have
   `at` alone; their strict reads are their lists', `m.keyList.get(i)` and
   `s.valueList.get(i)`.
-- **An insertion point** (`inserted`, `insertedAt`, `toSpliced`'s `start`) is an
+- **An insertion point** (`insertedAt`, `toSpliced`'s `start`) is an
   integer in `[0, length]`, never counted from the end, so the `-1` of an
   `indexOf` miss cannot quietly mean "the last one".
 - **A range** has an answer wherever it points, the part of it that exists.
@@ -117,7 +121,7 @@ list.get(1);                     // 'b', typed string
 list.get(3);                     // RangeError: ValueList.get: index 3 out of range [0, 3)
 list.at(-1);                     // 'c', typed string | undefined
 list.at(3);                      // undefined
-list.removed(['a'].indexOf('z')); // RangeError: ValueList.removed: index -1 out of range [0, 3)
+list.removedAt(['a'].indexOf('z')); // RangeError: ValueList.removedAt: index -1 out of range [0, 3)
 list.slice(-2).toArray();        // ['b', 'c']: a range clamps, as Array's does
 list.slice(0, 10).length;        // 3
 ```
@@ -156,10 +160,18 @@ mutable copy with `new Map(m)` / `new Set(s)` when you need one.
 `reduce`, `some` and `every`, whose callbacks get what their `forEach`
 passes, `(value, value, set)`; a `reduce` given no initial value folds from
 the first element on a `ValueList` or an `OrderedSet`, as `Array`'s, and
-is a `TypeError` on a `ValueSet`, whose members have no first. What they
+is a `TypeError` on a `ValueSet`, whose members have no first. `ValueMap`
+and `OrderedMap` have `filter`, `some`, `every` and `reduce`, whose callbacks
+get `(value, key, map)` as `forEach`'s do, and `mapValues`, which keeps the
+keys and replaces each value: there is no `map` on a map, since it could
+mean the values or the entries, and `mapValues` says which. A map's `reduce`
+always takes its initial value, an entry being a pair with no first value to
+fold from. What they
 build is canonical like any other
 collection (`list.filter(() => true) === list`), and a set's `map` merges
-equal results. `toSorted(compare?)` and `toReversed()` are `Array`'s too (a
+equal results. `concat` takes another `ValueList`, whose tree the result
+shares, or any iterable of elements, as the set algebra does
+(`list.concat([4, 5])`); a string is refused. `toSorted(compare?)` and `toReversed()` are `Array`'s too (a
 stable sort, `undefined` last, by string with no comparator), and a list
 already in order comes back as itself. `with` and `toSpliced` are `Array`'s
 names for the copying `set` and `splice`, with valsem's positions rather than
@@ -171,8 +183,8 @@ read with `get(i)` (a size-table walk; sequential reads stay in one leaf),
 iterate in index order, and take the interned frozen snapshot with
 `toArray()` — explicitly O(n), weakly memoized, with `toArray()[i] === get(i)`
 always. Because a chunk boundary is a property of the elements beside it,
-the tree's shape is a function of the content alone, so `inserted`,
-`removed`, `toSpliced`, `slice` and `concat` are O(log n) expected (they
+the tree's shape is a function of the content alone, so `insertedAt`,
+`removedAt`, `toSpliced`, `slice` and `concat` are O(log n) expected (they
 disturb only the chunks around the edit), a draft's finalize applies its
 point edits in one bottom-up pass, and `ValueList.diff(a, b)` returns the changed regions between *any*
 two lists — a refetched one included — in O(c log n) expected, by skipping
@@ -278,11 +290,11 @@ deliberately does not.
 (~1 ns per character), and valsem hashes a string value every time the
 record holding it is hashed from raw — at the boundary, and on raw-key
 lookups. Wrap a long text field once, at the boundary, with
-`InternedString.for(text)`: the hash is paid once per distinct text for the
+`InternedString.from(text)`: the hash is paid once per distinct text for the
 life of the value, equal texts are one `===` instance, and every later hash
 of the record reaches it through a cached lookup. It stringifies as the text
 (`toJSON`), so a state holding one serialises exactly as one holding
-strings; the round trip back is `InternedString.for` at the boundary. The
+strings; the round trip back is `InternedString.from` at the boundary. The
 price is an object where a primitive was: reads go through `.value`, and
 `typeof` says `'object'`. Ids, names and short strings do not need it —
 hashing them costs less than the wrapper.

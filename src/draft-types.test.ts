@@ -94,12 +94,12 @@ void [
 
 describe('produce — the types describe the runtime', () => {
   it('an opaque leaf is itself inside a recipe: methods work, fields are readonly, the slot is writable', () => {
-    const base = intern({ at: ValueDate.from(0), name: InternedString.for('x'), price: new Money(1) });
+    const base = intern({ at: ValueDate.from(0), name: InternedString.from('x'), price: new Money(1) });
     const next = produce(base, (d) => {
       expect(d.at).toBe(base.at); // the canonical value itself, not a proxy
       expect(d.at.toDate().getTime()).toBe(0);
       d.at = ValueDate.from(1000);
-      d.name = InternedString.for(d.name.value + '!');
+      d.name = InternedString.from(d.name.value + '!');
       d.price = d.price.plus(1);
       // @ts-expect-error — a readonly field of an opaque leaf
       expect(() => (d.at.epochMs = 5)).toThrow(TypeError); // and frozen at runtime
@@ -110,7 +110,7 @@ describe('produce — the types describe the runtime', () => {
       const snap: { at: ValueDate; name: InternedString; price: Money } = current(d);
       expect(snap.at).toBe(ValueDate.from(1000));
     });
-    expect(next).toBe(intern({ at: ValueDate.from(1000), name: InternedString.for('x!'), price: new Money(2) }));
+    expect(next).toBe(intern({ at: ValueDate.from(1000), name: InternedString.from('x!'), price: new Money(2) }));
   });
 
   it('a record with an any-typed field drafts and stays writable', () => {

@@ -95,17 +95,17 @@ value leaves behind until then is a cleared `WeakRef` and a slot of index,
 not the value.
 
 ```ts
-import { deepEqual, internHash } from 'valsem';
+import { deepEqual, deepHash } from 'valsem';
 
 deepEqual(a, { city: 'Aarhus', zip: '8000' });         // true — walks the raw side
 deepEqual(a, intern({ city: 'Odense', zip: '5000' })); // false in O(1) — both canonical
-internHash(a);                                          // cached hash, no traversal
+deepHash(a);                                            // cached hash, no traversal
 ```
 
 **What can be interned.** Primitives are returned unchanged, except `-0`, which is stored as `+0` (the two are one value). Plain objects and
 arrays are interned recursively. A class instance is interned when it is a
 **value** — it has an equality *and a hash*, either `[equals]` + `[hash]`
-on the class or a `deepEqual.register(Type, equalsFn, hashFn)` pair (which is
+on the class or a `registerType(Type, equalsFn, hashFn)` pair (which is
 how `valsem/temporal` makes Temporal values canonical): the hash declares that
 instances never change, and `intern` pools equal ones into one `===` instance,
 unfrozen. Auto-interning types (the collections, and classes built on

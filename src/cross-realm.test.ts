@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 import { describe, it, expect } from 'vitest';
 import { createContext, runInContext } from 'node:vm';
-import { deepEqual, interned } from './deep-equal.js';
+import { deepEqual, interned, registerType } from './deep-equal.js';
 import { deepHash } from './deep-hash.js';
 import { intern, isCanonical } from './intern.js';
 import { produce } from './produce.js';
@@ -104,7 +104,7 @@ describe('a registered hash handler is normalised like [hash]', () => {
     class K {
       constructor(readonly n: number) {}
     }
-    deepEqual.register(K, (a, b) => a.n === b.n, (_k, hasher) => (void hasher, -8.5)); // ignores the hasher on purpose: a constant, read as a uint32
+    registerType(K, (a, b) => a.n === b.n, (_k, hasher) => (void hasher, -8.5)); // ignores the hasher on purpose: a constant, read as a uint32
     const h = deepHash(new K(1));
     expect(Number.isInteger(h) && h >= 0 && h <= 0xffffffff).toBe(true);
     expect(h).toBe(-8.5 >>> 0);

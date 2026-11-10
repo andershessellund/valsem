@@ -94,8 +94,8 @@ describe('ValueList inside produce — the chunked draft', () => {
               case 'push': mirror.push(o.v); d.push(o.v); break;
               case 'pop': mirror.pop(); d.pop(); break;
               case 'splice': { const i = o.i % (n + 1); mirror.splice(i, o.del, ...o.items); d.splice(i, o.del, ...o.items); } break;
-              case 'insert': { const i = o.i % (n + 1); mirror.splice(i, 0, o.v); expect(d.insert(i, o.v)).toBe(d); } break;
-              case 'remove': if (n === 0) break; { const i = o.i % n; expect(d.remove(i)).toBe(mirror.splice(i, 1)[0]); } break;
+              case 'insert': { const i = o.i % (n + 1); mirror.splice(i, 0, o.v); expect(d.insertAt(i, o.v)).toBe(d); } break;
+              case 'remove': if (n === 0) break; { const i = o.i % n; expect(d.removeAt(i)).toBe(mirror.splice(i, 1)[0]); } break;
               case 'shift': expect(d.shift()).toBe(mirror.shift()); break;
               case 'unshift': expect(d.unshift(...o.items)).toBe(mirror.unshift(...o.items)); break;
             }
@@ -124,7 +124,7 @@ describe('DraftList — what a removal verb hands back, and the list at scale', 
     });
     expect(next).toBe(intern({ todos: ValueList.of({ id: 2, done: false }), done: ValueList.of({ id: 1, done: true }) }));
     const [r, patches, inverse] = produceWithPatches(todos(), (d) => {
-      const t = d.todos.remove(1);
+      const t = d.todos.removeAt(1);
       t.done = true;
       d.done.push(t);
       const u = d.todos.pop()!;
@@ -157,13 +157,14 @@ describe('DraftList — what a removal verb hands back, and the list at scale', 
     expect(performance.now() - t).toBeLessThan(2000); // quadratic, this took ~20 s
   });
 
-  it("an empty list's concat takes a ValueList, or a draft standing for its value, and nothing else", () => {
+  it("an empty list's concat takes a ValueList, or a draft standing for its value", () => {
     produce(intern({ a: ValueList.empty<number>(), b: ValueList.of(1) }), (d) => {
       const r = d.a.concat(d.b as unknown as ValueList<number>);
       expect(isDraft(r)).toBe(false);
       expect(r).toBe(ValueList.of(1));
       d.b.push(2);
       expect(d.a.concat(d.b as unknown as ValueList<number>)).toBe(ValueList.of(1, 2)); // the value it is right now
+      expect(d.b.concat([3, 4])).toBe(ValueList.of(1, 2, 3, 4)); // and any iterable of elements (D70)
     });
   });
 });

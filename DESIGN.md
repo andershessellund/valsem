@@ -50,10 +50,11 @@ not part of the model.
 
 | Subpath | Contents |
 | --- | --- |
-| `valsem` | the API: equality, hashing, interning, the collections, `produce`, `memoize`, the switches |
+| `valsem` | what an application calls: equality, hashing, interning, the collections, `produce`, `memoize`, the switches |
+| `valsem/extend` | what a module needs to *define* a value type: the protocol symbols, `registerType`, `createInternPool`, `mix`, `getHashSeed` (§5, §10.1); semver-covered |
 | `valsem/temporal` | side-effect import registering value semantics for the eight Temporal kinds (§5.3) |
 | `valsem/draft` | the toolkit for making a type draftable (§7.1); semver-covered |
-| `valsem/binding` | the two helpers a wire or storage binding needs (§10.1); semver-covered |
+| `valsem/binding` | the two helpers a wire or storage binding needs (§10.2); semver-covered |
 
 Ships as ES modules with declarations, dependency-free. Requires `WeakRef`
 and `globalThis.crypto`; uses `FinalizationRegistry`, `requestIdleCallback`
@@ -379,8 +380,9 @@ marks it `[interned]`, freezes it, and registers it.
   `===` makes and `deepEqual` does not, NaN (SameValueZero, as the pools
   compare) — after verifying both sides canonical while checks are on (a
   raw argument throws rather than yielding a silent `false`).
-- `internHash(v)`: the cached hash in O(1) for canonical objects, `deepHash`
-  otherwise. Pure.
+- `internHash(v)`, internal: the cached hash in O(1) for canonical objects,
+  `deepHash` otherwise. Pure. Not exported, since `deepHash` answers a
+  canonical object from the same cache (D69).
 
 ### 4.4 Freezing and the two switches
 
@@ -390,7 +392,10 @@ freeze their instances unconditionally; user value-type instances pooled
 through `intern` are not frozen. Two one-way,
 process-wide switches, read live and independent of the environment:
 `skipChecks()` stops the *canonical only* verification in `fastEqual`;
-`skipFreezing()` stops freezing canonical records and arrays. Drafts
+`skipFreezing()` stops freezing canonical records and arrays. Their scope is
+the copy of valsem, which is the process, so they are the application's to
+call and never a library's; the same holds for `configureHasher` and
+`configureLimits`. Drafts
 copy-on-write through a canonical whether or not it is frozen
 (`isImmutable` is "frozen or canonical"). Why: D16.
 
@@ -400,8 +405,8 @@ copy-on-write through a canonical whether or not it is frozen
 
 ### 5.1 The protocol
 
-The three value-protocol symbols, each `Symbol('valsem.<name>')` of this
-copy of valsem and of no other (D4); the fourth protocol symbol, `toDraft`,
+The three value-protocol symbols, exported from `valsem/extend` (D69), each
+`Symbol('valsem.<name>')` of this copy of valsem and of no other (D4); the fourth protocol symbol, `toDraft`,
 belongs to §7.1; the fifth, `hashCode`, is valsem's own and not exported:
 
 | Symbol | Tier | Shape |
@@ -411,8 +416,8 @@ belongs to §7.1; the fifth, `hashCode`, is valsem's own and not exported:
 | `hashCode` (internal) | **valsem's cache** of the value's hash under the active hasher | `[hashCode]: number`, written by valsem: a field on its own value types, a stamp on an instance `pool.intern` pooled (a class `intern` pooled is cached in the meta store). Read only on a class that has `[hash]`; a `[hashCode]` a class set itself, the declaration before 0.2, is refused (D26), and the symbol is not exported (D68) |
 | `interned` | **auto-interning type**: every instance canonical by construction | `[interned]: true`; requires a private constructor (D27) |
 
-The registry form for types you cannot edit: `deepEqual.register(Type,
-equalsFn)` makes it comparable; `deepEqual.register(Type, equalsFn, hashFn)`
+The registry form for types you cannot edit, also in `valsem/extend`:
+`registerType(Type, equalsFn)` makes it comparable; `registerType(Type, equalsFn, hashFn)`
 makes it a value, `hashFn` called as `hashFn(value, hasher)`; one declared
 with a single parameter is refused at registration. A value's registration
 is fixed: registering the type again
@@ -421,7 +426,7 @@ hashed and pooled by the first; a comparable-only registration may be
 replaced or upgraded (D26). Dispatch keys
 on the prototype's constructor. `register` refuses a hash for the mutable
 built-ins; an equality alone is accepted for them (the contained escape
-hatch: `deepEqual.register(Date, (a, b) => a.getTime() === b.getTime())`).
+hatch: `registerType(Date, (a, b) => a.getTime() === b.getTime())`).
 
 A class instance with `[equals]` alone is comparable and refused by every
 admitting operation with an error naming the missing hash.
@@ -486,16 +491,16 @@ and does not pretend to be (D29).
   `OrderedSet` carry the `ReadonlySet` read API. `new Map(m)` / `new
   Set(s)` for a mutable copy (D30).
 - **Copying edits, named for their result.** `with`, `pushed`, `popped`,
-  `shifted`, `unshifted`, `inserted`, `removed`, `toSpliced`, `added`,
-  `deleted` and `insertedAt` return the canonical successor; an unchanged
+  `shifted`, `unshifted`, `insertedAt`, `removedAt`, `toSpliced`, `added`,
+  `deleted` and `updated` return the canonical successor; an unchanged
   edit returns `this`. The imperative verbs (`set`, `push`, `add`, `delete`,
   …) are the drafts', which edit in place, so no value has one (D59).
 - **Checked positions.** A positional argument is checked by what it names,
   and fails with a `RangeError` before anything is touched. An *element*
-  (`get`, `with`, `removed`) is an integer in `[0, length)`, so `get` returns
+  (`get`, `with`, `removedAt`) is an integer in `[0, length)`, so `get` returns
   `T`, never `undefined` for "not there": `arr[i]` with its type made true.
   `at` is `Array.prototype.at`: a negative index from the end, and
-  `undefined` for no element (D56). An *insertion point* (`inserted`, `insertedAt`, `toSpliced`'s start) is
+  `undefined` for no element (D56). An *insertion point* (`insertedAt`, `toSpliced`'s start) is
   an integer in `[0, length]`, not counted from the end. A *range*
   has an answer wherever it points, the part that exists: `slice`'s bounds
   keep `Array`'s clamping whole, and `toSpliced`'s count is an amount, an
@@ -504,6 +509,11 @@ and does not pretend to be (D29).
   coercion is nowhere: `NaN`, `1.5` and `'2'` throw. `first()`/`last()`
   answer `undefined` when empty; keyed lookups are queries and a miss is an
   answer (D45).
+- **Functional reads that build values.** `ValueList` has `Array`'s; the
+  sets have `map`, `filter`, `reduce`, `some`, `every` (D54); the maps have
+  `filter`, `mapValues`, `reduce`, `some`, `every`, their callbacks getting
+  `(value, key, map)`, and `updated(key, fn)`, which is `with(key,
+  fn(get(key)))` (D70). A `filter` that keeps everything returns `this`.
 - **Explicit-stack iterators** extending the global `Iterator` where it
   exists, so the ES2025 helpers work (D6).
 - **Drafting** through `[toDraft]` (§7), with a mutable twin per class.
@@ -597,7 +607,8 @@ elements, and a cursor over a right context (the remainder of a list after
 a cut), re-chunk level by level until each level resynchronises with the
 right context's existing nodes, at which point the parent and everything
 after it are reused by pointer. `from`, `pushed`, `toSpliced`, `concat` and
-`slice` are all calls to it. `inserted`, `removed`, `shifted` and
+`slice` are all calls to it (`concat` builds a list from an iterable that
+is not one first, D70). `insertedAt`, `removedAt`, `shifted` and
 `unshifted` are splices. `with` is a path copy when no boundary flips, else
 a local re-chunk. `_setMany`, the drafts' finalize, applies a batch of point
 edits in one bottom-up pass. The bounds are expected on
@@ -669,7 +680,7 @@ the memoized function. Why: D14.
 
 ### 6.7 `InternedString`, `ValueDate`, `RawArray`
 
-`InternedString.for(text)` is an opaque, pooled wrapper holding `value` (the
+`InternedString.from(text)` is an opaque, pooled wrapper holding `value` (the
 string, public because a primitive is genuinely immutable) and its hash,
 paid once per distinct text; `toJSON` returns the text (D17).
 
@@ -1026,14 +1037,22 @@ Why: D19, D28. Tested in `src/hardening.test.ts` and `src/adversarial.test.ts`.
 
 ## 10. Package layout
 
-### 10.1 `valsem/binding`
+### 10.1 `valsem/extend`
+
+The definition surface: `equals`, `hash`, `interned`, `registerType`,
+`createInternPool`, `mix`, `getHashSeed`, and the `InternPool` and `Hasher`
+types. The main entry point exports none of them, nor `toDraft` (which is
+`valsem/draft`'s): it holds what an application calls, and a type's
+definition is written in a few modules, or in a library (D69).
+
+### 10.2 `valsem/binding`
 
 The stable surface for binding authors: `defineRecordField(record, key,
 value)`, the `__proto__`-safe record-field writer; `mutableBuiltinReason(
 ctor)`, the shared rejection text. No "is this type a value" probe exists;
 a binding calls `intern` and learns the answer per instance (D41).
 
-### 10.2 Module map
+### 10.3 Module map
 
 | Module | Responsibility |
 | --- | --- |
@@ -1055,7 +1074,7 @@ a binding calls `intern` and learns the answer per instance (D41).
 | `produce.ts` | record and array proxies, array finalize with transitions, `produce`, `produceWithPatches`, `applyPatches`, the types |
 | `current.ts` | `current`, `original`, the core snapshots |
 | `draft-map.ts`, `draft-set.ts`, `draft-list.ts`, `draft-ordered-map.ts`, `draft-ordered-set.ts` | the collection drafts |
-| `temporal.ts`, `binding.ts`, `draft.ts`, `index.ts` | the entry points |
+| `temporal.ts`, `binding.ts`, `draft.ts`, `extend.ts`, `index.ts` | the entry points |
 
 Dependency direction: `shared`, `hasher`, `limits`, `checks` and
 `deep-equal` are leaves; `deep-hash` and `intern-pool` sit over them as
@@ -1064,7 +1083,7 @@ independent siblings; `intern` is the first module to import both; then
 `produce` never imports a collection; a collection never imports `produce`
 (it imports `draft-core` and its own draft module).
 
-### 10.3 Tests and benchmarks
+### 10.4 Tests and benchmarks
 
 Vitest suites sit beside the modules. Property suites (fast-check):
 `property-laws` (companion invariant, intern idempotence over shuffled
@@ -1081,7 +1100,7 @@ two-copies behaviour (D4).
 D20. `scripts/experiments/` holds the one-off experiments behind decisions
 (pool cleanup strategies, retention regimes, the in-job `WeakRef` effect).
 
-### 10.4 Documentation
+### 10.5 Documentation
 
 The guide is a VitePress site under `docs/` (`pnpm docs:build`, after
 `pnpm build`: the demo imports the compiled `dist/`), published to GitHub

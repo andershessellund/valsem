@@ -27,7 +27,7 @@ export class InternedString {
 
   /** The token keeps construction inside the class: from JavaScript, `new InternedString(s, h)` would mint an unpooled instance that claims to be canonical. */
   private constructor(token: symbol, value: string, hash: number) {
-    if (token !== INTERNAL) throw new TypeError('valsem: InternedString instances are created by InternedString.for()');
+    if (token !== INTERNAL) throw new TypeError('valsem: InternedString instances are created by InternedString.from()');
     this.value = value;
     this.#hash = hash;
     Object.freeze(this);
@@ -61,9 +61,9 @@ export class InternedString {
   }
 
   /** Canonical InternedString for `value`. */
-  static for(value: string): InternedString {
+  static from(value: string): InternedString {
     if (typeof value !== 'string') {
-      throw new TypeError(`InternedString.for: expected a string, got ${typeof value}`);
+      throw new TypeError(`InternedString.from: expected a string, got ${typeof value}`);
     }
     const hash = hashString(value);
     const found = pool.lookup(hash, c => c.value === value);
