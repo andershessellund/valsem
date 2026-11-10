@@ -78,7 +78,7 @@ If your application truly wants, say, Date-by-time equality, register an
 **equality alone**:
 
 ```ts
-deepEqual.register(Date, (a, b) => a.getTime() === b.getTime());
+registerType(Date, (a, b) => a.getTime() === b.getTime());
 ```
 
 That makes `deepEqual` answer by content for Dates — and that is all an

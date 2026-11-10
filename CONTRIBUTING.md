@@ -138,8 +138,8 @@ What a PR should contain:
 ## Versioning
 
 valsem follows [Semantic Versioning](https://semver.org). The public API is
-everything exported from `valsem`, `valsem/temporal`, `valsem/binding` and
-`valsem/draft`, with its documented behaviour and its TypeScript types.
+everything exported from `valsem`, `valsem/extend`, `valsem/temporal`,
+`valsem/binding` and `valsem/draft`, with its documented behaviour and its TypeScript types.
 
 Breaking, and therefore a major version:
 

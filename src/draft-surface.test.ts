@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // A draft offers what its value offers, and a value has no mutator's name.
 //
-// The drafts grew method by method, and drifted: DraftList had no `insert`,
-// `remove` or `forEach` (ValueList's own vocabulary) and no `shift`/`unshift`
+// The drafts grew method by method, and drifted: DraftList had no `insertAt`,
+// `removeAt` or `forEach` (ValueList's own vocabulary) and no `shift`/`unshift`
 // (which a plain array in the same recipe has), DraftSet had no `entries()`,
 // DraftOrderedMap no `valueAt()`. The first test is the one that would have
 // caught it: every method of a value class is on its draft, no exceptions.

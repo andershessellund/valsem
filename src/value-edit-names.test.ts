@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // D59: a value's edits are named for their result, the draft's for what they
 // do. The value has `with`, `pushed`, `popped`, `shifted`, `unshifted`,
-// `inserted`, `removed`, `toSpliced`, `added`, `deleted` and `insertedAt`;
-// the draft has `set`, `push`, `pop`, `shift`, `unshift`, `insert`, `remove`,
+// `insertedAt`, `removedAt`, `toSpliced`, `added`, `deleted` and `insertedAt`;
+// the draft has `set`, `push`, `pop`, `shift`, `unshift`, `insertAt`, `removeAt`,
 // `splice`, `add`, `delete` and `insertAt`. Each pair is one edit: the
 // value's method gives what the draft's verb leaves behind. That is the law
 // here, pair by pair.
@@ -26,8 +26,8 @@ describe('ValueList: the copying edit gives what the draft’s verb leaves behin
     ['popped / pop', list.popped(), produce(list, (d) => void d.pop())],
     ['shifted / shift', list.shifted(), produce(list, (d) => void d.shift())],
     ['unshifted / unshift', list.unshifted('y', 'z'), produce(list, (d) => void d.unshift('y', 'z'))],
-    ['inserted / insert', list.insertedAt(1, 'x'), produce(list, (d) => void d.insertAt(1, 'x'))],
-    ['removed / remove', list.removedAt(1), produce(list, (d) => void d.removeAt(1))],
+    ['insertedAt / insertAt', list.insertedAt(1, 'x'), produce(list, (d) => void d.insertAt(1, 'x'))],
+    ['removedAt / removeAt', list.removedAt(1), produce(list, (d) => void d.removeAt(1))],
     ['toSpliced / splice', list.toSpliced(1, 1, 'x', 'y'), produce(list, (d) => void d.splice(1, 1, 'x', 'y'))],
     ['toSpliced(start) / splice(start)', list.toSpliced(1), produce(list, (d) => void d.splice(1))],
   ])('%s', (_, byValue, byDraft) => {

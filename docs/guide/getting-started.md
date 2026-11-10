@@ -48,8 +48,8 @@ valsem provides value semantics as a small, composable toolkit:
   `OrderedMap` / `OrderedSet`, `ValueDate`, `InternedString` and `RawArray`,
   whose *instances* are canonical (equal contents ⟹ same reference).
 - **Extension points** — the `equals` / `hash` / `interned` symbols,
-  `deepEqual.register`, and `createInternPool` let any type become a
-  first-class value.
+  `registerType`, and `createInternPool`, all in `valsem/extend`, let any
+  type become a first-class value.
 
 ## Sixty seconds of valsem
 

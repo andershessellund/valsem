@@ -68,12 +68,12 @@ export function sameSlots(a: readonly unknown[], b: readonly unknown[]): boolean
  * Positional arguments are CHECKED, never coerced (D45). Three kinds, by what
  * the argument names:
  *
- * - an ELEMENT ({@link elementIndex}: `get`, `with` and `removed` on a value,
- *   `set` and `remove` on its draft): an integer in `[0, length)`. There is
+ * - an ELEMENT ({@link elementIndex}: `get`, `with` and `removedAt` on a value,
+ *   `set` and `removeAt` on its draft): an integer in `[0, length)`. There is
  *   no element anywhere else, so there is nothing to answer with and nothing
  *   to edit;
- * - an INSERTION POINT ({@link insertionIndex}: `inserted`, `insertedAt` and
- *   `toSpliced`'s start on a value, `insert`, `insertAt` and `splice`'s on
+ * - an INSERTION POINT ({@link insertionIndex}: `insertedAt` and
+ *   `toSpliced`'s start on a value, `insertAt` and `splice`'s on
  *   its draft): an integer in `[0, length]`. An edit lands in canonical
  *   state, so the place it names must exist: no counting from the end, where
  *   an `indexOf` miss (-1) would name the last element;

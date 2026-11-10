@@ -331,7 +331,7 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
   // The value's copying edits are what-ifs here: each answers with the
   // `ValueList` the edit would give, applied to the list as it is right now,
   // and edits nothing (D59). The draft's own verbs — `set`, `push`, `pop`,
-  // `shift`, `unshift`, `insert`, `remove`, `splice` — are the edits. The
+  // `shift`, `unshift`, `insertAt`, `removeAt`, `splice` — are the edits. The
   // positions are checked here first, so a bad one is reported in this
   // draft's name and before the snapshot is built.
 
@@ -361,13 +361,13 @@ export class DraftList<T> implements Iterable<Draft<T> | (T & undefined)> {
     return (snapshotOf(this) as ValueList<T>).unshifted(...values);
   }
 
-  /** The list as it is right now with `value` inserted before `index` (a place in it, D45): a value, as `ValueList.insertedAt`. To edit, `insert`. */
+  /** The list as it is right now with `value` inserted before `index` (a place in it, D45): a value, as `ValueList.insertedAt`. To edit, `insertAt`. */
   insertedAt(index: number, value: T): ValueList<T> {
     insertionIndex(index, this.length, 'DraftList.insertedAt');
     return (snapshotOf(this) as ValueList<T>).insertedAt(index, value);
   }
 
-  /** The list as it is right now without the element at `index` (D45): a value, as `ValueList.removedAt`. To edit, `remove`. */
+  /** The list as it is right now without the element at `index` (D45): a value, as `ValueList.removedAt`. To edit, `removeAt`. */
   removedAt(index: number): ValueList<T> {
     elementIndex(index, this.length, 'DraftList.removedAt');
     return (snapshotOf(this) as ValueList<T>).removedAt(index);

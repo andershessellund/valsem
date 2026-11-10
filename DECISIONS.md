@@ -1554,6 +1554,14 @@ two orders of magnitude on an edit of a large plain array; SpiderMonkey:
 nothing, freezing is free there), and avoidable with one call in production
 or by holding large sequences in a `ValueList`. DESIGN.md §4.4.
 
+*Amended 2026-11-10.* Said outright, where it was only implied by "the
+user owns": the switches, `configureHasher` and `configureLimits` are the
+**application's** to call. Their scope is the copy of valsem, and a library
+shares that copy with code it has not read (D4), so a library that flips
+one decides for everyone. They stay process-wide: a narrower scope would
+need a second pool or a second seed, which is a second copy. The README's
+Gotchas, the guide and each function's documentation say so.
+
 ## Packaging and publication
 
 ### D20. Benchmark methodology
@@ -1888,7 +1896,7 @@ idiom), so it scans values and drafts the one element it returns. `filter` retur
 found anyway, later. A set's `reduce` takes its initial value: "the first
 member" of an unordered set is the hash seed's choice. **Rejected:** on the
 maps, for now: `map` over a map has no one meaning (values? entries?), and
-nothing here closes the door. **Rejected:** `find` on the sets, until set
+nothing here closes the door (the maps got theirs, without `map`, in D70). **Rejected:** `find` on the sets, until set
 members can be drafted at all (D53). **Cost.** Seven methods on the list, five on
 each set, and as many on the drafts, over four shared helpers; their size in
 a bundle is not measured here.
@@ -1922,6 +1930,9 @@ The last pass over the public names, while renaming still costs nothing.
 `size` is a getter: it walks every bucket and dereferences every weak
 reference, and a property should not cost O(n). **Cost.** Breaking, four
 times; nothing is published under the old names that anyone depends on.
+
+*Amended 2026-11-10.* `InternedString.for` is `InternedString.from`, by the
+second bullet's rule (D71).
 
 ### D56. Two positional reads, as on `Array`: `get` is `arr[i]` with its type made true, `at` is `Array.prototype.at`
 
@@ -2067,6 +2078,10 @@ keep the old names. Supersedes D52 in the names and keeps it in the shapes;
 reverses D58's rejection of `toSpliced` and `with`, which are the names now,
 not aliases. Left for later: a lint rule for a discarded copying result,
 generic over the `[interned]` brand.
+
+*Amended 2026-11-10.* The list's `inserted`/`removed` and the draft's
+`insert`/`remove` are `insertedAt`/`removedAt` and `insertAt`/`removeAt`:
+the `At` suffix no longer depends on the receiver (D71).
 
 ### D60. A collection's public type is its class, not an interface
 
@@ -2268,6 +2283,118 @@ code handed the symbol can, and code can mark a class just as well (the same in-
 forgery as `Object.create(ValueList.prototype)`). **Cost.** That record is
 taken at its word: `intern` returns it unfrozen and `isCanonical` says
 `true`. Pinned by a test in `cross-realm.test.ts`.
+
+### D69. The main entry point is what an application calls; a type's definition imports `valsem/extend`
+
+`valsem` exported some forty-five names to three audiences at once: the
+application that uses values, the module that defines a value type, and the
+author of a draftable. The second audience's names move to a new entry
+point, `valsem/extend`: the `equals`, `hash` and `interned` symbols,
+`createInternPool` with its `InternPool` type, `mix`, `getHashSeed`, and
+`registerType(Type, equalsFn, hashFn?)`, which is `deepEqual.register` under
+a name of its own. `toDraft` is exported from `valsem/draft` only, where the
+rest of its toolkit already was. `internHash` is no longer exported.
+
+**Why.** An application's autocomplete showed `mix` and `interned` beside
+`intern` and `produce`, and the names it needs are about fifteen. A value
+type is defined in a few modules, or in a library; those can afford a second
+import line, and `valsem/draft` and `valsem/binding` had already set the
+pattern. `deepEqual.register` hid the one call that makes a foreign type a
+*value* (the hash, and with it the immutability declaration of D26) behind
+the name of a comparison: nobody looking for "how do I make this class a
+key" reads the properties of `deepEqual`. A function of its own is also what
+a bundler can drop. `internHash` was `deepHash` with a cache probe in front,
+and `deepHash` makes that probe itself: two exported names for one answer,
+one of them absent from the README. It stays
+internal, where the collections call it on values they know are canonical.
+
+**What stays.** `configureHasher`, `configureLimits`, `skipChecks` and
+`skipFreezing` are the application's switches (D16) and stay in the main
+entry point, since the application is who calls them; so does
+`createMarvin32Hasher`, which an application passes to `deepHash` for a
+reproducible fingerprint (D68) without defining any type. The `Hasher` type
+is exported from both, being in `deepHash`'s signature.
+
+**Rejected:** keeping the old names in `valsem` as re-exports for a release.
+Nothing is published under them that anyone depends on (the reasoning of
+D55), and two homes for a symbol is how a second copy of it gets imported.
+**Rejected:** putting them in `valsem/binding`. A binding maps the model
+onto another representation and defines no type; the two surfaces have
+different readers. **Rejected:** `registerValue` for `registerType`: with an
+equality alone the type is comparable and not a value, and the name would
+claim the tier the caller did not ask for. **Cost.** Breaking: every module
+that defines a value type changes an import line, and `deepEqual.register`
+callers a name; the compiler finds each. DESIGN.md §1.2, §5.1, §10.1.
+
+### D70. The maps get their functional reads and `updated`; `concat` takes any iterable
+
+`ValueMap` and `OrderedMap` have `filter`, `mapValues`, `reduce`, `some` and
+`every`, their callbacks getting what `forEach` passes, `(value, key, map)`,
+and `updated(key, fn)`, which is `with(key, fn(get(key)))`. Their drafts
+have the same reads, over the value the draft is right now and returning
+values (D54), `updated` as a what-if, and the verb `update(key, fn)`, whose
+`fn` is given what `get` hands out. `ValueList.concat` takes a `ValueList`
+or any other iterable of elements.
+
+**Why.** D54 left the maps out "for now" because `map` over a map has no one
+meaning, and said nothing closed the door. The ambiguity is in one name, so
+that name is the only thing withheld: `mapValues` says which of the two it
+is, keeps the keys, and so keeps an `OrderedMap`'s order; mapping entries is
+`from` over the mapped pairs, which the classes already allow. The other
+four have one meaning each. Without them a filter over a map was a detour
+through `[...m].filter(...)` and `ValueMap.from`, for what the sets do in
+one call. `reduce` requires its initial
+value on both maps, the ordered one included: D54 gives the overload without
+one "where first exists", and a map's first entry is a pair, which is no
+accumulator for a callback that takes a value and a key. `updated` is the
+read-modify-write a reducer over a map otherwise writes by hand; `fn` gets `undefined` for an absent key,
+as `get` returns, so a counter is `m.updated(k, (n) => (n ?? 0) + 1)`. It
+follows D59 without an exception: the draft's verb is `update`, the value's
+edit its participle. `concat` refused a raw array while the set algebra
+beside it took any iterable, one library answering the same question
+two ways; the refusal dated from an empty receiver returning its argument
+as it came, which converting the argument first also fixes. A `ValueList`
+argument keeps the O(log n) seam; anything else costs its own length, as
+`ValueList.from` does.
+
+**Rejected:** `map` on the maps, as an alias of `mapValues` or with a
+pair-returning callback; either is the guess D54 declined to make.
+**Rejected:** `update` on `HashMap`. It is `Map`'s twin (D15, D55), and
+`Map` spells this `getOrInsert` followed by `set`. **Rejected:** a string as
+`concat`'s argument: it is iterable, and a list of its code points is not
+what anyone meant by it; it throws, with the other primitives. **Cost.** Six
+methods on each map and seven on each map draft. Additive.
+
+### D71. A positional edit that is not `Array`'s ends in `At`; `InternedString.from`
+
+`ValueList.inserted(i, v)` and `removed(i)` are `insertedAt(i, v)` and
+`removedAt(i)`, and the draft's `insert` and `remove` are `insertAt` and
+`removeAt`. `InternedString.for(text)` is `InternedString.from(text)`.
+
+**Why.** D59's rule was "the participle of the draft's verb, except where
+ES2023 named the copy", with an `At` suffix "positional where the unsuffixed
+name is keyed". That last clause made the suffix depend on the receiver: the
+same operation, insert before an index, was `inserted` on a list and
+`insertedAt` on an ordered set, and a reader had to know which collection
+they held to know which name compiled. The clause also missed its own
+argument. D59 rejected `without(i)` because on a list of numbers
+`rows.without(3)` reads as removal by content; `rows.removed(3)` reads the
+same way, and `deleted(3)` on the set beside it *is* removal by content.
+The rule is now one sentence with no receiver in it: an edit that takes a
+position and is not one of `Array`'s names (`with`, `toSpliced`) ends in
+`At`. `InternedString.for` was the one factory in the library that was not
+`of` or `from`; D55 settled that `from` converts something, and a string is
+converted. `Symbol.for`, which the name echoed, is a registry lookup by key,
+and the pool is not a registry anyone addresses.
+
+**Rejected:** dropping the suffix from the ordered collections instead.
+`set.inserted(3, 5)` on an ordered set of numbers has two readings, which is
+what the suffix was for. **Rejected:** `removedAt` and `insertedAt` as
+aliases beside the old names: two names for one edit, in a library whose
+D59 removed exactly that. **Left for later:** `removedAt(i)` on the ordered
+collections, which have only removal by key. **Cost.** Breaking for callers
+of the four list methods and the one factory; the compiler finds each.
+Amends D59 in the names and D55 in the factory.
 
 ## Non-goals
 

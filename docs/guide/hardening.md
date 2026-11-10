@@ -26,7 +26,8 @@ worry about the seed being recovered from output like that, or through
 timing, swap in a keyed PRF:
 
 ```ts
-import { configureHasher, getHashSeed, type Hasher } from 'valsem';
+import { configureHasher, type Hasher } from 'valsem';
+import { getHashSeed } from 'valsem/extend';
 
 const key = getHashSeed();
 const sip: Hasher = {
@@ -70,7 +71,7 @@ hashes yielded 4,000 such records, and interning them took 0.66 s against
 6 ms for as many random records. A keyed PRF as the leaf hash changes
 nothing here, because the attack never computes a leaf hash.
 
-So `deepHash` and `internHash` values stay inside the process.
+So `deepHash` values stay inside the process.
 An ETag, a cache key or anything else that leaves it should be a
 cryptographic hash (SHA-256, say) of the serialised value.
 

@@ -20,7 +20,11 @@ caller kept that promise, because the alternative is a silent wrong answer
 Both are on by default, everywhere, and neither consults the environment:
 a bundler's idea of "production" is not evidence that your answers are
 right. Turning either off is a one-way, explicit, per-process decision, made
-at startup, the way Angular's `enableProdMode()` is:
+at startup, the way Angular's `enableProdMode()` is. It is the
+**application's** decision: a switch changes valsem for every module that
+shares the copy, so a library that uses valsem never calls one (nor
+`configureHasher` or `configureLimits`), for the reason it declares valsem a
+peer dependency.
 
 ```ts
 import { skipChecks, skipFreezing } from 'valsem';

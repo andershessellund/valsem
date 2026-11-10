@@ -25,6 +25,9 @@ let maxDepth = 512;
  * @param limits.maxDepth - Maximum nesting depth `intern`/`deepHash` will
  * walk before rejecting the input (default 512). Must be a positive
  * integer. May be changed at any time.
+ *
+ * Process-wide, so the application's to set: a library that uses valsem
+ * shares the copy with code it has not read, and never calls this (D16).
  */
 export function configureLimits(limits: { maxDepth?: number }): void {
   if (limits.maxDepth !== undefined) {

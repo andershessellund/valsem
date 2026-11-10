@@ -8,9 +8,9 @@
 // review, finding 6). The fix coerced as Array does, ToIntegerOrInfinity.
 // Second (D45): positional arguments are CHECKED, by what they name.
 //
-//   - an ELEMENT (`get`, `with`, `removed`; `set`, `remove` on the draft): an
+//   - an ELEMENT (`get`, `with`, `removedAt`; `set`, `removeAt` on the draft): an
 //     integer in [0, length), or a RangeError. No element, no answer;
-//   - an INSERTION POINT (`inserted`, `insertedAt`, `toSpliced`'s start): an integer
+//   - an INSERTION POINT (`insertedAt`, `toSpliced`'s start): an integer
 //     in [0, length], not counted from the end, or a RangeError. An edit
 //     lands in canonical state, so the place must exist, and -1 (an
 //     `indexOf` miss) must not mean "the last one";

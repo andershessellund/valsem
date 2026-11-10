@@ -427,7 +427,7 @@ function listArg<T>(x: unknown, operation: string): ValueList<T> {
  * Persistent (immutable) list whose instances are canonical: equal content
  * is the same object, however built. Elements are interned on entry.
  * Every edit is a copying one, and is named for its result (D59): `with`,
- * `pushed`, `popped`, `shifted`, `unshifted`, `inserted`, `removed` and
+ * `pushed`, `popped`, `shifted`, `unshifted`, `insertedAt`, `removedAt` and
  * `toSpliced`, beside `slice` and `concat`, all O(log n) expected. The
  * imperative verbs (`set`, `push`, `splice`, …) belong to the draft, which
  * edits in place. `ValueList.diff(a, b)` finds the changed regions between
@@ -646,7 +646,7 @@ export class ValueList<T> implements Iterable<T> {
   /**
    * The list with `deleteCount` elements at `start` replaced by `items`
    * (interned on entry) — the general edit, as `Array.prototype.toSpliced`;
-   * O(log n) expected. `inserted`, `removed`, `shifted`, `unshifted` and
+   * O(log n) expected. `insertedAt`, `removedAt`, `shifted`, `unshifted` and
    * `slice` are all this. `start` is where the edit lands, so it must be a
    * place in the list: an integer in `[0, length]`, not counted from the end,
    * or a `RangeError`. `deleteCount` is how much, and means "up to": an

@@ -40,7 +40,7 @@ or a `DraftOrderedMap` (`for…of`, `forEach`, `values()`, `entries()`) hands
 out drafts, as `get` does, so `for (const t of d.todos) t.done = true` edits,
 the same as on a plain array; keys, and the members of a set, come as the
 values they are. So do the removal verbs: `pop`, `shift`, `splice` and the
-list's `remove` hand back what they removed drafted, as `get` would have
+list's `removeAt` hand back what they removed drafted, as `get` would have
 handed it out, so the immer idiom `const t = d.todos.shift(); t.done = true;
 d.done.push(t)` edits, on a plain array and a `DraftList` alike (the recipe's
 own raw material comes back raw, as a read of it does); and `sort`,
@@ -151,7 +151,7 @@ gains nothing from one.
 
 The type system recognises a leaf by its methods — a record can never hold a
 function, so a type with one is a class instance. The one case it cannot see
-is a class registered with `deepEqual.register` that has **no methods at
+is a class registered with `registerType` that has **no methods at
 all**: `Draft<T>` maps it member-wise and writable, while at runtime the
 recipe receives the pooled instance, unfrozen, so a write through it would
 corrupt every holder — and `produce` cannot notice, since the leaf is not a

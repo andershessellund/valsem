@@ -83,9 +83,9 @@ and `memoize` intern what they are given, so a raw key or argument still
 finds its entry, at the cost of a walk, and `fastEqual` throws on a raw
 object rather than answering a silent `false`.
 
-**Immutable, with immer's recipes.** Everything that comes out of `produce`,
-`intern` or a collection is frozen, all the way down, so a stray mutation
-throws instead of corrupting shared state. Editing is a recipe: mutate a
+**Immutable, with immer's recipes.** Every record, array and collection that
+comes out of `produce`, `intern` or a collection is frozen, all the way
+down, so a stray mutation throws instead of corrupting shared state. Editing is a recipe: mutate a
 draft, get a new value, with structural sharing. `produceWithPatches`,
 `applyPatches`, `current`, `original` and the curried form are all there,
 and the collections draft as mutable twins with the native API; what
@@ -134,8 +134,9 @@ intern({ tags: new Set(['a']) });
 ```
 
 **Extensible.** Your own classes become values with two members — `[equals]`
-and a companion `[hash]` — or one registration, `deepEqual.register`,
-and then compare, hash, intern, and key a map like anything else. Third-party
+and a companion `[hash]` — or one registration, `registerType`, all from
+`valsem/extend`, and then compare, hash, intern, and key a map like anything
+else. Third-party
 types work the same way; Temporal ships ready-made behind `valsem/temporal`.
 See [Extending](#extending).
 
@@ -170,7 +171,7 @@ Recipes, the curried form, `produceWithPatches`/`applyPatches`, `nothing`,
 | Iterating a `Map` or `Set` draft | yields drafts | a `DraftMap`'s values (and a `DraftList`'s elements) come as drafts too, so `for (const [, v] of d.m) v.x = 1` edits; keys and set members come as the **values** they are, since a set member's content is its identity. A loop that only reads is cheaper over `current(d.m)`, which drafts nothing |
 | `castDraft()` | for a `readonly` value headed into a mutable slot | the same, and also for every whole collection assigned into a slot: `d.todos = castDraft(ValueList.of(a, b))`, since a `ValueList` slot is typed as a `DraftList` |
 | `createDraft()` / `finishDraft()` | a draft with its own lifetime | `draftOf(value)` inside a recipe — a detached draft that resolves where you attach it, and is revoked with the recipe like every other draft |
-| Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.removed(-1)` throw, so `get` returns `T`), while `at` and ranges are `Array`'s: `list.at(-1)` is the last element, `list.at(99)` is `undefined`, `slice(0, 10)` clamps |
+| Index arguments | coerced as `Array` does: `NaN` is index 0 | checked: `d.items.splice(NaN, 1)` throws. On valsem's own collections an index must also name a place that exists (`list.get(99)` and `list.removedAt(-1)` throw, so `get` returns `T`), while `at` and ranges are `Array`'s: `list.at(-1)` is the last element, `list.at(99)` is `undefined`, `slice(0, 10)` clamps |
 | `produce(draft, recipe)` inside a recipe | a new value; the outer draft is untouched, so use the result | the same, for every kind of draft: the draft stands for `current(draft)` |
 | Async recipes | silently wrong | rejected with an error |
 
@@ -201,7 +202,7 @@ growth by `set(size, x)` are a `RangeError` here (`at` and `slice` keep
 | --- | --- | --- |
 | `list.push(x)`, `list.pop()` | `list.pushed(x)`, `list.popped()` | `d.list.push(x)`, `d.list.pop()` |
 | `list.unshift(x)`, `list.shift()` | `list.unshifted(x)`, `list.shifted()` | `d.list.unshift(x)`, `d.list.shift()` |
-| `list.set(i, x)`, `list.insert(i, x)`, `list.remove(i)`, `list.splice(…)` | `list.with(i, x)`, `list.inserted(i, x)`, `list.removed(i)`, `list.toSpliced(…)` | `d.list.set(i, x)`, `insert`, `remove`, `splice` |
+| `list.set(i, x)`, `list.insertAt(i, x)`, `list.removeAt(i)`, `list.splice(…)` | `list.with(i, x)`, `list.insertedAt(i, x)`, `list.removedAt(i)`, `list.toSpliced(…)` | `d.list.set(i, x)`, `insertAt`, `removeAt`, `splice` |
 | `map.set(k, v)`, `map.delete(k)` | `map.with(k, v)`, `map.deleted(k)` | `d.map.set(k, v)`, `d.map.delete(k)` |
 | `set.add(x)`, `set.delete(x)` | `set.added(x)`, `set.deleted(x)` | `d.set.add(x)`, `d.set.delete(x)` |
 | `list.first()`, `list.last()` | the same | the same, handing out drafts |
@@ -288,7 +289,7 @@ cache.get({ id: 1, table: 'users' });                        // row — mutable 
 ```
 
 A value's edits are named for their result and return the new value —
-`with`, `pushed`, `popped`, `inserted`, `added`, `deleted`, `toSpliced` —
+`with`, `pushed`, `popped`, `insertedAt`, `added`, `deleted`, `toSpliced` —
 while the imperative verbs (`set`, `push`, `add`, `delete`, …) belong to the
 drafts, which edit in place: `list.push(x)` on a value is a type error, not a
 silent no-op. Inside `produce` the collections draft as mutable twins
@@ -384,7 +385,9 @@ compared, memoised, or recur, and not for data built once and compared once.
 ## Extending
 
 Any class becomes a value by implementing `[equals]` and `[hash]`: given a
-hasher, hash the content through it (equal values must hash equal):
+hasher, hash the content through it (equal values must hash equal). The
+symbols, and everything else that only a type's definition needs, are in
+`valsem/extend`, so the main entry point holds what an application calls:
 
 ```ts
 import { deepEqual, deepHash, intern, HashMap } from 'valsem';
@@ -406,7 +409,10 @@ new HashMap().set(new Money(5, 'EUR'), 'x').get(new Money(5, 'EUR')); // 'x' —
 
 The hash is the declaration that makes it a value: implementing one says
 the instance never changes, and with that promise valsem pools it, keys by
-it, and stores it in state. Taking the hasher as a parameter is what lets
+it, and stores it in state. The promise is yours to keep: valsem does not
+freeze an instance of your class, since freezing an object it did not build
+proves nothing about private fields, closures or what the instance refers
+to. Taking the hasher as a parameter is what lets
 one method serve every hasher: the process's own, seeded, which every pool
 and collection buckets by (valsem computes that once per interned instance
 and keeps it), and any other you hold —
@@ -425,10 +431,14 @@ so `produce` can edit your type in place, with patches.
 
 ## Guarantees
 
-- **Immutable.** Everything `produce`, `intern` and the collections return is
-  frozen, all the way down — unless you call `skipFreezing()`, which trades
-  that enforcement for unfrozen (faster to iterate) canonical arrays; see
-  the [performance guide](https://andershessellund.github.io/valsem/guide/performance).
+- **Immutable.** Every record, array and collection `produce`, `intern` and
+  the collections return is frozen, all the way down — unless you call
+  `skipFreezing()`, which trades that enforcement for unfrozen (faster to
+  iterate) canonical arrays; see the
+  [performance guide](https://andershessellund.github.io/valsem/guide/performance).
+  An instance of a value class of your own is the one thing valsem holds
+  and does not freeze: its hash is your declaration that it never changes
+  ([Extending](#extending)), and valsem takes it at its word.
 - **Canonical.** Equal values are the same object — lineage-free: however a
   value was built, it converges on one instance.
 - **Compared by content.** `deepEqual` never throws on a *type* — mutable
@@ -465,6 +475,12 @@ so `produce` can edit your type in place, with patches.
   it by reference, with a development warning). Plain data crosses. A
   library that uses valsem declares it a **peer dependency**; an application
   deduplicates its install.
+- **The switches are the application's.** `skipChecks()`, `skipFreezing()`,
+  `configureHasher()` and `configureLimits()` change valsem for the whole
+  process, which is the only scope they could have: there is one pool and
+  one seed. So the application calls them, once, at startup. A library that
+  uses valsem never does, for the reason it declares valsem a peer
+  dependency: it shares the one copy with code it has not read.
 - **Drafts do not escape.** A draft used after its `produce` call throws, and
   so does a draft *put into* a different `produce` call's state, however
   deeply it is wrapped; pass `current(draft)` to give its value to another
@@ -501,9 +517,10 @@ it costs.
 | `OrderedMap`, `OrderedSet` | the same, insertion-ordered — order is part of the value; `indexOf`, `at`, `insertedAt` in O(log n) (`DraftOrderedMap`/`DraftOrderedSet` inside recipes) |
 | `ValueDate` | an immutable, canonical timestamp — the value a `Date` stands for |
 | `InternedString`, `RawArray` | a string with its hash paid once; a large response admitted slice by slice |
-| `equals`, `hash`, `interned`, `deepHash`, `deepEqual.register`, `createInternPool` | making types values |
-| `toDraft`, `valsem/draft` | making types draftable — the protocol `produce` uses for everything but plain objects and arrays |
-| `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches you own |
+| `deepHash`, `createMarvin32Hasher` | the companion hash; a hasher on a key of your own, for a hash that is the same in every process |
+| `configureHasher`, `configureLimits`, `skipChecks`, `skipFreezing` | hardening knobs, and the two switches: the application's to call, never a library's |
+| `valsem/extend` | making types values: the `equals`, `hash` and `interned` symbols, `registerType`, `createInternPool`, `mix`, `getHashSeed` |
+| `valsem/draft` | making types draftable — `toDraft` and the toolkit, the protocol `produce` uses for everything but plain objects and arrays |
 | `valsem/temporal` | value semantics for Temporal (side-effect import) |
 | `valsem/binding` | the two helpers a wire or storage binding needs; not for application code |
 
